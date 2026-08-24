@@ -1,28 +1,59 @@
+// src/common/capabilities.c3
 module lsp;
 
-import dessert;
-import derive;
-
-$expand(derive(CompletionOptions::name, dessert));
-struct CompletionOptions @DStruct({ .rename_all = CAMEL_CASE })
+struct CompletionItemCapability
 {
-	String[] trigger_characters;
-	String[] all_commit_characters;
-	bool resolve_provider;
-	struct completion_item 
-	{
-		bool label_detail_support;
-	}
+	bool labelDetailSupport;
+}
+
+struct CompletionOptions
+{
+	String[] triggerCharacters;
+	String[] allCommitCharacters;
+	bool resolveProvider;
+	CompletionItemCapability completionItem;
+}
+
+struct SignatureHelpOptions
+{
+	String[] triggerCharacters;
+	String[] retriggerCharacters;
+}
+
+struct SemanticTokensLegend
+{
+	String[] tokenTypes;
+	String[] tokenModifiers;
+}
+
+struct SemanticTokensOptions
+{
+	SemanticTokensLegend legend;
+	bool full;
+}
+
+struct RenameOptions
+{
+	bool prepareProvider;
 }
 
 <*
 	https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities
 *>
-$expand(derive(LspServerCapabilities::name, dessert));
-struct LspServerCapabilities @DStruct({ .rename_all = CAMEL_CASE })
+struct LspServerCapabilities
 {
-	TextDocumentSyncOptions text_document_sync;
-	CompletionOptions completion_provider;
-	bool hover_provider;
-	bool definition_provider;
+	TextDocumentSyncOptions textDocumentSync;
+	CompletionOptions completionProvider;
+	bool hoverProvider;
+	bool definitionProvider;
+	SignatureHelpOptions signatureHelpProvider;
+	bool referencesProvider;
+	RenameOptions renameProvider;
+	SemanticTokensOptions semanticTokensProvider;
+	bool documentSymbolProvider;
+	bool workspaceSymbolProvider;
+	bool inlayHintProvider;
+	bool foldingRangeProvider;
+	bool documentFormattingProvider;
+	bool documentRangeFormattingProvider;
 }

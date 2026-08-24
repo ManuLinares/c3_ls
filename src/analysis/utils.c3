@@ -1,11 +1,86 @@
+// src/analysis/utils.c3
 module lsp::analysis;
 
 import analyzer::core;
 import analyzer::cursor;
-import analyzer::workspace;
+import lsp::core;
+import lsp;
 
 import std::collections::list;
 
+<*
+ Precomputes line starting byte offsets in a single linear pass for O(1) lookups.
+*>
+fn sz[] build_line_offsets(Allocator allocator, String content)
+{
+	List{sz} offsets;
+	offsets.init(allocator);
+	offsets.push(0); // Line 0 starts at index 0
+
+	for (sz i = 0; i < content.len; i++)
+	{
+		if (content[i] == '\n')
+		{
+			offsets.push(i + 1);
+		}
+	}
+
+	return offsets.array_view();
+}
+
+<*
+ Converts line and character coordinates into a zero-indexed byte offset in O(1).
+*>
+fn sz offset_from_line_table(sz[] line_offsets, String content, uint target_line, uint target_char)
+{
+	if (target_line >= line_offsets.len) return content.len;
+	sz off = line_offsets[target_line] + (sz)target_char;
+	if (off > content.len) return content.len;
+	return off;
+}
+
+<*
+ Converts line and character coordinates into a zero-indexed byte offset in a content buffer.
+*>
+fn sz compute_byte_offset(String content, uint target_line, uint target_char)
+{
+	sz target_col = (sz)target_char;
+
+	if (target_line == 0)
+	{
+		if (target_col > content.len) return content.len;
+		return target_col;
+	}
+
+	uint current_line = 0;
+	sz i = 0;
+
+	while (i < content.len && current_line < target_line)
+	{
+		if (try next_nl = content[i..].index_of_char('\n'))
+		{
+			i += next_nl + 1;
+			current_line++;
+		}
+		else
+		{
+			return content.len;
+		}
+	}
+
+	if (current_line == target_line)
+	{
+		sz final_pos = i + target_col;
+		if (final_pos > content.len) return content.len;
+		return final_pos;
+	}
+
+	return content.len;
+}
+
+<*
+ Extracts a token prefix preceding a byte offset.
+*>
 fn String extract_prefix(String text, sz byte_offset)
 {
 	if (byte_offset == 0 || byte_offset > text.len) return "";
@@ -35,14 +110,36 @@ fn String extract_prefix(String text, sz byte_offset)
 	}
 
 	if (start_idx >= byte_offset) return "";
-	return text[start_idx..byte_offset];
+	return text[start_idx .. byte_offset - 1];
+}
+
+<*
+ Retrieves the canonical identifier text for any AST node with robust fallbacks.
+*>
+fn String get_node_symbol_name(Node* node)
+{
+	if (!node) return "";
+	String symbol_name = cursor::spelling(node, tmem);
+	switch (true)
+	{
+		case symbol_name.len == 0 && node.kind == IDENT_EXPR:
+		{
+			IdentExpr* ident_expr = node.as(IdentExpr);
+			return ident_expr.ident ? ident_expr.ident.text : "";
+		}
+		case symbol_name.len == 0 && node.kind == TYPE_EXPR:
+		{
+			return cursor::raw_type_identifier(node) ?? "";
+		}
+		default:
+			return symbol_name;
+	}
 }
 
 fn CompletionItemKind completion_kind_from_node(Node* node)
 {
-	NodeKind kind = node.kind;
-
-	switch (kind)
+	if (!node) return TEXT;
+	switch (node.kind)
 	{
 		case MODULE_DECL:    return MODULE;
 		case FN_DECL:        return FUNCTION;
@@ -52,212 +149,26 @@ fn CompletionItemKind completion_kind_from_node(Node* node)
 		case VAR_DECL:
 		{
 			VarDecl* var_decl = node.as(VarDecl);
-			if (var_decl.flags.is_const)
-			{
-				return CONSTANT;
-			}
-			switch (var_decl.var_kind)
-			{
-				case VAR_FIELD:
-					return FIELD;
-				default:
-					return VARIABLE;
-			}
+			if (var_decl.var_flags.is_const) return CONSTANT;
+			return var_decl.var_kind == VAR_FIELD ? FIELD : VARIABLE;
 		}
 		default:
 			return TEXT;
 	}
 }
 
-<*
-*>
-fn ScopeKind find_scope(Context* ctx, int cursor_pos)
-{
-	if (!ctx.top_level_node) return GLOBAL;
-	Node* node = ctx.top_level_node;
-	if (cursor_pos < node.offset.start || cursor_pos > node.offset.end) return GLOBAL;
-
-	switch (node.kind)
-	{
-		case IMPORT_DECL: 
-			return IMPORT;
-		case FN_DECL:
-			FnDecl* func = node.as(FnDecl);
-			if (func.body && cursor_pos >= func.body.offset.start)
-			{
-				return EXECUTION;
-			}
-			break;
-		case MACRO_DECL:
-			MacroDecl* mac = node.as(MacroDecl);
-			if (mac.body  && cursor_pos >= mac.body.offset.start) 
-			{
-				return EXECUTION;
-			}
-			break;
-		default:
-			break;
-	}
-
-	switch (node.kind)
-	{
-		case STRUCT_DECL:
-		{
-			ScopeKind scope = NONE;
-			int num_braces;
-			
-			foreach (t : ctx.tokens)
-			{
-				if (node.offset.start + t.pos >= cursor_pos) break;
-
-				if (t.kind == LBRACE)
-				{ 
-					num_braces++;
-					scope = CONTAINER;
-				}
-				if (t.kind == RBRACE)
-				{ 
-					num_braces--;
-					if (num_braces <= 0)
-					{
-						scope = GLOBAL;
-					}
-				}
-			}
-			return scope;
-		}
-
-		case FN_DECL:
-		case MACRO_DECL:
-		{
-			ScopeKind scope = GLOBAL;
-			int parens;
-			int braces;
-
-			foreach (t : ctx.tokens)
-			{
-				if (node.offset.start + t.pos >= cursor_pos) break;
-
-				if (t.kind == LBRACE)
-				{
-					braces++; 
-					scope = EXECUTION;
-				}
-				else if (t.kind == RBRACE)
-				{
-					braces--; 
-					scope = (braces == 0) ? GLOBAL : EXECUTION; 
-				}
-				else if (t.kind == LPAREN)
-				{
-					parens++; 
-					scope = PARAMETER; 
-				}
-				else if (t.kind == RPAREN)
-				{ 
-					parens--; 
-					scope = NONE; 
-				}
-				else if (braces == 0 && parens == 0 && t.kind == IDENT)
-				{
-					scope = NONE;
-				}
-			}
-			return scope;
-		}
-
-		default:
-			break;
-	}
-
-	return GLOBAL;
-}
-
-<*
-*>
-fn ScopeKind find_node(Context* ctx, int cursor_pos)
-{
-	if (!ctx.top_level_node) return GLOBAL;
-	Node* node = ctx.top_level_node;
-	if (cursor_pos >= node.offset.start && cursor_pos <= node.offset.end)
-	{
-		switch (node.kind)
-		{
-			case IMPORT_DECL:
-				return IMPORT;
-			case FN_DECL:
-			case MACRO_DECL:
-				return EXECUTION;
-			case STRUCT_DECL:
-				return CONTAINER;
-
-			default:
-				break;
-		}
-	}
-
-
-	return GLOBAL;
-}
-
-fn MarkupContent md(String md)
+fn MarkupContent md(String md_text)
 {
 	return {
-		.value = md,
+		.value = md_text,
 		.kind = MARKDOWN
 	};
 }
 
-fn List{String} get_expression_chain(Context* ctx)
+fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_name, String identifier)
 {
-	List{String} chain; chain.tinit();
-	sz cursor_idx = -1;
-	for (sz i = 0; i < ctx.tokens.len(); i++) 
-	{
-		if (ctx.tokens[i].pos > ctx.offset) 
-		{
-			cursor_idx = i - 1;
-			log::info("Found token: idx = %d", cursor_idx);
-			break;
-		}
-	}
-	if (cursor_idx == -1) return chain;
-	bool expect_ident = true;
-	for (sz i = cursor_idx; i >= 0; i--)
-	{
-		Token t = ctx.tokens[i];
-		if (expect_ident)
-		{
-			if (t.kind == DOT || t.kind == SCOPE) continue;
-			if (t.kind == IDENT || t.kind == TYPE_IDENT)
-			{
-				chain.insert_at(0, ctx.section.source_file.source[t.pos:t.len]);
-				expect_ident = false;
-				log::info("appened!");
-			}
-			else
-			{
-				break;
-			}
-		}
-		else
-		{
-			if (t.kind == DOT || t.kind == SCOPE) 
-			{
-				expect_ident = true;
-			} 
-			else 
-			{
-				break;
-			}
-		}
-	}
-	
-	return chain;
-}
+	if (!ws.ctx) return null;
 
-fn Module* find_module_by_identifier(Workspace* ws, String current_module_name, String identifier)
-{
 	String scoped_path = "";
 	if (current_module_name.len > 0) 
 	{
@@ -265,7 +176,7 @@ fn Module* find_module_by_identifier(Workspace* ws, String current_module_name, 
 	}
 	String suffix_path = string::tformat("::%s", identifier);
 
-	ws.modules.@each(; mod_name, mod)
+	ws.ctx.modules.@each(; mod_name, mod)
 	{
 		if (mod_name == identifier) return mod;
 		if (scoped_path.len > 0 && mod_name == scoped_path) return mod;
@@ -275,7 +186,7 @@ fn Module* find_module_by_identifier(Workspace* ws, String current_module_name, 
 	return null;
 }
 
-fn void inject_type_properties(Context* ctx, List{CompletionItem}* items, NodeKind type_kind)
+fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind)
 {
 	items.push({ .label = "alignment", .kind = PROPERTY, .detail = "sz", .documentation = md("Alignment of the type in bytes.") });
 	items.push({ .label = "kind", .kind = PROPERTY, .detail = "TypeKind", .documentation = md("The underlying kind of the type") });
@@ -291,135 +202,18 @@ fn void inject_type_properties(Context* ctx, List{CompletionItem}* items, NodeKi
 			items.push({ .label = "members", .kind = PROPERTY, .detail = "any[]", .documentation = md("Array of fields/members.") });
 			items.push({ .label = "get_tag", .kind = METHOD, .detail = "fn any(String)", .documentation = md("Get attributes/tags.") });
 			items.push({ .label = "has_tag", .kind = METHOD, .detail = "fn bool(String)", .documentation = md("Check if attribute exists.") });
-			if (type_kind == STRUCT_DECL) {
-				items.push({ .label = "is_substruct", .kind = PROPERTY, .detail = "bool" });
-				items.push({ .label = "parent", .kind = PROPERTY, .detail = "typeid" });
-			}
-			break;
-
+			items.push({ .label = "is_substruct", .kind = PROPERTY, .detail = "bool" });
+			items.push({ .label = "parent", .kind = PROPERTY, .detail = "typeid" });
 		case ENUM_DECL:
 			items.push({ .label = "values", .kind = PROPERTY, .detail = "any[]", .documentation = md("List of all enum variants.")});
 			items.push({ .label = "len", .kind = PROPERTY, .detail = "sz", .documentation = md("Number of elements.")});
 			items.push({ .label = "members", .kind = PROPERTY, .detail = "any[]" });
 			items.push({ .label = "from_ordinal", .kind = METHOD, .detail = "fn type(sz)" });
 			items.push({ .label = "lookup_field", .kind = METHOD, .detail = "fn any(String)" });
-			break;
-
 		case FN_DECL:
 			items.push({ .label = "params", .kind = PROPERTY, .detail = "any[]", .documentation = md("Function parameter types.")});
 			items.push({ .label = "returns", .kind = PROPERTY, .detail = "typeid", .documentation = md("Function return type.")});
-			break;
-
 		default:
 			break;
 	}
-}
-
-fn String format_contract_markdown(ModuleSection* section, ContractDecl* contract, String signature)
-{
-	DString md = dstring::temp_with_capacity(512);
-
-	md.appendf("```\n%s\n```\n", signature);
-	
-	String? raw_doc = contract.comment.text;
-	if (try raw_doc && raw_doc.len > 0)
-	{
-		log::info("raw doc: %s", raw_doc);
-		String doc_clean = raw_doc.trim().treplace("\"", "");
-		md.appendf("\n%s\n", doc_clean.trim());
-	}
-	
-	//if (contract.params)
-	//{
-	//	md.append("\n#### Parameters\n");
-	//	foreach (param_node : contract.params)
-	//	{
-	//		Cursor param_cursor = { section, param_node };
-	//		String p_name = param_cursor.spelling(tmem) ?? "";
-	//		String p_desc = param_cursor.source_text() ?? "";
-	//		md.appendf("* **%s** : %s\n", p_name, p_desc);
-	//	}
-	//}
-//
-	//if (contract.requires)
-	//{
-	//	md.append("\n#### Requires (Preconditions)\n");
-	//	foreach (req_expr : contract.requires)
-	//	{
-	//		Cursor param_cursor = { section, req_expr };
-	//		String expr_str = param_cursor.source_text() ?? "";
-	//		md.appendf("* `assert(%s)`\n", expr_str);
-	//	}
-	//}
-//
-	//if (contract.ensures)
-	//{
-	//	md.append("\n#### Ensures (Postconditions)\n");
-	//	foreach (ens_expr : contract.ensures)
-	//	{
-	//		Cursor param_cursor = { section, ens_expr };
-	//		String expr_str = param_cursor.source_text() ?? "";
-	//		md.appendf("* `assert(%s)`\n", expr_str);
-	//	}
-	//}
-//
-	//if (contract.returns || contract.return_desc)
-	//{
-	//	md.append("\n#### Returns\n");
-	//	if (contract.return_desc)
-	//	{
-	//		Cursor cursor = { section, contract.return_desc };
-	//		String desc = cursor.source_text() ?? "";
-	//		md.appendf("* Description: %s\n", desc);
-	//	}
-	//	foreach (ret_node : contract.returns)
-	//	{
-	//		Cursor param_cursor = { section, ret_node };
-	//		String expr_str = param_cursor.source_text() ?? "";
-	//		md.appendf("* %s\n", expr_str);
-	//	}
-	//}
-	//
-	//if (contract.deprecated)
-	//{
-	//	md.append("\n **Deprecated:** ");
-	//	Cursor param_cursor = { section, contract.deprecated };
-	//	String expr_str = param_cursor.source_text() ?? "";
-	//	md.append(expr_str);
-	//	md.append("\n");
-	//}
-		
-	String raw_str = md.str_view();
-	DString escape_buf = dstring::temp_with_capacity(raw_str.len * 2);
-	
-	// Process every single byte sequentially to avoid intermediate allocator overlap
-	for (sz i = 0; i < raw_str.len; i++)
-	{
-		char c = raw_str[i];
-		switch (c)
-		{
-			case '\\':
-				escape_buf.append("\\\\");
-				break;
-			case '"':
-				escape_buf.append("\\\"");
-				break;
-			case '\n':
-				escape_buf.append("\\n");
-				break;
-			case '\r':
-				escape_buf.append("\\r");
-				break;
-			case '\t':
-				escape_buf.append("\\t");
-				break;
-			default:
-				escape_buf.append_char(c);
-				break;
-		}
-	}
-
-	log::info("formatted markdown: %s", escape_buf.str_view());
-
-	return escape_buf.str_view();
 }

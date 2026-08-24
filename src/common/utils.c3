@@ -1,30 +1,36 @@
+// src/common/utils.c3
 module lsp::utils;
 
 import std::io;
-import std::collections;
-
-fn bool? sf_walk_callback(Path path, bool is_dir, void* data) @private
-{
-	log::info("Walking: %s", path);
-    if (is_dir) return false;
-    List{String}* paths = (List{String}*)data;
-    if (path.has_extension("c3i") || path.has_extension("c3"))
-    {
-        paths.push(path.copy(tmem));
-    }
-    
-    return false;
-}
+import std::collections::list;
 
 fn String[] find_source_files(Allocator allocator, Path base_path, bool with_c3i = true)
 {
-	List{String} paths; paths.init(allocator);
-    
-    if (catch err = base_path.walk(&sf_walk_callback, &paths))
-    {
-        log::error("Failed to walk source_files: %s", err);
-    }
+	String clean_str = base_path.trim_right("/\\");
+	Path? clean_path = path::tnew(clean_str);
+	if (catch clean_path) return {};
 
-    return paths.array_view();
+	List{String} paths;
+	paths.init(allocator);
+
+	if (try c3_files = path::ls(tmem, clean_path, no_dirs: true, mask: "*.c3", recursive: true, rebase: clean_path))
+	{
+		foreach (p : c3_files)
+		{
+			paths.push(p.copy(allocator));
+		}
+	}
+
+	if (with_c3i)
+	{
+		if (try c3i_files = path::ls(tmem, clean_path, no_dirs: true, mask: "*.c3i", recursive: true, rebase: clean_path))
+		{
+			foreach (p : c3i_files)
+			{
+				paths.push(p.copy(allocator));
+			}
+		}
+	}
+
+	return paths.array_view();
 }
-

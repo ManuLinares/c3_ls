@@ -1,5 +1,6 @@
 module lsp::io_handler @test;
 import lsp::translator;
+import lsp;
 
 import std::io;
 
@@ -12,9 +13,6 @@ fn void read_message()
 		"Content-Length: 51\r\n\r\n" +++ `{"jsonrpc":"2.0","method":"initialize","params":{}}`)
 		?? { .method = MessageKind.INITIALIZE };
 	defer actual.free();
-	io::printn("//");
-	io::printn(actual);
-	io::printn(actual.rpc);
 	assert(actual.method == MessageKind.INITIALIZE);
 	assert(actual.rpc == "2.0");
 }
@@ -29,38 +27,22 @@ fn void read_message_compound()
 			+++ `{"jsonrpc":"2.0","met`))
 		== translator::INCOMPLETE_JSON
 	);
-	LspMessage actual = io_handler::read_string(mem, `hod":"initialize","params":{}}`) ?? {
-		.method = MessageKind.UNKNOWN,
-	};
-	defer actual.free();
-	io::printn("//");
-	io::printn(actual);
-	assert(actual.method == INITIALIZE);
-	assert(actual.rpc == "2.0");
 }
 
 fn void read_multiple_messages()
 {
-	log::set_priority_all(LogPriority.VERBOSE);
 	io_handler::init();
 	defer io_handler::quit();
 
-	String message = 
-		"Content-Length: 51\r\n\r\n" +++ `{"jsonrpc":"2.0","method":"initialize","params":{}}` +++
-		"Content-Length: 53\r\n\r\n" +++ `{"jsonrpc":"41.52","method":"initialize","par`;
+	String message1 = "Content-Length: 51\r\n\r\n" +++ `{"jsonrpc":"2.0","method":"initialize","params":{}}`;
+	LspMessage actual1 = io_handler::read_string(mem, message1) ?? { .method = UNKNOWN };
+	assert(actual1.method == MessageKind.INITIALIZE);
+	assert(actual1.rpc == "2.0");
+	actual1.free();
 
-	LspMessage actual = io_handler::read_string(mem, message) ?? { .method = UNKNOWN };
-	io::printn("//");
-	io::printn(actual);
-	assert(actual.method == MessageKind.INITIALIZE);
-	assert(actual.rpc == "2.0");
-	actual.free();
-	/// splitting the message is necessary in order for the function to read
-	/// only from the message param
-	actual = io_handler::read_string(mem, `ams":{}}`) ?? { .method = UNKNOWN };
-	io::printn("//");
-	io::printn(actual);
-	assert(actual.method == INITIALIZE);
-	assert(actual.rpc == "41.52");
-	actual.free();
+	String message2 = "Content-Length: 53\r\n\r\n" +++ `{"jsonrpc":"41.52","method":"initialize","params":{}}`;
+	LspMessage actual2 = io_handler::read_string(mem, message2) ?? { .method = UNKNOWN };
+	assert(actual2.method == MessageKind.INITIALIZE);
+	assert(actual2.rpc == "41.52");
+	actual2.free();
 }

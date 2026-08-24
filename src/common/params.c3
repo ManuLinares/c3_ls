@@ -1,13 +1,10 @@
+// src/common/params.c3
 module lsp;
 
 import std::collections::object;
 import std::collections::maybe;
 
-import dessert;
-import derive;
-
-$expand(derive(MessageKind::name, dessert));
-enum MessageKind : char (String name) @DEnum({ .as = FIELD, .field = "name", .fallback = "UNKNOWN" })
+enum MessageKind : char (String name)
 {
 	UNKNOWN      { "unknown" },
 	INITIALIZE   { "initialize" },
@@ -84,6 +81,163 @@ enum MessageKind : char (String name) @DEnum({ .as = FIELD, .field = "name", .fa
 	LOG_TRACE    { "$/logTrace" },
 }
 
+fn MessageKind message_kind_from_string(String s)
+{
+	$foreach $val : MessageKind::values:
+		if (s == $val.name) return $val;
+	$endforeach
+	return UNKNOWN;
+}
+
+struct ClientInfo
+{
+	String name;
+	String version;
+}
+
+struct InitializeParams
+{
+	int process_id;
+	ClientInfo client_info;
+	String locale;
+	Maybe{DocumentUri} root_uri;
+	Maybe{TraceKind} trace;
+	Maybe{WorkspaceFolder[]} workspace_folders;
+}
+
+struct DidOpenParams
+{
+	TextDocumentItem document;
+}
+
+struct TextDocumentIdentifier
+{
+	DocumentUri uri;
+}
+
+struct DidCloseParams
+{
+	TextDocumentIdentifier document;
+}
+
+struct HoverParams
+{
+	TextDocumentIdentifier document;
+	LspPosition position;
+}
+
+struct GoToDefinitionParams
+{
+	TextDocumentIdentifier document;
+	LspPosition position;
+}
+
+struct SignatureHelpParams
+{
+	TextDocumentIdentifier text_document;
+	LspPosition position;
+}
+
+struct ReferenceContext
+{
+	bool includeDeclaration;
+}
+
+struct ReferenceParams
+{
+	TextDocumentIdentifier text_document;
+	LspPosition position;
+	ReferenceContext context;
+}
+
+struct PrepareRenameParams
+{
+	TextDocumentIdentifier text_document;
+	LspPosition position;
+}
+
+struct RenameParams
+{
+	TextDocumentIdentifier text_document;
+	LspPosition position;
+	String newName;
+}
+
+struct SemanticTokensParams
+{
+	TextDocumentIdentifier text_document;
+}
+
+struct CompletionTextDocument
+{
+	String uri;
+}
+
+struct CompletionParams
+{
+	CompletionTextDocument text_document;
+	LspPosition position;
+	CompletionContext context;
+}
+
+struct CompletionItemResolveParams
+{
+	inline CompletionItem item;
+}
+
+constdef MessageSeverityConst : int
+{
+	ERROR = 1,
+	WARNING = 2,
+	INFO = 3,
+	HINT = 4,
+}
+
+struct LspDiagnostic 
+{
+	LspRange range;
+	int severity;
+	String message;
+	String source;
+}
+
+struct PublishDiagnosticsParams
+{
+	DocumentUri uri;
+	int version;
+	bool has_version;
+	LspDiagnostic[] diagnostics;
+}
+
+struct CancelParams
+{
+	int id;
+}
+
+struct SetTraceParams
+{
+	TraceKind value;
+}
+
+struct TextDocumentContentChangeEvent
+{
+	LspRange range;
+	uint range_length;
+	String text;
+}
+
+struct DidChangeParams
+{
+	VersionedTextDocumentIdentifier document;
+	TextDocumentContentChangeEvent[] content_changes;
+}
+
+struct LogMessageParams
+{
+	int type;
+	String message;
+}
+
 union MessageParams
 {
 	Object* unknown;
@@ -95,6 +249,17 @@ union MessageParams
 	CompletionParams completion;
 	CompletionItemResolveParams completion_resolve;
 	GoToDefinitionParams definition;
+	SignatureHelpParams signature_help;
+	ReferenceParams references;
+	PrepareRenameParams prepare_rename;
+	RenameParams rename;
+	SemanticTokensParams semantic_tokens;
+	DocumentSymbolParams document_symbol;
+	WorkspaceSymbolParams workspace_symbol;
+	InlayHintParams inlay_hint;
+	FoldingRangeParams folding_range;
+	DocumentFormattingParams formatting;
+	DocumentRangeFormattingParams range_formatting;
 
 	PublishDiagnosticsParams pub_diag;
 	LogMessageParams log_message;
@@ -103,115 +268,24 @@ union MessageParams
 	SetTraceParams set_trace;
 }
 
-$expand(derive(InitializeParams::name, dessert));
-struct InitializeParams @DStruct({ .rename_all = CAMEL_CASE })
+struct FormattingOptions
 {
-	int process_id;
-	struct client_info
-	{
-		String name;
-		String version;
-	}
-
-	String locale;
-	Maybe{DocumentUri} root_uri;
-
-	Maybe{TraceKind} trace;
-
-	Maybe{WorkspaceFolder[]} workspace_folders;
+	uint tab_size;
+	bool insert_spaces;
+	bool trim_trailing_whitespace;
+	bool insert_final_newline;
+	bool trim_final_newlines;
 }
 
-$expand(derive(DidOpenParams::name, dessert));
-struct DidOpenParams
+struct DocumentFormattingParams
 {
-	TextDocumentItem document @DField({ .rename = "textDocument" });
+	TextDocumentIdentifier text_document;
+	FormattingOptions options;
 }
 
-$expand(derive(DidCloseParams::name, dessert));
-struct DidCloseParams
+struct DocumentRangeFormattingParams
 {
-	struct document @DField({ .rename = "textDocument" })
-	{
-		DocumentUri uri;
-	}
-}
-
-$expand(derive(HoverParams::name, dessert));
-struct HoverParams
-{
-	struct document @DField({ .rename = "textDocument" })
-	{
-		DocumentUri uri;
-	}
-	LspPosition position;
-}
-
-$expand(derive(GoToDefinitionParams::name, dessert));
-struct GoToDefinitionParams
-{
-	struct document @DField({ .rename = "textDocument" })
-	{
-		DocumentUri uri;
-	}
-	LspPosition position;
-}
-
-$expand(derive(CompletionParams::name, dessert));
-struct CompletionParams @DStruct({ .rename_all = CAMEL_CASE })
-{
-	struct text_document 
-	{
-		String uri;
-	}
-	LspPosition position;
-	CompletionContext context;
-}
-
-$expand(derive(CompletionItemResolveParams::name, dessert));
-struct CompletionItemResolveParams
-{
-	inline CompletionItem item;
-}
-
-$expand(derive(PublishDiagnosticsParams::name, dessert));
-struct PublishDiagnosticsParams
-{
-	DocumentUri uri;
-	Maybe{int} version @DField({ .skip_if_empty = true });
-
-	LspDiagnostic[] diagnostics;
-}
-
-$expand(derive(CancelParams::name, dessert));
-struct CancelParams
-{
-	int id;
-}
-
-$expand(derive(SetTraceParams::name, dessert));
-struct SetTraceParams
-{
-	TraceKind value;
-}
-
-$expand(derive(TextDocumentContentChangeEvent::name, dessert));
-struct TextDocumentContentChangeEvent @DStruct({ .rename_all = CAMEL_CASE })
-{
+	TextDocumentIdentifier text_document;
 	LspRange range;
-	uint range_length;
-	String text;
-}
-
-$expand(derive(DidChangeParams::name, dessert));
-struct DidChangeParams @DStruct({ .rename_all = CAMEL_CASE })
-{
-	VersionedTextDocumentIdentifier document @DField({ .rename = "textDocument" });
-	TextDocumentContentChangeEvent[] content_changes;
-}
-
-$expand(derive(LogMessageParams::name, dessert));
-struct LogMessageParams
-{
-	int type;
-	String message;
+	FormattingOptions options;
 }

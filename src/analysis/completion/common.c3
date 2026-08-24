@@ -1,6 +1,6 @@
+// src/analysis/completion/common.c3
 module lsp::analysis::completion;
 
-import analyzer::workspace;
 import analyzer::core;
 import analyzer::cursor;
 import analyzer::sema;
@@ -9,6 +9,7 @@ import std::collections::list;
 import std::collections::map;
 
 import lsp::core;
+import lsp;
 import uri;
 
 fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
@@ -35,22 +36,22 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 				if (!kw.is_value()) continue;
 				break;
 			default:
+				break;
 		}
 		if (ctx.prefix.len == 0 || kw.name.starts_with(ctx.prefix))
 		{
 			items.push({
 				.label = kw.name,
-				.documentation = { .value = kw.docs },
 				.kind = KEYWORD,
-				.sort_text = string::tformat("0010_%s", kw.name),
+				.detail = "Keyword",
+				.insertText = kw.name,
+				.filterText = kw.name,
+				.sortText = string::tformat("0010_%s", kw.name),
 			});
 		}
 	}
 }
 
-<*
- ffoooo basdarsfdasfasfas
-*>
 fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String symbol_name, Node* node, String base_identifier, String prefix = "")
 {
 	if (!node) return;
@@ -99,39 +100,34 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 			break;
 
 		case VAR_DECL:
+		{
+			VarDecl* decl = node.as(VarDecl);
+			if (decl.var_flags.is_const)
 			{
-				VarDecl* decl = node.as(VarDecl);
-				if (decl.flags.is_const)
-				{
-					item_kind = CONSTANT;
-					type_desc = "constant";
-					break;
-				}
-				
-				item_kind = VARIABLE;
-				type_desc = "global var";
+				item_kind = CONSTANT;
+				type_desc = "constant";
 				break;
 			}
+			
+			item_kind = VARIABLE;
+			type_desc = "global var";
+			break;
+		}
 		default:
 			break;
 	}
 	
 	String detail_string = string::tformat("%s via %s", type_desc, base_identifier);
- 
-	String filter_text = symbol_name;
-	if (filter_text.len > 0 && filter_text[0] == '@')
-	{
-		filter_text = filter_text[1..];
-	}
+	String filter_text = symbol_name.strip_prefix("@");
 	
 	items.push({
 		.label = symbol_name,
 		.kind = item_kind,
 		.detail = detail_string,
-		.insert_text = insert_text,
-		.insert_text_format = format,
-		.filter_text = filter_text,
-		.sort_text = string::tformat("0005_%s", symbol_name),
-		.data = string::tformat("%d;%s", ctx.section.id, symbol_name)
+		.insertText = insert_text,
+		.insertTextFormat = format,
+		.filterText = filter_text,
+		.sortText = string::tformat("0005_%s", symbol_name),
+		.data = symbol_name
 	});
 }

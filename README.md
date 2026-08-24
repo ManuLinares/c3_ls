@@ -1,39 +1,43 @@
 # c3_ls
 
-Language Server Protocol (LSP) implementation for the **C3 programming language**
+C3 language server.
 
----
+## build
 
-## Getting Started
+requires `c3c` in your path.
 
-### Prerequisites
-Before compiling, ensure you have the **C3 compiler (`c3c`)** installed and available in your system path.
-* Required version: 0.8.2 - pre release
-* Recommended version: 0.8.2 - pre release
-
-### Installation
-
-Run the following commands in your terminal:
-
-```bash
-# 1. Clone the repository with its submodules
-git clone --recursive https://github.com/Zathyy/c3_ls.git
-
-# 2. Navigate into the project directory
-cd c3_ls
-
-# 3. Build the language server using the C3 compiler
+```sh
 c3c build
 ```
 
-### Command-line args
+binary is in `build/c3_ls`.
 
-| Argument | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--stdlib-path` | `String` | *`c3c --version` to acquire the path* | Explicit path to the C3 standard library directory |
-| `--compiler-path` | `String` | *None* | Absolute path to the C3 compiler (`c3c`) binary. |
-| `--log-path` | `String` | *None* | Output path destination for the language server's log file. |
-| `--cache-path` | `String` | *None* | Overrides the default directory where workspace cache files are stored. |
-| `--log-level` | `LogLevel` | `ERROR` | Sets the minimum logging severity (`DEBUG`, `INFO`, `WARN`, `ERROR`). |
-| `--diagnostics-delay` | `uint` | `0` | Specifies a delay (in milliseconds) before calculating and sending diagnostics. (not used) |
-| `--send-crash-reports` | `bool` | `false` | Enables or disables automated crash reporting to help improve stability. (not used) |
+## flags
+
+* `--stdlib-path <path>`: path to C3 standard library.
+* `--log-level <error|warn|info|debug>`: minimum log severity (default: `error`).
+* `--log-path <path>`: file path to write logs to.
+* `-v, --version`: print version and exit.
+
+## features
+
+* diagnostics
+* hover
+* goto definition
+* completion & resolve
+* signature help
+* references
+* rename & prepare rename
+* document & workspace symbols
+* semantic tokens
+* inlay hints
+* folding ranges
+* formatting & range formatting
+
+## license
+
+mit
+
+## credits
+
+> Special thanks to **m0tholith**, **Zathy**, and **ecoral360** for laying the groundwork and architecture for the C3 language server.

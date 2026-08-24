@@ -1,3 +1,4 @@
+// src/io_handler.c3
 module lsp::io_handler;
 import lsp::translator;
 
@@ -9,12 +10,8 @@ import std::net::os;
 import libc;
 import std::os::win32;
 
-// will be in std lib soon
 extern fn int _setmode(int fd, int mode) @feat(WIN32);
 
-<*
- Set up stdin for continuous reading
-*>
 fn void init()
 {
 	$if env::WIN32:
@@ -33,27 +30,31 @@ fn LspMessage? read_string(Allocator allocator, String message)
 }
 
 <*
-  Reads a protocol-framed LSP message from stdin
+  Reads a protocol-framed LSP message from stdin.
   @return "LSP message allocated with `allocator`"
-  @return? translator::INVALID_MESSAGE
+  @return? translator::INVALID_MESSAGE, translator::INCOMPLETE_JSON, io::EOF
 *>
 fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
 {
-    // InStream stream = io::stdin();
-    DString line = dstring::new(tmem);
-    defer line.free();
+    DString line;
+    line.tinit();
 
     while (true)
     {
-        if (try c = stream.read_byte())
+        line.clear();
+        while (true)
         {
-            if (c == '\n') break;
-            if (c != '\r') line.append_char(c);
+            if (try c = stream.read_byte())
+            {
+                if (c == '\n') break;
+                if (c != '\r') line.append_char(c);
+            }
+            else
+            {
+                return io::EOF~;
+            }
         }
-        else
-        {
-            return translator::INVALID_MESSAGE~;
-        }
+        if (line.len() > 0) break;
     }
 
     String s = line.str_view();
@@ -66,11 +67,11 @@ fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
     }
     if (content_length == 0) return translator::INVALID_MESSAGE~;
 
-    // Consume remaining headers until hitting the blank separator line (\r\n)
+    // Consume remaining headers until hitting the blank separator line
     while (true)
     {
-        DString hdr = dstring::new(allocator);
-        defer hdr.free();
+        DString hdr;
+        hdr.tinit();
         while (true)
         {
             if (try c = stream.read_byte())
@@ -80,29 +81,25 @@ fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
             }
             else
             {
-                return translator::INVALID_MESSAGE~;
+                return io::EOF~;
             }
         }
-        if (hdr.str_view().len == 0) break; // Found blank line!
+        if (hdr.str_view().len == 0) break;
     }
 
-    char[] body = mem::new_array(char, content_length);
+    char[] body = mem::temp_array(char, content_length);
     sz read_so_far = 0;
     while (read_so_far < content_length)
     {
-        sz n = stream.read(body[read_so_far..content_length - 1]) ?? 0;
+        sz n = stream.read(body[read_so_far .. content_length - 1]) ?? 0;
         if (n == 0)
         {
-            mem::free(body);
-            return translator::INVALID_MESSAGE~;
+            return translator::INCOMPLETE_JSON~;
         }
         read_so_far += n;
     }
 
     String json_payload = (String)body[:content_length];
-    defer mem::free(body);
-
-	log::debug(json_payload);
 
     IoDecodeResult? decode_result = translator::decode(allocator, json_payload);
     if (catch err = decode_result)
@@ -114,9 +111,6 @@ fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
     return decode_result.message;
 }
 
-<*
- @param [in] message
-*>
 fn void write(String message) @inline
 {
 	io::print(message);

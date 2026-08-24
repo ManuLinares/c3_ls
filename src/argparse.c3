@@ -40,6 +40,15 @@ fn int main(String[] args)
 }
 ```
 
+### Supported Syntax Conventions
+
+The parser is designed to adhere to standard POSIX and GNU command-line parsing conventions:
+
+* **Long Option Separators**: Values can be passed to long options using either spaces or an equals sign (e.g., `--port 8080` or `--port=8080`).
+* **Short Option Stacking**: Multiple short flags can be stacked together (e.g., `-vh` instead of `-v -h`).
+* **Compact Short Option Values**: A short option requiring an argument can accept its value directly attached to the flag (e.g., `-p8080` instead of `-p 8080`).
+* **Negative Numbers**: Hyphenated numeric values (such as `-10` or `-3.14`) are automatically detected and treated as literal values rather than illegal options.
+
 ---
 
 ## Option Qualifiers
@@ -53,16 +62,39 @@ Any flag designated with `*` acts as a help trigger. When matched, the macro aut
 ```
 
 ### 2. Optional Suffix (`?`)
-By default, non-boolean variables require an argument (e.g. `--port 8080`). Appending `?` to the option name makes its argument optional. If the flag is provided without an argument, boolean targets are set to `true`, and other types retain their defaults or are parsed if a value is present.
+By default, non-boolean options *must* be followed by a value (for example, `--port` expects a trailing number, and omitting it throws a `MISSING_ARGUMENT` error). 
+
+Appending `?` to any option name makes its value optional:
+
+1. **For non-booleans (Strings, Integers, etc.)**: If the flag is specified without a value, the parser skips it without throwing an error, allowing the variable to retain its default initialized value. If a value *is* provided, it is parsed and assigned normally.
+2. **For booleans**: By default, booleans don't accept arguments. Appending `?` allows them to optionally parse explicit values (such as `--verbose=false` or `--verbose=true`), while falling back to `true` if passed as a bare flag.
+
+This is highly useful for flags that enable a feature with a sensible default but can optionally accept a custom override.
+
 ```c3
-"v?", "verbose?", "Toggle verbose output", &verbose
+String log_file = "default.log";
+bool help = false;
+
+sz? result = argparse::@parse(args,
+	"h*", "help*", "Show help manual",                                   &help,
+	"l?", "log?", "Enable logging, optionally specifying a custom file", &log_file
+);
+
+// Running:  ./app --log
+// Result:   log_file remains "default.log"
+
+// Running:  ./app --log custom.log
+// Result:   log_file becomes "custom.log"
 ```
 
 ### 3. Incremental Counters (`+`)
 Appending `+` to an option name increments the target numeric variable every time the flag is specified.
+
+The parser supports both standard stacked short flags (e.g., `-vvv`) as well as repeated occurrences of flags.
 ```c3
 "v+", "verbose+", "Increase verbosity", &verbosity
-// Passing "-v -v --verbose -v" results in verbosity = 4
+// Passing "-vvv -v" results in verbosity = 4
+// Passing "-vv --verbose -vvv -v" results in verbosity = 7
 ```
 
 ---
@@ -81,7 +113,9 @@ argparse::@parse(args,
 ```
 
 ### 2. Custom Validation Callbacks
-You can pass a callback function of type `fn void? (String)` as an option assignee. The callback is invoked with the parsed option value. Returning a fault from this function aborts option parsing and propagates the fault out of `@parse`.
+You can pass a callback function of type `fn void? (String)` as an option assignee.
+
+The callback is invoked with the parsed option value. Returning a fault from this function aborts option parsing and propagates the fault out of `@parse`.
 
 ```c3
 fn void? validate_port(String value)
@@ -99,7 +133,11 @@ argparse::@parse(args,
 ```
 
 ### 3. Sequential Array Collection
-Passing a pointer to a fixed-size array collects sequential occurrences of that option flag into the array. If the array size is exceeded, the parser returns `argparse::OUT_OF_BOUNDS`.
+Passing a pointer to a fixed-size array collects sequential occurrences of that option flag into the array.
+
+To prevent parsing ambiguity with subsequent positional arguments, each item must be preceded by its own option flag. Space-separated multi-value syntax (e.g. `-f file1 file2`) is intentionally unsupported to ensure positional arguments are not eaten by mistake.
+
+If the array capacity is exceeded, the parser returns `argparse::OUT_OF_BOUNDS`.
 
 ```c3
 String[3] input_files = {};
@@ -151,6 +189,43 @@ argparse::@parse(args,
 ### 7. End-of-Options Marker (`--`)
 The standard double-hyphen marker `--` disables option-parsing for any subsequent arguments. All arguments following `--` are treated strictly as positional arguments, even if they begin with a hyphen.
 
+### 8. Subcommand Routing
+If `@parse` is called without specifying a final positional target array, option parsing terminates immediately upon reaching the first raw positional argument. The macro then returns the index of that unhandled argument. 
+
+This enables robust multi-command routing by letting you slice the arguments array at the returned index and pass the slice to subcommand-specific parsers.
+
+```c3
+bool verbose, help;
+
+sz? parse_res = argparse::@parse(args,
+	"h*", "help*", "Show help manual", &help,
+	"v", "verbose", "Verbose mode",    &verbose
+);
+
+if (catch err = parse_res)
+{
+	// If help was requested, append the subcommand "help" before exiting
+	if (err == argparse::HELP_REQUESTED)
+	{
+		io::printfn("\nCommands:");
+		io::printfn("  build       Optimize and compile the project");
+		io::printfn("  run         Execute the project binary");
+		return 0;
+	}
+	return 1;
+}
+
+if (parse_res < args.len)
+{
+	switch (args[parse_res])
+	{
+		case "build": return handle_build(args[parse_res..]);
+		case "run":   return handle_run(args[parse_res..]);
+		default:      io::eprintfn("Unknown command: %s", args[parse_res]); return 1;
+	}
+}
+```
+
 ---
 
 ## Low-Level API: `ArgParser`
@@ -158,39 +233,46 @@ The standard double-hyphen marker `--` disables option-parsing for any subsequen
 For manual or non-standard argument processing, you can bypass the compile-time macro and use the zero-allocation `ArgParser` struct directly.
 
 ```c3
-import std::io;
-import std::os::argparse;
+import std;
 
-fn void parse_manually(String[] args)
+fn void main(String[] args)
 {
 	ArgParser parser;
 	parser.init(args);
 
+	bool verbose = false;
 	bool is_option;
+
 	while (try token = parser.next(&is_option))
 	{
 		if (is_option)
 		{
-			if (token == "p" || token == "port")
+			switch (token)
 			{
-				if (try val = parser.value())
-				{
-					io::printfn("Custom Port: %s", val);
-				}
+				case "h": case "help":
+					io::printfn("Usage: %s [-v | --verbose] [files...]", args[0]);
+					return;
+				case "v": case "verbose":
+					verbose = true;
+				default:
+					io::eprintfn("Error: Unknown option '--%s'.", token);
+					if (parser.has_value()) (void)parser.consume_value();
+					return;
 			}
 		}
 		else
 		{
-			io::printfn("Custom Positional: %s", token);
+			io::printfn("Processing positional: %s", token);
 		}
 	}
+
+	io::printfn("Running with verbose = %b", verbose);
 }
 ```
 *>
 module std::os::argparse;
 
-import std::io;
-import std::os::env;
+import std::io, std::os::env;
 
 faultdef
 	MISSING_ARGUMENT,
@@ -200,6 +282,13 @@ faultdef
 	INVALID_VALUE,
 	INVALID_ENUM_VALUE,
 	END_OF_ARGS;
+
+int option_col_width     = 15;
+int short_only_col_width = 20;
+
+const String ENV_FALLBACK_PREFIX = "=env:";
+
+String last_opt;
 
 struct ArgParser
 {
@@ -214,13 +303,11 @@ struct ArgParser
 
 fn void ArgParser.init(ArgParser* self, String[] args, bool strict_mode = false)
 {
-	self.args = args;
-	self.index = 1;
-	self.short_remain = "";
-	self.pending_value = "";
-	self.has_pending_value = false;
-	self.strict_mode = strict_mode;
-	self.stop_options = false;
+	*self = {
+		.args = args,
+		.index = 1,
+		.strict_mode = strict_mode
+	};
 }
 
 fn String? ArgParser.next(ArgParser* self, bool* is_option)
@@ -229,8 +316,8 @@ fn String? ArgParser.next(ArgParser* self, bool* is_option)
 
 	if (self.short_remain.len > 0)
 	{
-		String opt = self.short_remain[0:1];
-		self.short_remain = self.short_remain.len > 1 ? self.short_remain[1 : self.short_remain.len - 1] : "";
+		String opt = self.short_remain[:1];
+		self.short_remain = self.short_remain[1..];
 		*is_option = true;
 		return opt;
 	}
@@ -257,12 +344,12 @@ fn String? ArgParser.next(ArgParser* self, bool* is_option)
 	{
 		self.index++;
 		*is_option = true;
-		String opt_part = arg[2 : arg.len - 2];
+		String opt_part = arg[2..];
 		if (try eq_idx = opt_part.index_of_char('='))
 		{
-			self.pending_value = opt_part[eq_idx + 1 : opt_part.len - (eq_idx + 1)];
+			self.pending_value = opt_part[eq_idx + 1..];
 			self.has_pending_value = true;
-			return opt_part[0 : eq_idx];
+			return opt_part[:eq_idx];
 		}
 		return opt_part;
 	}
@@ -272,14 +359,11 @@ fn String? ArgParser.next(ArgParser* self, bool* is_option)
 	{
 		self.index++;
 		*is_option = true;
-		self.short_remain = arg.len > 2 ? arg[2 : arg.len - 2] : "";
+		self.short_remain = arg[2..];
 		return arg[1:1];
 	}
 
-	if (self.strict_mode)
-	{
-		self.stop_options = true;
-	}
+	if (self.strict_mode) self.stop_options = true;
 	self.index++;
 	return arg;
 }
@@ -289,99 +373,205 @@ fn bool ArgParser.has_value(ArgParser* self)
 	if (self.has_pending_value) return true;
 	if (self.short_remain.len > 0) return true;
 	if (self.index >= self.args.len) return false;
-	return !self.args[self.index].starts_with("-");
+
+	String next_arg = self.args[self.index];
+	if (next_arg.starts_with("-"))
+	{
+		// If it's a single "-" or a negative number (like "-10"), it is a valid value
+		if (next_arg.len == 1 || (next_arg[1] >= '0' && next_arg[1] <= '9'))
+		{
+			return true;
+		}
+		return false;
+	}
+	return true;
 }
 
-fn String? ArgParser.value(ArgParser* self)
+fn String? ArgParser.consume_value(ArgParser* self)
 {
-	if (self.has_pending_value)
+	switch
 	{
-		self.has_pending_value = false;
-		return self.pending_value;
+		case self.has_pending_value:
+			self.has_pending_value = false;
+			return self.pending_value;
+
+		case self.short_remain.len > 0:
+			defer self.short_remain = "";
+			return self.short_remain;
+
+		case self.index >= self.args.len:
+			return MISSING_ARGUMENT~;
 	}
 
-	if (self.short_remain.len > 0)
-	{
-		String val = self.short_remain;
-		self.short_remain = "";
-		return val;
-	}
-
-	if (self.index >= self.args.len)
-	{
-		return MISSING_ARGUMENT~;
-	}
-
-	String val = self.args[self.index];
-	self.index++;
-	return val;
+	defer self.index++;
+	return self.args[self.index];
 }
 
 <* Parses a string to a primitive type. *>
 macro void? @parse_value(String val_str, $Type, #assignee) @local
 {
 	$switch ($Type):
-		$case int::typeid:
-		$case short::typeid:
-		$case uint::typeid:
-		$case ushort::typeid:
-			int? parsed = val_str.to_int();
-			if (catch err = parsed) return INVALID_VALUE~;
-			#assignee = ($Type)parsed;
-		$case long::typeid:
-		$case ulong::typeid:
-			long? parsed = val_str.to_long();
-			if (catch err = parsed) return INVALID_VALUE~;
-			#assignee = ($Type)parsed;
-		$case float::typeid:
-			float? parsed = val_str.to_float();
-			if (catch err = parsed) return INVALID_VALUE~;
-			#assignee = parsed;
-		$case double::typeid:
-			double? parsed = val_str.to_double();
-			if (catch err = parsed) return INVALID_VALUE~;
-			#assignee = parsed;
-		$case String::typeid:
+		$case int:
+		$case short:
+			#assignee = ($Type)(val_str.to_int() ?? INVALID_VALUE~!);
+		$case uint:
+		$case ushort:
+			#assignee = ($Type)(val_str.to_uint() ?? INVALID_VALUE~!);
+		$case long:
+			#assignee = val_str.to_long() ?? INVALID_VALUE~!;
+		$case ulong:
+			#assignee = val_str.to_ulong() ?? INVALID_VALUE~!;
+		$case float:
+			#assignee = val_str.to_float() ?? INVALID_VALUE~!;
+		$case double:
+			#assignee = val_str.to_double() ?? INVALID_VALUE~!;
+		$case String:
 			#assignee = val_str;
-		$case bool::typeid:
+		$case bool:
 			#assignee = (val_str == "true" || val_str == "1");
 		$default:
-			$error "Type `" + $Type::name + "` is unsupported by the standard option parser.";
+			$error "Type `" +++ $Type::name +++ "` is unsupported by the standard option parser.";
 	$endswitch
 }
 
-<* Extracts and cleans option metadata from raw flags. *>
-macro @clean_option_meta(String #short_raw, String #long_raw, #is_help, #is_inc, #is_opt, #short_clean, #long_opt_name, #env_var_name, #has_env_fallback) @local
+const int QUALIFIER_LEN @private = 1;
+
+struct UnpackedOption @private
 {
-	#is_help = (#short_raw.len > 0 &&& #short_raw[^1] == '*') ||| (#long_raw.len > 0 &&& #long_raw[^1] == '*');
-	#is_inc  = (#short_raw.len > 0 &&& #short_raw[^1] == '+') ||| (#long_raw.len > 0 &&& #long_raw[^1] == '+');
-	#is_opt  = (#short_raw.len > 0 &&& #short_raw[^1] == '?') ||| (#long_raw.len > 0 &&& #long_raw[^1] == '?');
+	String short_raw;
+	String long_raw;
+	String desc;
+	int assignee_offset;
+	int stride;
+}
 
-	#short_clean = #is_help ||| #is_inc ||| #is_opt ??? (#short_raw.len > 0 ??? #short_raw[0 : #short_raw.len - 1] : "") : #short_raw;
-	String $long_clean  = #is_help ||| #is_inc ||| #is_opt ??? (#long_raw.len > 0 ??? #long_raw[0 : #long_raw.len - 1] : "") : #long_raw;
+<* Checks if a flag string is a long option name rather than a short flag. *>
+macro bool @is_long_option_name($name) @private
+{
+	return !($name.len <= QUALIFIER_LEN ||| ($name.len == QUALIFIER_LEN + 1 &&& @in($name[1], '*', '+', '?')));
+}
 
-	#long_opt_name = $long_clean;
-	#env_var_name = "";
-	#has_env_fallback = false;
+<* Checks if an index in $vaarg is a pointer or callback assignee. *>
+macro bool @is_assignee(int $idx, ...) @private
+{
+	return $idx < $vaarg.len &&& (@kindof($vaarg[$idx]) == POINTER ||| @kindof($vaarg[$idx]) == FUNC);
+}
 
-	$if $long_clean.len > 5:
-		$for var $e_idx = 0; $e_idx < $long_clean.len - 4; ++$e_idx:
-			$if $long_clean[$e_idx : 5] == "=env:":
-				#has_env_fallback = true;
-				#long_opt_name = $long_clean[0 : $e_idx];
-				#env_var_name = $long_clean[$e_idx + 5 : $long_clean.len - ($e_idx + 5)];
+<* Safely retrieves an argument string from $vaarg or empty string if out of bounds. *>
+macro String @get_arg(int $idx, ...) @private
+{
+	return $idx < $vaarg.len ??? $vaarg[$idx] : "";
+}
+
+<* Unpacks 2, 3, or 4-element option tuples from $vaarg starting at index $start_idx. *>
+macro UnpackedOption @unpack_option(int $start_idx, ...) @private
+{
+	String $short_raw = @get_arg($start_idx, ...$vaarg);
+	String $long_raw;
+	String $desc;
+	int $assignee_offset;
+	int $stride;
+
+	$switch:
+		$case @is_assignee($start_idx + 1, ...$vaarg):
+			$assignee_offset = 1;
+			$stride = 2;
+			$if @is_long_option_name($short_raw):
+				$long_raw = $short_raw;
+				$short_raw = "";
+			$else
+				$long_raw = "";
+			$endif
+
+		$case @is_assignee($start_idx + 2, ...$vaarg):
+			$assignee_offset = 2;
+			$stride = 3;
+			$if @is_long_option_name($short_raw):
+				$desc = @get_arg($start_idx + 1, ...$vaarg);
+				$long_raw = $short_raw;
+				$short_raw = "";
+			$else
+				$long_raw = @get_arg($start_idx + 1, ...$vaarg);
+			$endif
+
+		$default:
+			$assignee_offset = 3;
+			$stride = 4;
+			$long_raw = @get_arg($start_idx + 1, ...$vaarg);
+			$desc = @get_arg($start_idx + 2, ...$vaarg);
+	$endswitch
+
+	return {
+		.short_raw = $short_raw,
+		.long_raw = $long_raw,
+		.desc = $desc,
+		.assignee_offset = $assignee_offset,
+		.stride = $stride
+	};
+}
+
+struct OptionMeta @private
+{
+	bool is_help;
+	bool is_inc;
+	bool is_opt;
+	String short_clean;
+	String long_opt_name;
+	String env_var_name;
+	bool has_env_fallback;
+}
+
+<* Extracts and cleans option metadata from raw flags at compile-time. *>
+macro OptionMeta @clean_option_meta($short_raw, $long_raw) @private
+{
+	bool $is_help = ($short_raw.len > 0 &&& $short_raw[^1] == '*') ||| ($long_raw.len > 0 &&& $long_raw[^1] == '*');
+	bool $is_inc  = ($short_raw.len > 0 &&& $short_raw[^1] == '+') ||| ($long_raw.len > 0 &&& $long_raw[^1] == '+');
+	bool $is_opt  = ($short_raw.len > 0 &&& $short_raw[^1] == '?') ||| ($long_raw.len > 0 &&& $long_raw[^1] == '?');
+	bool $has_qualifier = $is_help ||| $is_inc ||| $is_opt;
+
+	String $short_clean = $has_qualifier ??? ($short_raw.len > 0 ??? $short_raw[:$short_raw.len - QUALIFIER_LEN] : "") : $short_raw;
+	String $long_clean  = $has_qualifier ??? ($long_raw.len > 0 ??? $long_raw[:$long_raw.len - QUALIFIER_LEN] : "") : $long_raw;
+
+	String $long_opt_name = $long_clean;
+	String $env_var_name;
+	bool $has_env_fallback;
+
+	$if $long_clean.len > ENV_FALLBACK_PREFIX.len:
+		$for int $e_idx = 0; $e_idx < $long_clean.len - (ENV_FALLBACK_PREFIX.len - 1); ++$e_idx:
+			$if $long_clean[$e_idx : ENV_FALLBACK_PREFIX.len] == ENV_FALLBACK_PREFIX:
+				$has_env_fallback = true;
+				$long_opt_name = $long_clean[:$e_idx];
+				$env_var_name = $long_clean[$e_idx + ENV_FALLBACK_PREFIX.len..];
 			$endif
 		$endfor
+	$endif
+
+	return {
+		.is_help = $is_help,
+		.is_inc = $is_inc,
+		.is_opt = $is_opt,
+		.short_clean = $short_clean,
+		.long_opt_name = $long_opt_name,
+		.env_var_name = $env_var_name,
+		.has_env_fallback = $has_env_fallback
+	};
+}
+
+<* Validates an option's qualifier against its assignee type at compile-time. *>
+macro void @validate_option($short_raw, $long_raw, $assignee_kind) @private
+{
+	bool $is_inc = ($short_raw.len > 0 &&& $short_raw[^1] == '+') ||| ($long_raw.len > 0 &&& $long_raw[^1] == '+');
+	$if $is_inc &&& $assignee_kind == BOOL:
+		$error "Option '" +++ ($long_raw.len > 0 ??? $long_raw : $short_raw) +++ "' uses incremental '+' qualifier, but assignee is `bool*`. Use an integer type (e.g. `int`) instead.";
 	$endif
 }
 
 <* Parses and maps a string value to an Enum type safely. *>
-macro void? @parse_enum(String val, $TargetType, #assignee) @local
+macro void? @parse_enum(String val, $TargetType, #assignee) @private
 {
-	String val_upper = val.to_upper_copy(tmem);
-	bool enum_matched = false;
-	$for var $e = 0; $e < $TargetType::len; ++$e:
-		if (!enum_matched && val_upper == $TargetType::names[$e].to_upper_copy(tmem))
+	bool enum_matched;
+	$for int $e = 0; $e < $TargetType::len; ++$e:
+		if (!enum_matched && val.compare_to_ignore_case($TargetType::names[$e]) == 0)
 		{
 			#assignee = $TargetType::values[$e];
 			enum_matched = true;
@@ -405,36 +595,50 @@ macro void? @parse_enum(String val, $TargetType, #assignee) @local
 	return;
 }
 
-macro sz? @parse(#args, ...) @public
+<*
+ @param #args : "The command-line argument slice (typically String[] args from main)."
+ @return "On success, the index of the first argument that was not handled (not consumed as a flag or flag value). On failure, returns a parsing fault or HELP_REQUESTED."
+ @require $defined(String[] a = #args) : "Expected '#args' to be compatible with String[]"
+*>
+macro sz? @parse(#args, ...)
 {
-	bool $strict_mode = false;
-	var $vaarg_start = 0;
+	bool $strict_mode;
+	int $vaarg_start;
 	$if @kindof($vaarg[0]) == BOOL:
 		$strict_mode = $vaarg[0];
 		$vaarg_start = 1;
 	$endif
 
-	var $total_options = 0;
-	var $has_positional_target = false;
-	var $positional_idx = -1;
-	var $i = $vaarg_start;
+	int $total_options;
+	bool $has_positional_target;
+	int $positional_idx = -1;
+	int $i = $vaarg_start;
 
 	$for ; $i < $vaarg.len; :
-		$if $i == $vaarg.len - 1:
+		$if $i == $vaarg.len - 1 &&& (@kindof($vaarg[$i]) == POINTER ||| @kindof($vaarg[$i]) == FUNC):
 			$positional_idx = $i;
 			$has_positional_target = true;
 			$i++;
 		$else
-			$total_options++;
-			$if @kindof($vaarg[$i+2]) == POINTER ||| @kindof($vaarg[$i+2]) == FUNC:
-				$i += 3;
+			UnpackedOption $unpacked = @unpack_option($i, ...$vaarg);
+			int $assignee_idx = $i + $unpacked.assignee_offset;
+			$if $assignee_idx >= $vaarg.len:
+				$error "Invalid arguments to `@parse`: missing assignee pointer for option '" +++ $vaarg[$i] +++ "'.";
 			$else
-				$i += 4;
+				$if @kindof($vaarg[$assignee_idx]) == POINTER:
+					@validate_option($unpacked.short_raw, $unpacked.long_raw, @kindof(*$vaarg[$assignee_idx]));
+				$else
+					$if @kindof($vaarg[$assignee_idx]) != FUNC:
+						$error "Invalid arguments to `@parse`: expected assignee pointer or callback for option '" +++ $vaarg[$i] +++ "', but got '" +++ $Typeof($vaarg[$assignee_idx])::name +++ "'.";
+					$endif
+				$endif
 			$endif
+			$total_options++;
+			$i += $unpacked.stride;
 		$endif
 	$endfor
 
-	var $options_end = $has_positional_target ? $vaarg.len - 1 : $vaarg.len;
+	int $options_end = $has_positional_target ? $vaarg.len - 1 : $vaarg.len;
 
 	ArgParser parser;
 	parser.init(#args, $strict_mode);
@@ -442,93 +646,60 @@ macro sz? @parse(#args, ...) @public
 	sz[$total_options > 0 ??? $total_options : 1] array_indexes = {};
 	bool[$total_options > 0 ??? $total_options : 1] option_parsed = {};
 	sz positional_index = 0;
+	bool print_def = false;
 
 	bool is_opt;
 	while (try opt = parser.next(&is_opt))
 	{
 		if (is_opt)
 		{
+			last_opt = opt;
 			bool option_matched = false;
 
-			var $opt_idx = 0;
-			var $j = $vaarg_start;
+			int $opt_idx;
+			int $j = $vaarg_start;
 			$for ; $j < $options_end; :
-			{
-				var $curr_j = $j;
-				String $short_raw = $vaarg[$curr_j];
-				String $long_raw = $vaarg[$curr_j+1];
+				int $curr_j = $j;
+				UnpackedOption $unpacked = @unpack_option($curr_j, ...$vaarg);
+				String $short_raw = $unpacked.short_raw;
+				String $long_raw = $unpacked.long_raw;
+				String $desc = $unpacked.desc;
+				int $assignee_offset = $unpacked.assignee_offset;
+				$j += $unpacked.stride;
 
-				var $assignee_offset = 2;
-				String $desc = "";
-				$if @kindof($vaarg[$curr_j+2]) == POINTER ||| @kindof($vaarg[$curr_j+2]) == FUNC:
-					$assignee_offset = 2;
-					$j += 3;
-				$else
-					$desc = $vaarg[$curr_j+2];
-					$assignee_offset = 3;
-					$j += 4;
-				$endif
+				OptionMeta $meta = @clean_option_meta($short_raw, $long_raw);
 
-				var $is_help = false;
-				var $is_inc = false;
-				var $is_opt = false;
-				String $short_clean = "";
-				String $long_opt_name = "";
-				String $env_var_name = "";
-				bool $has_env_fallback = false;
-
-				@clean_option_meta($short_raw, $long_raw, $is_help, $is_inc, $is_opt, $short_clean, $long_opt_name, $env_var_name, $has_env_fallback);
-
-				if (($short_clean.len > 0 && opt == $short_clean) || ($long_opt_name.len > 0 && opt == $long_opt_name))
+				if (($meta.short_clean.len > 0 && opt == $meta.short_clean) || ($meta.long_opt_name.len > 0 && opt == $meta.long_opt_name))
 				{
 					option_matched = true;
 					option_parsed[$opt_idx] = true;
 
 					$switch:
-						$case $is_help:
+						$case $meta.is_help:
 							// Print help menu
 							io::printfn("Usage: %s [options]", #args[0]);
 							io::printfn("Options:");
-							var $h_idx = $vaarg_start;
+							int $h_idx = $vaarg_start;
 							$for ; $h_idx < $options_end; :
-							{
-								var $curr_h = $h_idx;
-								String $h_short = $vaarg[$curr_h];
-								String $h_long  = $vaarg[$curr_h+1];
+								int $curr_h = $h_idx;
+								UnpackedOption $h_unpacked = @unpack_option($curr_h, ...$vaarg);
+								String $h_short = $h_unpacked.short_raw;
+								String $h_long = $h_unpacked.long_raw;
+								String $h_desc = $h_unpacked.desc;
+								int $h_assignee_offset = $h_unpacked.assignee_offset;
+								$h_idx += $h_unpacked.stride;
 
-								var $h_assignee_offset = 2;
-								String $h_desc = "";
-								$if @kindof($vaarg[$curr_h+2]) == POINTER ||| @kindof($vaarg[$curr_h+2]) == FUNC:
-									$h_assignee_offset = 2;
-									$h_idx += 3;
-								$else
-									$h_desc = $vaarg[$curr_h+2];
-									$h_assignee_offset = 3;
-									$h_idx += 4;
-								$endif
-
-								var $h_help = false;
-								var $h_inc = false;
-								var $h_opt = false;
-								String $h_s_clean = "";
-								String $h_long_opt_name = "";
-								String $h_env_var_name = "";
-								bool $h_has_env_fallback = false;
-
-								@clean_option_meta($h_short, $h_long, $h_help, $h_inc, $h_opt, $h_s_clean, $h_long_opt_name, $h_env_var_name, $h_has_env_fallback);
+								OptionMeta $h_meta = @clean_option_meta($h_short, $h_long);
 
 								// Print aligned option strings
-								if ($h_s_clean.len > 0 && $h_long_opt_name.len > 0)
+								switch
 								{
-									io::printf("  -%s, --%-15s ", $h_s_clean, $h_long_opt_name);
-								}
-								else if ($h_s_clean.len > 0)
-								{
-									io::printf("  -%-20s ", $h_s_clean);
-								}
-								else if ($h_long_opt_name.len > 0)
-								{
-									io::printf("      --%-15s ", $h_long_opt_name);
+									case $h_meta.short_clean.len > 0 && $h_meta.long_opt_name.len > 0:
+										io::printf("  -%s, --%-*s ", $h_meta.short_clean, option_col_width, $h_meta.long_opt_name);
+									case $h_meta.short_clean.len > 0:
+										io::printf("  -%-*s ", short_only_col_width, $h_meta.short_clean);
+									case $h_meta.long_opt_name.len > 0:
+										io::printf("      --%-*s ", option_col_width, $h_meta.long_opt_name);
 								}
 
 								$switch:
@@ -536,32 +707,31 @@ macro sz? @parse(#args, ...) @public
 										io::printfn("%s", $h_desc);
 									$default:
 										var $HType = $Typeof(*$vaarg[$curr_h + $h_assignee_offset]);
-										bool print_def = true;
+										print_def = true;
 
 										$switch ($HType::kind):
 											$case BOOL:
 												print_def = *$vaarg[$curr_h + $h_assignee_offset];
 											$case ARRAY:
-												bool array_has_val = false;
+												print_def = false;
 												foreach (elem : *$vaarg[$curr_h + $h_assignee_offset])
 												{
 													var $ElemType = $Typeof(elem);
-													$if $ElemType == String::typeid:
-														if (elem.len > 0) array_has_val = true;
+													$if $ElemType == String:
+														if (elem.len > 0) print_def = true;
 													$else
-														if (elem != 0) array_has_val = true;
+														if (elem != 0) print_def = true;
 													$endif
 												}
-												print_def = array_has_val;
 											$default:
-												$if $HType == String::typeid:
+												$if $HType == String:
 													print_def = (*$vaarg[$curr_h + $h_assignee_offset]).len > 0;
 												$endif
 										$endswitch
 
 										if (print_def)
 										{
-											$if $HType == String::typeid:
+											$if $HType == String:
 												io::printfn("%s (default: \"%s\")", $h_desc, *$vaarg[$curr_h + $h_assignee_offset]);
 											$else
 												io::printfn("%s (default: %s)", $h_desc, *$vaarg[$curr_h + $h_assignee_offset]);
@@ -572,70 +742,50 @@ macro sz? @parse(#args, ...) @public
 											io::printfn("%s", $h_desc);
 										}
 								$endswitch
-							}
 							$endfor
 							return HELP_REQUESTED~;
 
-						$case $is_inc:
+						$case $meta.is_inc:
 							(*$vaarg[$curr_j + $assignee_offset])++;
 
 						$case @kindof($vaarg[$curr_j + $assignee_offset]) == FUNC:
-							String? val = parser.value();
-							if (catch err = val) return err~;
-							if (catch err = ($vaarg[$curr_j + $assignee_offset])(val)) return err~;
+							($vaarg[$curr_j + $assignee_offset])(parser.consume_value()!)!;
 
 						$default:
 							var $TargetType = $Typeof(*$vaarg[$curr_j + $assignee_offset]);
 
 							$switch ($TargetType::kind):
 								$case ARRAY:
-									String? val = parser.value();
-									if (catch err = val) return err~;
 									sz idx = array_indexes[$opt_idx]++;
 									if (idx >= (*$vaarg[$curr_j + $assignee_offset]).len) return OUT_OF_BOUNDS~;
 									var $ElementType = $Typeof((*$vaarg[$curr_j + $assignee_offset])[0]);
-									if (catch err = @parse_value(val, $ElementType::typeid, (*$vaarg[$curr_j + $assignee_offset])[idx])) return err~;
+									@parse_value(parser.consume_value(), $ElementType, (*$vaarg[$curr_j + $assignee_offset])[idx])!;
 
 								$case ENUM:
-									String? val = parser.value();
-									if (catch err = val) return err~;
-									if (catch err = @parse_enum(val, $TargetType, *$vaarg[$curr_j + $assignee_offset])) return err~;
+									@parse_enum(parser.consume_value(), $TargetType, *$vaarg[$curr_j + $assignee_offset])!;
 
 								$case BOOL:
-									$if $is_opt:
+									bool flag_val = true;
+									$if $meta.is_opt:
 										if (parser.has_value())
 										{
-											String? val = parser.value();
-											if (catch err = val) return err~;
-											*$vaarg[$curr_j + $assignee_offset] = (val == "true" || val == "1");
+											String val = parser.consume_value()!;
+											flag_val = (val == "true" || val == "1");
 										}
-										else
-										{
-											*$vaarg[$curr_j + $assignee_offset] = true;
-										}
-									$else
-										*$vaarg[$curr_j + $assignee_offset] = true;
 									$endif
+									*$vaarg[$curr_j + $assignee_offset] = flag_val;
 
 								$default:
-									$if $is_opt:
-										if (parser.has_value())
-										{
-											String? val = parser.value();
-											if (catch err = val) return err~;
-											if (catch err = @parse_value(val, $TargetType::typeid, *$vaarg[$curr_j + $assignee_offset])) return err~;
-										}
+									$if $meta.is_opt:
+										if (parser.has_value()) @parse_value(parser.consume_value(), $TargetType, *$vaarg[$curr_j + $assignee_offset])!;
 									$else
-										String? val = parser.value();
-										if (catch err = val) return err~;
-										if (catch err = @parse_value(val, $TargetType::typeid, *$vaarg[$curr_j + $assignee_offset])) return err~;
+										@parse_value(parser.consume_value(), $TargetType, *$vaarg[$curr_j + $assignee_offset])!;
 									$endif
 							$endswitch
 					$endswitch
 				}
 
 				$opt_idx++;
-			}
 			$endfor
 
 			if (!option_matched) return ILLEGAL_OPTION~;
@@ -659,51 +809,43 @@ macro sz? @parse(#args, ...) @public
 	}
 
 	// Apply environment fallbacks for any unparsed options
-	var $fallback_idx = 0;
-	var $k = $vaarg_start;
+	int $fallback_idx;
+	int $k = $vaarg_start;
 	$for ; $k < $options_end; :
-	{
-		var $curr_k = $k;
-		String $short_raw = $vaarg[$curr_k];
-		String $long_raw = $vaarg[$curr_k+1];
+		int $curr_k = $k;
+		UnpackedOption $k_unpacked = @unpack_option($curr_k, ...$vaarg);
+		String $short_raw = $k_unpacked.short_raw;
+		String $long_raw = $k_unpacked.long_raw;
+		int $assignee_offset = $k_unpacked.assignee_offset;
+		$k += $k_unpacked.stride;
 
-		var $assignee_offset = 2;
-		$if @kindof($vaarg[$curr_k+2]) == POINTER ||| @kindof($vaarg[$curr_k+2]) == FUNC:
-			$assignee_offset = 2;
-			$k += 3;
-		$else
-			$assignee_offset = 3;
-			$k += 4;
-		$endif
+		OptionMeta $k_meta = @clean_option_meta($short_raw, $long_raw);
 
-		var $h_help = false;
-		var $h_inc = false;
-		var $h_opt = false;
-		String $h_s_clean = "";
-		String $long_opt_name = "";
-		String $env_var_name = "";
-		bool $has_env_fallback = false;
-
-		@clean_option_meta($short_raw, $long_raw, $h_help, $h_inc, $h_opt, $h_s_clean, $long_opt_name, $env_var_name, $has_env_fallback);
-
-		$if $has_env_fallback:
+		$if $k_meta.has_env_fallback:
 			if (!option_parsed[$fallback_idx])
 			{
-				String? env_val = env::tget_var($env_var_name);
+				String? env_val = env::tget_var($k_meta.env_var_name);
 				if (try val = env_val)
 				{
 					$switch:
 						$case @kindof($vaarg[$curr_k + $assignee_offset]) == FUNC:
-							if (catch err = ($vaarg[$curr_k + $assignee_offset])(val)) return err~;
+							($vaarg[$curr_k + $assignee_offset])(val)!;
 						$default:
 							var $TargetType = $Typeof(*$vaarg[$curr_k + $assignee_offset]);
 							$switch ($TargetType::kind):
+								$case ARRAY:
+									sz idx = array_indexes[$fallback_idx]++;
+									if (idx < (*$vaarg[$curr_k + $assignee_offset]).len)
+									{
+										var $ElementType = $Typeof((*$vaarg[$curr_k + $assignee_offset])[0]);
+										@parse_value(val, $ElementType, (*$vaarg[$curr_k + $assignee_offset])[idx])!;
+									}
 								$case BOOL:
 									*$vaarg[$curr_k + $assignee_offset] = (val == "true" || val == "1");
 								$case ENUM:
-									if (catch err = @parse_enum(val, $TargetType, *$vaarg[$curr_k + $assignee_offset])) return err~;
+									@parse_enum(val, $TargetType, *$vaarg[$curr_k + $assignee_offset])!;
 								$default:
-									if (catch err = @parse_value(val, $TargetType::typeid, *$vaarg[$curr_k + $assignee_offset])) return err~;
+									@parse_value(val, $TargetType, *$vaarg[$curr_k + $assignee_offset])!;
 							$endswitch
 					$endswitch
 				}
@@ -711,7 +853,6 @@ macro sz? @parse(#args, ...) @public
 		$endif
 
 		$fallback_idx++;
-	}
 	$endfor
 
 	return parser.index;

@@ -1,6 +1,6 @@
+// src/analysis/completion/completion.c3
 module lsp::analysis::completion;
 
-import analyzer::workspace;
 import analyzer::core;
 import analyzer::cursor;
 import analyzer::sema;
@@ -10,204 +10,96 @@ import std::collections::map;
 import std::collections::set;
 
 import lsp::core;
+import lsp;
 import uri;
-import analyzer::core::lexer;
+import analyzer::lexer;
+import lsp::analysis;
+import lsp::analysis::hover;
 
 struct Context
 {
 	Uri uri;
 	LspPosition position;
 	sz offset;
-	sz base_offset;
-	Workspace* ws;
-	ModuleSection* section;
+	LspWorkspace* ws;
+	SourceFile* sf;
 	Allocator allocator;
 	String prefix;
 	ScopeKind scope;
-	Node* leaf_node;
-	Node* top_level_node;
-	<*
-	 Contains all tokens of the current file
-	*>
-	List{Token} tokens;
-
 	LspAccessKind access;
-	String base_identifier; // Stores 'variable' or 'Type' string found before the operator
+	String base_identifier;
 }
 
-fn void context_populate_tokens(Context* ctx)
+fn void resolve_item(LspProject* project, CompletionItem* item)
 {
-    ctx.tokens.tinit();
-    
-    String src = ctx.section.source_file.source;
-    Lexer lexer = { .buffer = src };
+	if (!project || !item || item.label.len == 0) return;
 
-    while (try t = lexer.next())
-    {
-        ctx.tokens.push(t);
-    }
-}
-
-<*
- @param [&inout] item
-*>
-fn void? resolve_item(LspProject* project, CompletionItem* item)
-{
-	if (!item.data) return;
-    String metadata = item.data;
-
-	sz split_idx = metadata.index_of_char(';') ?? -1;
-    if (split_idx < 0) return;
-
-	String id_str = metadata[..split_idx];
-    String symbol_name = metadata[split_idx + 1..];
-	
-	ulong section_id = id_str.to_ulong() ?? 0;
-
-	ModuleSection* section = workspace::get_section_from_id(&project.workspace, section_id);
-    if (!section) return;
-
-	List{SymbolEntry}*? entries = project.workspace.lookup_in_module(section.parent_module.name, symbol_name);
-    if (catch err = entries)
+	String sym_name = item.label;
+	List{SymbolEntry} syms = project.workspace.find_symbol_by_name(sym_name);
+	if (syms.len() == 0 && sym_name.starts_with("@"))
 	{
-		log::error("Failed to acquire symbol: %s", err);
-		return;
+		syms = project.workspace.find_symbol_by_name(sym_name.strip_prefix("@"));
 	}
-	if (entries == null) return;
-	SymbolEntry entry = entries.get(0);
+	if (syms.len() == 0 || !syms.get(0).node) return;
 
-	switch (entry.node.kind)
+	Node* node = syms.get(0).node;
+	String sig = hover::format_node_signature(node, sym_name);
+	String doc_comment = cursor::docs(node) ?? "";
+
+	DString md_buf;
+	md_buf.tinit();
+	md_buf.appendf("```c3\n%s\n```", sig);
+
+	if (doc_comment.len > 0)
 	{
-		case FN_DECL:
+		String clean_doc = doc_comment.trim().treplace("\"", "");
+		if (clean_doc.len > 0)
 		{
-			item.documentation.kind = MARKDOWN;
-			Cursor cursor = { entry.node };
-			String signature = cursor.signature_text(section.source_file) ?? "fn";
-			FnDecl* decl = entry.node.as(FnDecl);
-			if (try val = decl.contract.get())
-			{
-				item.documentation.value = analysis::format_contract_markdown(section, val.as(ContractDecl), signature);
-			}
-			else
-			{
-				item.documentation.value = signature;
-			}
+			md_buf.appendf("\n\n%s", clean_doc);
 		}
-		default:
 	}
+
+	item.documentation = {
+		.kind = MARKDOWN,
+		.value = md_buf.str_view()
+	};
 }
 
 fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 {
-	log::debug("resolve");
-	Context ctx = (Context){
+	log::debug("completion resolve at line %d, char %d", pos.line, pos.character);
+
+	List{CompletionItem} items;
+	items.init(tmem);
+
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
+	if (!sf) return items.array_view();
+
+	Context ctx = {
 		.uri = uri,
 		.position = pos,
 		.ws = &project.workspace,
+		.sf = sf,
 		.allocator = tmem,
+		.scope = EXECUTION,
+		.offset = analysis::compute_byte_offset(sf.content, pos.line, pos.character),
 	};
 
-	Location loc = { 
-		.line = (sz)ctx.position.line,
-		.column = (sz)ctx.position.character
-	};
+	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);
 
-	log::info("resolve - editor location: %s:%s", loc.line + 1, loc.column + 1);
+	detect_access_context(&ctx, sf);
 
-	List{CompletionItem} items; items.init(tmem);
-	List{ModuleSection*} file_sections = ctx.ws.find_section_by_path(uri.path);
-	if (file_sections.len() == 0)
+	if (ctx.access != NONE)
 	{
-		return items.array_view(); // No tracked sections for this file yet
+		provide_member_access(&ctx, &items);
 	}
-
-	SourceFile* sf = file_sections.get(0).source_file;
-	sz offset = sf.line_map.get_offset(sf.source, loc);
-	ctx.offset = offset;
-	ctx.prefix = analysis::extract_prefix(sf.source, (sz)offset).trim();
-
-	if (offset > 0 && sf.source[offset - 1] == ':')
-    {
-        if (offset < 2 || sf.source[offset - 2] != ':')
-        {
-            log::debug("Aborting completion: Triggered by a single ':' context.");
-            return items.array_view(); 
-        }
-    }
-
-	Location res_loc = sf.line_map.resolve(offset);
-	
-	log::info("resolve - parser location: %s:%s", res_loc.line + 1, res_loc.column + 1);
-
-	ctx.access = NONE;
-	ctx.base_identifier = "";
-
-	Cursor current_cursor = ctx.ws.find_top_level_statement_at_location(uri.path, loc, &ctx.section);
-	ctx.top_level_node = current_cursor.node;
-	if (!ctx.section)
-	{
-		ctx.section = file_sections.last()!;
-	}
-
-	ctx.leaf_node = cursor::find_at(ctx.section, (int)ctx.offset).node;
-	
-	context_populate_tokens(&ctx);
-	detect_access_context(&ctx);
-	ctx.scope = analysis::find_scope(&ctx, (int)offset);
-
-	log::info("access: %s", ctx.access.description);
-	log::info("Scope: %s", ctx.scope.description);
-	log::info("base_ident: %s", ctx.base_identifier);
-	log::info("prefix: %s", ctx.prefix);
- 
-	if (provide_member_access(&ctx, &items)) 
-	{
-		return items.array_view();
-	}
-	
-	if (ctx.scope == IMPORT)
-	{
-		provide_imports(&ctx, &items);
-		return items.array_view();
-	}
-	
-	if (ctx.scope == EXECUTION || ctx.scope == CONTAINER)
+	else
 	{
 		provide_locals(&ctx, &items);
+		provide_global(&ctx, &items);
+		provide_module_paths(&ctx, &items);
+		provide_keywords(&ctx, &items);
 	}
-
-	provide_global(&ctx, &items);
-	provide_module_paths(&ctx, &items);
-	provide_keywords(&ctx, &items);
 
 	return items.array_view();
 }
-
-fn void provide_imports(Context* ctx, List{CompletionItem}* items)
-{
-	HashMap{String, Module*} modules = ctx.ws.modules;
-	
-	modules.@each(; name, mod)
-	{
-		do SCOPE:
-		{
-			if (ctx.prefix.len > 0 && !name.starts_with(ctx.prefix))
-			{
-				break SCOPE;
-			}
-			
-			items.push({
-				.label = name,
-				.kind = MODULE,
-				.detail = "Module",
-				.sort_text = string::tformat("0001_%s", name),
-				.documentation = { .value = string::tformat("Import the `%s` module into this file context.", name) }
-			});
-		};
-	};
-
-	ctx.prefix = "\0_CONTEXT_LOCK_";
-}
-
-
-

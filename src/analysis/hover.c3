@@ -1,139 +1,356 @@
+// src/analysis/hover.c3
 module lsp::analysis::hover;
 
-import analyzer::workspace;
 import analyzer::core;
 import analyzer::cursor;
+import analyzer::sema::query;
+import lsp::analysis::macro_expand;
 
 import std::collections::list;
 import std::collections::map;
+import std::io;
 
 import lsp::core;
-
+import lsp;
 import uri;
-import analyzer::core::lexer;
+import lsp::analysis;
+
+struct CallFinderContext
+{
+	Range target_range;
+	CallExpr* found_call;
+}
+
+fn ChildVisitResult find_call_callback(Node* c, Node* p, void* user_data)
+{
+	if (!c || c.kind == ERROR) return CONTINUE;
+	CallFinderContext* ctx = (CallFinderContext*)user_data;
+	if (c.kind == CALL_EXPR && c.range.contains_range(ctx.target_range))
+	{
+		ctx.found_call = c.as(CallExpr);
+		return RECURSE;
+	}
+	return RECURSE;
+}
+
+struct AccessFinderContext
+{
+	Range target_range;
+	AccessExpr* found_access;
+}
+
+fn ChildVisitResult find_enclosing_access_callback(Node* c, Node* p, void* user_data)
+{
+	if (!c || c.kind == ERROR) return CONTINUE;
+	AccessFinderContext* ctx = (AccessFinderContext*)user_data;
+	if (c.kind == ACCESS_EXPR && c.range.contains_range(ctx.target_range))
+	{
+		ctx.found_access = c.as(AccessExpr);
+		return RECURSE;
+	}
+	return RECURSE;
+}
+
+fn String format_param_signature(Node* param)
+{
+	if (!param || param.kind != VAR_DECL) return "";
+	VarDecl* pdecl = param.as(VarDecl);
+
+	DString buf;
+	buf.tinit();
+
+	if (pdecl.type)
+	{
+		String ptype = cursor::spelling(pdecl.type, tmem);
+		if (ptype.len > 0)
+		{
+			buf.append(ptype);
+			buf.append(" ");
+		}
+	}
+
+	String pname = pdecl.name ? pdecl.name.text : (pdecl.var_flags.is_variadic ? "..." : "");
+	buf.append(pname);
+
+	if (pdecl.init_expr)
+	{
+		String init_text = cursor::spelling(pdecl.init_expr, tmem);
+		if (init_text.len == 0 && pdecl.init_expr.kind == LITERAL_EXPR)
+		{
+			LiteralExpr* lit = pdecl.init_expr.as(LiteralExpr);
+			switch (lit.literal_kind)
+			{
+				case INT_LITERAL:
+					init_text = string::tformat("%d", lit.integer);
+				case REAL_LITERAL:
+					if (lit.real == (double)(long)lit.real)
+					{
+						init_text = string::tformat("%.1f", lit.real);
+					}
+					else
+					{
+						init_text = string::tformat("%g", lit.real);
+					}
+				case STRING_LITERAL:
+					init_text = string::tformat("\"%s\"", lit.string);
+				case BOOL_LITERAL:
+					init_text = lit.boolean ? "true" : "false";
+				case NULL_LITERAL:
+					init_text = "null";
+				default:
+					break;
+			}
+		}
+		if (init_text.len > 0)
+		{
+			buf.appendf(" = %s", init_text);
+		}
+	}
+
+	return buf.str_view();
+}
+
+fn String format_node_signature(Node* node, String name)
+{
+	if (!node) return name;
+	DString buf;
+	buf.tinit();
+
+	switch (node.kind)
+	{
+		case PATH_EXPR:
+		{
+			PathExpr* pe = node.as(PathExpr);
+			String mod_name = pe.path ? pe.path.text.strip_suffix("::") : name;
+			buf.appendf("module %s;", mod_name);
+		}
+		case MODULE_DECL:
+		{
+			ModuleDecl* mod_decl = node.as(ModuleDecl);
+			String mod_name = mod_decl.path ? mod_decl.path.as(PathExpr).path.text : name;
+			buf.appendf("module %s;", mod_name);
+		}
+		case FN_DECL:
+		{
+			FnDecl* fn_decl = node.as(FnDecl);
+			String ret = cursor::spelling(fn_decl.ret_type, tmem) ?: "void";
+			if (fn_decl.associated_type)
+			{
+				String assoc = cursor::spelling(fn_decl.associated_type, tmem);
+				buf.appendf("fn %s %s.%s(", ret, assoc, name);
+			}
+			else
+			{
+				buf.appendf("fn %s %s(", ret, name);
+			}
+			foreach (i, param : fn_decl.params)
+			{
+				if (i > 0) buf.append(", ");
+				buf.append(format_param_signature(param));
+			}
+			buf.append(")");
+		}
+		case MACRO_DECL:
+		{
+			MacroDecl* mac = node.as(MacroDecl);
+			String ret = "";
+			if (try ret_node = mac.ret_type.get())
+			{
+				ret = cursor::spelling(ret_node, tmem);
+			}
+
+			if (try assoc = mac.associated_type.get())
+			{
+				String assoc_name = cursor::spelling(assoc, tmem);
+				if (ret.len > 0 && ret != "void")
+				{
+					buf.appendf("macro %s %s.%s(", ret, assoc_name, name);
+				}
+				else
+				{
+					buf.appendf("macro %s.%s(", assoc_name, name);
+				}
+			}
+			else
+			{
+				if (ret.len > 0 && ret != "void")
+				{
+					buf.appendf("macro %s %s(", ret, name);
+				}
+				else
+				{
+					buf.appendf("macro %s(", name);
+				}
+			}
+			foreach (i, param : mac.params)
+			{
+				if (i > 0) buf.append(", ");
+				buf.append(format_param_signature(param));
+			}
+			if (mac.body_params && mac.body_params.kind == BODY_PARAM_DECL)
+			{
+				BodyParamDecl* bpd = mac.body_params.as(BodyParamDecl);
+				buf.append("; @body(");
+				foreach (i, bp : bpd.params)
+				{
+					if (i > 0) buf.append(", ");
+					buf.append(format_param_signature(bp));
+				}
+				buf.append(")");
+			}
+			buf.append(")");
+		}
+		case STRUCT_DECL:
+		{
+			StructDecl* st = node.as(StructDecl);
+			if (st.is_union)
+			{
+				buf.appendf("union %s", name);
+			}
+			else if (st.is_bitstruct)
+			{
+				buf.appendf("bitstruct %s", name);
+			}
+			else
+			{
+				buf.appendf("struct %s", name);
+			}
+		}
+		case ENUM_DECL:
+			buf.appendf("enum %s", name);
+		case TYPEDEF_DECL:
+		{
+			TypedefDecl* td = node.as(TypedefDecl);
+			String base = cursor::spelling(td.base_type, tmem);
+			buf.appendf("typedef %s = %s", name, base);
+		}
+		case ALIAS_DECL:
+		{
+			AliasDecl* ad = node.as(AliasDecl);
+			String target = cursor::spelling(ad.target, tmem);
+			buf.appendf("alias %s = %s", name, target);
+		}
+		case VAR_DECL:
+		{
+			VarDecl* vd = node.as(VarDecl);
+			String vtype = cursor::spelling(vd.type, tmem) ?: "var";
+			if (vd.var_flags.is_const)
+			{
+				buf.appendf("const %s %s", vtype, name);
+			}
+			else
+			{
+				buf.appendf("%s %s", vtype, name);
+			}
+		}
+		case TYPE_EXPR:
+		{
+			buf.appendf("type %s", name);
+		}
+		case TRY_EXPR:
+		{
+			TryExpr* te = node.as(TryExpr);
+			String vtype = cursor::spelling(te.type, tmem) ?: "var";
+			buf.appendf("try %s %s", vtype, name);
+		}
+		case CATCH_EXPR:
+		{
+			CatchExpr* ce = node.as(CatchExpr);
+			String vtype = cursor::spelling(ce.type, tmem) ?: "catch";
+			buf.appendf("catch %s %s", vtype, name);
+		}
+		case FAULT_DECL:
+		{
+			buf.appendf("fault %s", name);
+		}
+		case FAULTDEF_DECL:
+		{
+			buf.appendf("faultdef %s", name);
+		}
+		default:
+			buf.append(name);
+	}
+
+	return buf.str_view();
+}
 
 fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 {
-	log::info("hover");
-	Location loc = { 
-		.line = (sz)pos.line,
-		.column = (sz)pos.character
+	Location loc = {
+		.line = (int)pos.line,
+		.column = (int)pos.character
 	};
-	
-	log::info("resolve - editor location: %s:%s", loc.line + 1, loc.column + 1);
-	
-	List{ModuleSection*} file_sections = project.workspace.find_section_by_path(uri.path);
-	if (file_sections.len() == 0)
+
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
+	if (!sf || !project.workspace.ctx) return "";
+
+	Range target_range = { .start = loc, .end = loc };
+	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
+
+	AccessFinderContext acc_finder = { .target_range = target_range, .found_access = null };
+	CallFinderContext call_finder = { .target_range = target_range, .found_call = null };
+	foreach (stmt : sf.ast.statements)
 	{
-		return "";
+		if (!stmt || stmt.kind == ERROR) continue;
+		cursor::visit(stmt, null, { .on_enter = &find_enclosing_access_callback }, &acc_finder);
+		cursor::visit(stmt, null, { .on_enter = &find_call_callback }, &call_finder);
 	}
-	
-	SourceFile* sf = file_sections.get(0).source_file;
-	sz offset = sf.line_map.get_offset(sf.source, loc);
 
-	Lexer lexer = { .buffer = sf.source, .index = 0 };
-	Token? target_token = lexer.find_token_at((int)offset);
-	if (catch target_token) return "";
-
-	switch
+	Node* ct_node = acc_finder.found_access ? (Node*)acc_finder.found_access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
+	if (ct_node)
 	{
-		case target_token.kind.is_keyword():
+		String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
+		if (ct_eval.len > 0)
 		{
-			return get_keyword_docs(target_token.kind);
+			DString ct_buf;
+			ct_buf.tinit();
+			ct_buf.appendf("```c3\n// Compile-Time Evaluation:\n%s\n```", ct_eval);
+			return ct_buf.str_view();
 		}
-		case target_token.kind.is_base_type():
+	}
+
+	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
+	if (!decl_node) return "";
+
+	String symbol_name = analysis::get_node_symbol_name(decl_node);
+	if (symbol_name.len == 0 && decl_node.kind != MODULE_DECL && decl_node.kind != PATH_EXPR) return "";
+
+	String signature = format_node_signature(decl_node, symbol_name);
+	String doc_comment = cursor::docs(decl_node) ?? "";
+
+	DString md_buf;
+	md_buf.tinit();
+	md_buf.appendf("```c3\n%s\n```", signature);
+
+	if (decl_node.kind == MACRO_DECL)
+	{
+		CallFinderContext call_ctx = { .target_range = target_range, .found_call = null };
+		foreach (stmt : sf.ast.statements)
 		{
-			return get_base_type_docs(target_token.kind);
+			if (!stmt || stmt.kind == ERROR) continue;
+			cursor::visit(stmt, null, { .on_enter = &find_call_callback }, &call_ctx);
+			if (call_ctx.found_call) break;
+		}
+
+		if (call_ctx.found_call)
+		{
+			String expansion = macro_expand::expand_macro(project.workspace.ctx, sf, call_ctx.found_call, decl_node.as(MacroDecl));
+			String trimmed_expansion = expansion.trim();
+			if (trimmed_expansion.len > 0 && trimmed_expansion != "{}" && trimmed_expansion != "{\n}")
+			{
+				md_buf.appendf("\n\n**Macro Expansion:**\n```c3\n%s\n```", expansion);
+			}
 		}
 	}
 
-	Cursor cursor = cursor::find_at(file_sections.get(0), (int)offset);
-	if (!cursor.is_valid()) return "";
-
-	return cursor.spelling(tmem);
-}
-
-fn String get_keyword_docs(TokenKind kind)
-{
-	switch (kind)
+	if (doc_comment.len > 0)
 	{
-		case ALIAS:      return "alias";
-		case ASSERT:     return "assert";
-		case ASM:        return "asm block";
-		case ATTRDEF:    return "attrdef";
-		case BITSTRUCT:  return "bitstruct";
-		case BREAK:      return "break";
-		case CASE:       return "case";
-		case CATCH:      return "catch";
-		case CONSTDEF:   return "constdef";
-		case CONST:      return "const";
-		case CONTINUE:   return "continue";
-		case DEFAULT:    return "default";
-		case DEFER:      return "defer";
-		case DO:         return "do";
-		case ELSE:       return "else";
-		case ENUM:       return "enum";
-		case EXTERN:     return "extern";
-		case FALSE:      return "false";
-		case FAULTDEF:   return "faultdef";
-		case FOR:        return "for";
-		case FOREACH:    return "foreach";
-		case FOREACH_R:  return "foreach_r";
-		case FN:         return "fn";
-		case TLOCAL:     return "tlocal";
-		case IF:         return "if";
-		case INLINE:     return "inline";
-		case IMPORT:     return "import";
-		case LENGTHOF:   return "lengthof";
-		case MACRO:      return "macro";
-		case MODULE:     return "module";
-		case NEXTCASE:   return "nextcase";
-		case NULL:       return "null";
-		case INTERFACE:  return "interface";
-		case RETURN:     return "return";
-		case STATIC:     return "static";
-		case STRUCT:     return "struct";
-		case SWITCH:     return "switch";
-		case TRUE:       return "true";
-		case TRY:        return "try";
-		case TYPEDEF:    return "typedef";
-		case UNION:      return "union";
-		case VAR:        return "var";
-		case WHILE:      return "while";
-		default: unreachable();
+		String clean_doc = doc_comment.trim().treplace("\"", "");
+		if (clean_doc.len > 0)
+		{
+			md_buf.appendf("\n\n%s", clean_doc);
+		}
 	}
-}
 
-fn String get_base_type_docs(TokenKind kind)
-{
-	switch (kind)
-	{
-		case VOID_TYPE:           return "void";
-		case BOOL_TYPE:           return "bool";
-		case CHAR_TYPE:           return "char";
-		case DOUBLE_TYPE:         return "double";
-		case FLOAT_TYPE:          return "float";
-		case FLOAT16_TYPE:        return "float16";
-		case BFLOAT_TYPE:         return "bfloat";
-		case INT128_TYPE:         return "int128";
-		case ICHAR_TYPE:          return "ichar";
-		case INT_TYPE:            return "int";
-		case IPTR_TYPE:           return "iptr";
-		case SZ_TYPE:             return "sz";
-		case LONG_TYPE:           return "long";
-		case SHORT_TYPE:          return "short";
-		case UINT128_TYPE:        return "uint128";
-		case UINT_TYPE:           return "uint";
-		case ULONG_TYPE:          return "ulong";
-		case UPTR_TYPE:           return "uptr";
-		case USHORT_TYPE:         return "ushort";
-		case USZ_TYPE:            return "usz";
-		case FLOAT128_TYPE:       return "float128"; 
-		case ANY_TYPE:            return "any";
-		case FAULT_TYPE:          return "fault";
-		case TYPEID_TYPE:         return "typeid";
-		case UNTYPEDLIST_TYPE:    return "untypedlist";
-		default: unreachable();
-	}
+	return md_buf.str_view();
 }
-

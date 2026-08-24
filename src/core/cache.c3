@@ -1,23 +1,18 @@
+// src/core/cache.c3
 module lsp::core::cache;
 
-import derive, dessert;
-
+import std::encoding::json;
+import std::collections::object;
 import std::io;
 import std::time;
 
 const String CACHE_DIR_NAME = ".lsp-cache";
 
-//const String DEFAULT_PATH = path::
-
-$expand(derive(MetaData::name, dessert));
 struct MetaData
 {
 	long modified_time;
 }
 
-<*
- 
-*>
 fn Path? get_or_create_cache_dir(String workspace_root)
 {
 	Path base = path::tnew(workspace_root)!;
@@ -54,13 +49,16 @@ fn bool? is_library_outdated(String library_name, String root_cache_path, String
 	String? content = (String)file::load(tmem, meta_file);
 	if (catch content) return true;
 
-	MetaData? meta = des::deserialize{MetaData}(&&json::tdeserializer(content));
-	if (catch meta) return true;
+	Object*? parsed = json::tparse(content);
+	if (catch parsed) return true;
+	if (!parsed) return true;
+
+	long mod_val = parsed.get_int("modified_time") ?? 0;
 
 	Path src_path = path::tnew(source_archive)!;
 	Time modified_time = file::last_modified(src_path)!;
 
-	return modified_time > (Time)meta.modified_time;
+	return (long)modified_time > mod_val;
 }
 
 <*
@@ -76,8 +74,7 @@ fn void? update_library_meta(String library_name, String root_cache_path, String
 	Time src_time = file::last_modified(src_path)!;
 
 	MetaData meta = { .modified_time = (long)src_time };
-
-	String json_out = ser::serialize(&&json::string_serializer(), meta)!;
+	String json_out = json::marshal(tmem, meta, NONE);
 
 	if (catch file::save(meta_file, json_out))
 	{

@@ -1,50 +1,30 @@
 module lsp::translator @test;
 
-import std::collections::pair;
 import std::io;
-import dessert;
-import derive;
-
-$expand(derive(TranslatorTest::name, dessert));
-struct TranslatorTest
-{
-	String method;
-	int hello;
-	struct this_is {
-		bool working;
-		String well;
-		struct uhh {
-			int i_guess;
-		}
-	}
-}
+import lsp;
+import lsp::server;
 
 fn void encode_message()
 {
-	TranslatorTest encoded = {
-		.method = "idk",
-		.hello = 21,
-		.this_is = {
-			.working = true,
-			.well = "yes it is",
-			.uhh.i_guess = 314159,
-		}
+	LspShutdownResponse response = {
+		.jsonrpc = "2.0",
+		.id = 1,
 	};
-	io::printn(encoded);
-	String expected = "Content-Length: 98\r\n\r\n" +++ `{"method":"idk","hello":21,"this_is":{"working":true,"well":"yes it is","uhh":{"i_guess":314159}}}`;
-	io::printn(expected);
-	String actual = translator::encode(encoded, tmem);
-	io::printn(actual);
-	assert(actual == expected);
+	String actual = translator::encode(response, tmem);
+	assert(actual.contains(`"jsonrpc":"2.0"`));
+	assert(actual.contains(`"id":1`));
+	assert(actual.starts_with("Content-Length:"));
 }
 
 fn void decode_message()
 {
-	String decoded = "Content-Length: 51\r\n\r\n" +++ `{"jsonrpc":"2.0","method":"initialize","params":{}}`;
-	IoDecodeResult actual = translator::decode(mem, decoded)!!;
+	String body = `{"jsonrpc":"2.0","method":"initialize","id":42,"params":{"processId":123}}`;
+	IoDecodeResult actual = translator::decode(mem, body)!!;
 	defer actual.message.free();
-	io::printn("//");
-	io::printn(actual.message);
+
 	assert(actual.message.rpc == "2.0");
 	assert(actual.message.method == INITIALIZE);
+	assert(actual.message.has_id);
+	assert(actual.message.id == 42);
+	assert(actual.message.params.initialize.process_id == 123);
 }

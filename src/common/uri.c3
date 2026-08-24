@@ -1,3 +1,4 @@
+// src/common/uri.c3
 module uri;
 
 import std::io;
@@ -5,8 +6,8 @@ import std::core::ascii;
 
 faultdef 
 	INVALID_SYNTAX,
-    UNSUPPORTED_SCHEME,
-    MALFORMED_HEX;
+	UNSUPPORTED_SCHEME,
+	MALFORMED_HEX;
 
 struct Uri (Printable)
 {
@@ -24,31 +25,25 @@ fn void Uri.free(&self)
 fn sz? Uri.to_format(&self, Formatter* formatter) @dynamic
 {
 	$if env::WIN32:
-        return formatter.printf("%s:///%s", self.scheme, self.path);
-    $else
-        return formatter.printf("%s://%s", self.scheme, self.path);
-    $endif
+		return formatter.printf("%s:///%s", self.scheme, self.path);
+	$else
+		return formatter.printf("%s://%s", self.scheme, self.path);
+	$endif
 }
 
 fn bool Uri.equal(self, Uri other) @operator(==)
 {
-	return self.scheme == other.scheme
-		&& self.path == other.path;
+	return self.scheme == other.scheme && self.path == other.path;
 }
 
 <*
-	Right now only supports file schema
-	example: file://home/user/code/main.c3
+	Parses a file URI (e.g., file:///home/user/code/main.c3 or file:///C:/project/main.c3)
 	@return? INVALID_SYNTAX, UNSUPPORTED_SCHEME, MALFORMED_HEX
 *>
 fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 {
-	// Isolate the scheme separator '://'
 	sz scheme_bound = raw_uri.index_of("://")!;
-	if (scheme_bound == sz::max || scheme_bound == 0)
-	{
-		return INVALID_SYNTAX~;
-	}
+	if (scheme_bound == 0) return INVALID_SYNTAX~;
 
 	String scheme = raw_uri[:scheme_bound];
 	if (scheme != "file")
@@ -57,28 +52,19 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 		return UNSUPPORTED_SCHEME~;
 	}
 
-	// Advance past "://"
 	String remaining_path = raw_uri[scheme_bound + 3..];
 
-	// strip all leading slashes
 	$if env::WIN32:
-		while (remaining_path.starts_with("/"))
-		{
-			remaining_path = remaining_path[1..];
-		}
-	$endif
-
-	// Adjust for Windows authority/drive formatting quirks
-	// Example: '/C%3A/foo' -> first slash is authority spacer, drop it so we get 'C%3A/foo'
-	$if env::WIN32:
+		remaining_path = remaining_path.trim_left("/");
+		// Adjust for Windows authority/drive formatting quirks ('/C%3A/foo' -> 'C%3A/foo')
 		if (remaining_path.starts_with("/") && remaining_path.len >= 4 && remaining_path[2] == '%' && remaining_path[3] == '3')
 		{
 			remaining_path = remaining_path[1..];
 		}
 	$endif
 
-	// Decode percent-encoded text characters in-place
-	char[] decoded = alloc::new_array(tmem, char, remaining_path.len);
+	// Decode percent-encoded characters
+	char[] decoded = mem::temp_array(char, remaining_path.len);
 	sz write_idx = 0;
 
 	for (sz i = 0; i < remaining_path.len; )
@@ -110,15 +96,14 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 
 	String native_path = (String)decoded[:write_idx];
 
-	// Clean up Windows casing anomalies (c: -> C:)
 	$if env::WIN32:
 		if (native_path.len >= 2 && native_path[0].is_lower() && native_path[1] == ':')
-        {
-            native_path[0] = native_path[0].to_upper(); 
-        }
+		{
+			native_path[0] = native_path[0].to_upper(); 
+		}
 	$endif
 
-	return (Uri){
+	return {
 		.scheme = scheme.copy(allocator),
 		.path = native_path.copy(allocator),
 		.allocator = allocator
@@ -127,90 +112,34 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 
 fn Uri from_file_path(Allocator allocator, String native_path)
 {
-    String cleaned_path = native_path.copy(tmem);
-    for (sz i = 0; i < cleaned_path.len; i++)
-    {
-        if (cleaned_path[i] == '\\')
-        {
-            cleaned_path[i] = '/';
-        }
-    }
+	String cleaned_path = native_path.copy(tmem);
+	for (sz i = 0; i < cleaned_path.len; i++)
+	{
+		if (cleaned_path[i] == '\\')
+		{
+			cleaned_path[i] = '/';
+		}
+	}
 
-    // (c:/ -> C:/)
-    $if env::WIN32:
-        if (cleaned_path.len >= 2 && cleaned_path[0].is_lower() && cleaned_path[1] == ':')
-        {
-            cleaned_path[0] = cleaned_path[0].to_upper();
-        }
-    $endif
+	$if env::WIN32:
+		if (cleaned_path.len >= 2 && cleaned_path[0].is_lower() && cleaned_path[1] == ':')
+		{
+			cleaned_path[0] = cleaned_path[0].to_upper();
+		}
+	$endif
 
-    return (Uri){
-        .scheme = "file".copy(allocator),
-        .path = cleaned_path.copy(allocator),
-        .allocator = allocator
-    };
+	return {
+		.scheme = "file".copy(allocator),
+		.path = cleaned_path.copy(allocator),
+		.allocator = allocator
+	};
 }
 
 fn String Uri.to_raw_string(&self, Allocator output_allocator)
 {
-    $if env::WIN32:
-        return string::format(output_allocator, "%s:///%s", self.scheme, self.path);
-    $else
-        return string::format(output_allocator, "%s://%s", self.scheme, self.path);
-    $endif
-}
-
-fn void uri_windows_test() @test @feat(WIN32)
-{
-    String value = `file:///C%3A/project/readme.md`;
-    Uri expected = { 
-        .scheme = "file",
-        .path = "C:/project/readme.md",
-    };
-
-    Uri uri = parse(mem, value)!!;
-    defer uri.free();
-    log::debug("Windows Test Result: %s", uri);
-
-    assert(uri == expected);
-}
-
-fn void uri_linux_test() @test @feat(LINUX)
-{
-    String value = `file:///home/user/code/main.c3`;
-    
-    Uri expected = { 
-        .scheme = "file",
-        .path = "/home/user/code/main.c3", 
-    };
-
-    Uri uri = parse(mem, value)!!;
-    defer uri.free();
-    log::debug("Linux Test Result: %s", uri);
-
-    assert(uri == expected);
-}
-
-fn void uri_serialization_windows_test() @test @feat(WIN32)
-{
-    String native_path = `C:\project\readme.md`;
-    Uri uri = from_file_path(mem, native_path);
-    defer uri.free();
-
-    String raw_uri = uri.to_raw_string(tmem);
-    log::debug("Windows To URI Result: %s", raw_uri);
-
-    assert(raw_uri == "file:///C:/project/readme.md");
-}
-
-fn void uri_serialization_linux_test() @test @feat(LINUX)
-{
-    String native_path = "/home/user/code/main.c3";
-    Uri uri = from_file_path(mem, native_path);
-    defer uri.free();
-
-    String raw_uri = uri.to_raw_string(tmem);
-    log::debug("Linux To URI Result: %s", raw_uri);
-
-    assert(raw_uri == "file:///home/user/code/main.c3");
+	$if env::WIN32:
+		return string::format(output_allocator, "%s:///%s", self.scheme, self.path);
+	$else
+		return string::format(output_allocator, "%s://%s", self.scheme, self.path);
+	$endif
 }

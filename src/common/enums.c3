@@ -1,10 +1,8 @@
+// src/common/enums.c3
 module lsp;
 
 import std::collections::object;
 import std::collections::maybe;
-
-import dessert;
-import derive;
 
 enum LogLevel : char (String name)
 {
@@ -15,29 +13,25 @@ enum LogLevel : char (String name)
 	ERROR { "error" }
 }
 
-$expand(derive(MarkupKind::name, dessert));
 constdef MarkupKind : inline String
 {
 	PLAIN_TEXT = "plaintext",
 	MARKDOWN = "markdown"
 }
 
-$expand(derive(TraceKind::name, dessert));
-enum TraceKind : char (String name) @DEnum({ .as = FIELD, .field = "name" })
+enum TraceKind : char (String name)
 {
 	OFF      { "off" },
 	MESSAGES { "messages" },
 	VERBOSE  { "verbose" }
 }
 
-$expand(derive(InsertTextFormat::name, dessert));
 constdef InsertTextFormat : int
 {
 	PLAIN_TEXT = 1,
 	SNIPPET = 2,
 }
 
-$expand(derive(DiagnosticSeverity::name, dessert));
 constdef DiagnosticSeverity : int
 {
 	ERROR = 1,
@@ -46,56 +40,26 @@ constdef DiagnosticSeverity : int
 	HINT = 4,
 }
 
-$expand(derive(DiagnosticTag::name, dessert));
 constdef DiagnosticTag : int 
 {
 	UNNECESSARY = 1,
 	DEPRECATED = 2,
 }
 
-$expand(derive(TextDocumentSyncKind::name, dessert));
 constdef TextDocumentSyncKind : int
 {
-	<*
-		Documents should not be synced at all.
-	*>
 	NONE = 0,
-	<*
-		Documents are synced by always sending the full content
-		of the document.
-	*>
 	FULL = 1,
-	<*
-		Documents are synced by sending the full content on open.
-		After that only incremental updates to the document are
-		sent.
-	*>
 	INCREMENTAL = 2,
 }
 
-$expand(derive(CompletionTriggerKind::name, dessert));
 constdef CompletionTriggerKind : int
 {
-	<*
-	 	Completion was triggered by typing an identifier (24x7 code
-	  	complete), manual invocation (e.g Ctrl+Space) or via API.
-	*>
 	INVOKED = 1,
-
-	<*
-	 	Completion was triggered by a trigger character specified by
-		the `triggerCharacters` properties of the
-		`CompletionRegistrationOptions`.
-	*>
 	TRIGGER_CHARACTER = 2,
-
-	<*
-		Completion was re-triggered as the current completion list is incomplete.
-	*>
 	TRIGGER_FOR_INCOMPLETE_COMPLETIONS = 3,
 }
 
-$expand(derive(MessageType::name, dessert));
 constdef MessageType : int
 {
     ERROR = 1,
@@ -104,10 +68,6 @@ constdef MessageType : int
     LOG = 4
 }
 
-<*
-    https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#completionItemKind
-*>
-$expand(derive(CompletionItemKind::name, dessert));
 constdef CompletionItemKind : int
 {
 	TEXT = 1,
@@ -137,7 +97,49 @@ constdef CompletionItemKind : int
 	TYPEPARAMETER = 25,
 }
 
-//TODO: fill out docs
+constdef SymbolKind : int
+{
+	FILE = 1,
+	MODULE = 2,
+	NAMESPACE = 3,
+	PACKAGE = 4,
+	CLASS = 5,
+	METHOD = 6,
+	PROPERTY = 7,
+	FIELD = 8,
+	CONSTRUCTOR = 9,
+	ENUM = 10,
+	INTERFACE = 11,
+	FUNCTION = 12,
+	VARIABLE = 13,
+	CONSTANT = 14,
+	STRING = 15,
+	NUMBER = 16,
+	BOOLEAN = 17,
+	ARRAY = 18,
+	OBJECT = 19,
+	KEY = 20,
+	NULL = 21,
+	ENUMMEMBER = 22,
+	STRUCT = 23,
+	EVENT = 24,
+	OPERATOR = 25,
+	TYPEPARAMETER = 26
+}
+
+constdef InlayHintKind : int
+{
+	TYPE = 1,
+	PARAMETER = 2,
+}
+
+constdef FoldingRangeKind : inline String
+{
+	COMMENT = "comment",
+	IMPORTS = "imports",
+	REGION = "region",
+}
+
 enum Keywords : int (String name, String docs)
 {
 	ALIAS     { "alias", "" },
@@ -159,6 +161,7 @@ enum Keywords : int (String name, String docs)
 	EXTERN    { "extern", "" },
 	FALSE     { "false", "" },
 	FAULTDEF  { "faultdef", "" },
+	FAULTSET  { "faultset", "" },
 	FOR       { "for", "" },
 	FOREACH   { "foreach", "" },
 	FOREACH_R { "foreach_r", "" },
@@ -200,6 +203,7 @@ fn bool Keywords.is_top_level(self)
 		case ENUM:
 		case EXTERN:
 		case FAULTDEF:
+		case FAULTSET:
 		case FN:
 		case TLOCAL:
 		case MACRO:

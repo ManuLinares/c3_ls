@@ -1,93 +1,100 @@
+// src/analysis/completion/global.c3
 module lsp::analysis::completion;
 
-import analyzer::workspace;
 import analyzer::core;
 import analyzer::cursor;
 import analyzer::sema;
 
 import std::collections::list;
 import std::collections::map;
+import std::collections::set;
 
 import lsp::core;
+import lsp;
 import uri;
 
 fn void provide_global(Context* ctx, List{CompletionItem}* items)
 {
-	if (ctx.access != NONE) return;
-	
-	bool types_only = false;
-	Module* current_mod = ctx.section.parent_module;
-	
-	if (ctx.scope == GLOBAL)
+	if (ctx.access != NONE || !ctx.ws || !ctx.ws.ctx) return;
+
+	HashSet{String} seen_symbols;
+	seen_symbols.tinit();
+
+	foreach (item : *items)
 	{
-		types_only = true;
+		seen_symbols.add(item.label);
 	}
 
-	ctx.ws.modules.@each(; mod_name, mod)
+	if (ctx.ws.ctx.registry)
 	{
-		mod.symbols.@each(; symbol_name, symbol_list)
+		Registry* reg = ctx.ws.ctx.registry;
+
+		reg.functions.@each(; qname, fn_info)
 		{
-			do SCOPE:
+			if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
 			{
-				if (symbol_list.is_empty()) break SCOPE;
-				
-				if (ctx.prefix.len > 0 && !symbol_name.contains(ctx.prefix)) 
+				FnDecl* fndecl = fn_info.node.as(FnDecl);
+				String fname = fndecl.name ? fndecl.name.text : "";
+				if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
 				{
-					break SCOPE;
-				}
-				
-				foreach (entry : symbol_list)
-				{
-					if (!should_include_node(entry.node, mod, current_mod, types_only))
+					if (seen_symbols.add(fname))
 					{
-						continue;
+						add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
 					}
-					
-					add_symbol_completion(ctx, items, symbol_name, entry.node, mod_name, ctx.prefix);
 				}
-			};
+			}
 		};
+
+		reg.types.@each(; qname, ty_info)
+		{
+			if (ty_info && ty_info.node)
+			{
+				String tname = cursor::spelling(ty_info.node, tmem);
+				if (tname.len > 0 && (ctx.prefix.len == 0 || tname.starts_with(ctx.prefix)))
+				{
+					if (seen_symbols.add(tname))
+					{
+						add_symbol_completion(ctx, items, tname, ty_info.node, ty_info.mod, ctx.prefix);
+					}
+				}
+			}
+		};
+
+		reg.macros.@each(; qname, mac_info)
+		{
+			if (mac_info && mac_info.node && mac_info.node.kind == MACRO_DECL)
+			{
+				MacroDecl* mac = mac_info.node.as(MacroDecl);
+				String mname = mac.name ? mac.name.text : "";
+				if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+				{
+					if (seen_symbols.add(mname))
+					{
+						add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+					}
+				}
+			}
+		};
+	}
+
+	ctx.ws.ctx.files.@each(; file_path, sf)
+	{
+		if (sf)
+		{
+			foreach (stmt : sf.ast.statements)
+			{
+				if (stmt)
+				{
+					String sname = cursor::spelling(stmt, tmem);
+					if (sname.len > 0 && (ctx.prefix.len == 0 || sname.starts_with(ctx.prefix)))
+					{
+						if (seen_symbols.add(sname))
+						{
+							add_symbol_completion(ctx, items, sname, stmt, "global", ctx.prefix);
+						}
+					}
+				}
+			}
+		}
 	};
-}
-
-fn bool should_include_node(Node* node, Module* mod, Module* current_mod, bool types_only) @local
-{
-	if (!node || !node.is_valid()) return false;
-	
-	if (mod.id != current_mod.id)
-	{
-		if (node.visibility != PUBLIC) return false;
-
-		switch (node.kind)
-		{
-			case VAR_DECL:
-				return false;
-			default:
-				break;
-		}
-	}
-	
-	switch (node.kind)
-	{
-		case MODULE_DECL:
-		case IMPORT_DECL:
-			return false;
-		default: 
-			break;
-	}
-	
-	if (types_only)
-	{
-		switch (node.kind)
-		{
-			case FN_DECL:
-			case MACRO_DECL:
-			case VAR_DECL:
-				return false;
-			default:
-				break;
-		}
-	}
-	
-	return true;
 }

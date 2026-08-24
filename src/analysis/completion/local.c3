@@ -1,6 +1,6 @@
+// src/analysis/completion/local.c3
 module lsp::analysis::completion;
 
-import analyzer::workspace;
 import analyzer::core;
 import analyzer::cursor;
 import analyzer::sema;
@@ -9,64 +9,70 @@ import std::collections::list;
 import std::collections::map;
 
 import lsp::core;
+import lsp;
 import uri;
 
 fn void provide_locals(Context* ctx, List{CompletionItem}* items)
 {
-	if (ctx.scope != EXECUTION) return;
-	if (ctx.access != NONE) return;
-	
-	ModuleSection* sec = ctx.section;
-	SemaScope* root = &sec.scope;
-	SemaScope* leaf = sema::find_deepest_scope(root, (int)ctx.offset);
-	List{SemaVar} symbols = sema::collect_visible_symbols(tmem, leaf, (int)ctx.offset);
-	foreach (symbol : symbols)
-    {
-		if (!symbol.def) continue;
-		
-		VarDecl* decl = symbol.def.as(VarDecl);
-        Cursor var_cursor = { .node = symbol.def };
-        String name = var_cursor.spelling(tmem) ?? "";
+	if (ctx.access != NONE || !ctx.sf) return;
 
-        if (ctx.prefix.len > 0 && !name.contains(ctx.prefix)) continue;
-		
-		Cursor type_cursor = { decl.type };
-		String type_name;
-		if (decl.type)
+	Location loc = {
+		.line = (int)ctx.position.line,
+		.column = (int)ctx.position.character
+	};
+
+	Range target_range = { .start = loc, .end = loc };
+	Node* enclosing_node = cursor::find_at(ctx.sf.ast.statements.array_view(), target_range);
+	if (!enclosing_node) return;
+
+	Node* curr = enclosing_node;
+	while (curr)
+	{
+		if (curr.kind == FN_DECL)
 		{
-			type_name = type_cursor.raw_type_identifier() ?? "";
+			FnDecl* fn_decl = curr.as(FnDecl);
+			foreach (param : fn_decl.params)
+			{
+				if (!param || param.kind != VAR_DECL) continue;
+				VarDecl* pdecl = param.as(VarDecl);
+				String pname = pdecl.name ? pdecl.name.text : "";
+				if (pname.len > 0 && (ctx.prefix.len == 0 || pname.starts_with(ctx.prefix)))
+				{
+					String ptype = cursor::spelling(pdecl.type, tmem) ?: "param";
+					items.push({
+						.label = pname,
+						.kind = VARIABLE,
+						.detail = ptype,
+						.insertText = pname,
+						.filterText = pname,
+						.sortText = string::tformat("0001_%s", pname)
+					});
+				}
+			}
+			break;
 		}
-		
-        String details;
-		CompletionItemKind kind;
-		switch (true)
+		else if (curr.kind == MACRO_DECL)
 		{
-		case decl.flags.is_const:
-			kind = CONSTANT;
-			details = string::tformat("(constant) %s", type_name);
+			MacroDecl* mac_decl = curr.as(MacroDecl);
+			foreach (param : mac_decl.params)
+			{
+				if (!param || param.kind != VAR_DECL) continue;
+				VarDecl* pdecl = param.as(VarDecl);
+				String pname = pdecl.name ? pdecl.name.text : "";
+				if (pname.len > 0 && (ctx.prefix.len == 0 || pname.starts_with(ctx.prefix)))
+				{
+					items.push({
+						.label = pname,
+						.kind = VARIABLE,
+						.detail = "macro param",
+						.insertText = pname,
+						.filterText = pname,
+						.sortText = string::tformat("0001_%s", pname)
+					});
+				}
+			}
 			break;
-		case decl.var_kind == VAR_GLOBAL:
-			kind = VARIABLE;
-			details = string::tformat("(global) %s", type_name);
-			break;
-		case decl.var_kind == VAR_PARAM:
-			kind = VARIABLE;
-			details = string::tformat("(param) %s", type_name);
-			break;
-		case decl.var_kind == VAR_LOCAL:
-			kind = VARIABLE;
-			details = string::tformat("(local) %s", type_name);
-			break;
-		default:
-			kind = VARIABLE;
-			details = string::tformat("(local) %s", type_name);
 		}
-		
-        items.push({ 
-            .label = name, 
-            .kind = kind, 
-            .detail = details,
-            .sort_text = string::tformat("0001_%s", name)
-        });
-    }
+		break;
+	}
 }

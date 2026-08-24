@@ -1,37 +1,45 @@
+// src/core/logger.c3
 module lsp::core::logger;
 
-import lsp::msg_handler::log_message;
 import lsp::server;
 
 import std::io;
 import std::time;
 import std::collections::list;
 
-File file;
+File log_file;
+bool has_log_file = false;
 LogPriority priority_level;
 
 fn void init()
 {
 	priority_level = to_category(server::log_level);
 
-	if (!server::log_path) return;
-	if (catch err = @try(file, file::open(server::log_path, "w")))
+	if (server::log_path.len == 0) return;
+
+	if (try f = file::open(server::log_path, "w"))
 	{
-		log::error("Failed to open file: %s (%s)", err, server::log_path);
+		log_file = f;
+		has_log_file = true;
+		log::info("Logging to file: %s", server::log_path);
 	}
-	log::info("Logging to file: %s", server::log_path);
+	else
+	{
+		log::error("Failed to open log file: %s", server::log_path);
+	}
 }
 
 fn void flush()
 {
-	if (!file.file) return;
-	(void)file.flush();
+	if (!has_log_file) return;
+	(void)log_file.flush();
 }
 
 fn void close()
 {
-	if (!file.file) return;
-	file.close();
+	if (!has_log_file) return;
+	(void)log_file.close();
+	has_log_file = false;
 }
 
 struct LspLogger (Logger)
@@ -57,8 +65,8 @@ fn LogPriority to_category(LogLevel level) @local
 	switch (level)
 	{
 		case DEBUG: return DEBUG;
-		case INFO: return INFO;
-		case WARN: return WARN;
+		case INFO:  return INFO;
+		case WARN:  return WARN;
 		default:
 			return ERROR;
 	}
@@ -72,19 +80,20 @@ fn void LspLogger.log(&self, LogPriority priority, LogCategory category, LogTag 
 		str.init(mem, 256);
 		str.appendf(fmt, ...args);
 		TzDateTime time = datetime::now().to_local();
+
 		$if log::FULL_LOG:
-		if (logger::file.file)
+		if (has_log_file)
 		{
-			(void)io::fprintfn(&logger::file, "[%02d:%02d:%02d:%04d] %s:%d [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), file, line, priority, str);
-			(void)logger::file.flush(); // flush everytime to capture crashes
+			(void)io::fprintfn(&log_file, "[%02d:%02d:%02d:%04d] %s:%d [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), file, line, priority, str);
+			(void)log_file.flush();
 		}
 		if (priority < priority_level) return;
 		io::eprintfn("[%02d:%02d:%02d:%04d] %s:%d [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), file, line, priority, str);
 		$else
-		if (logger::file.file)
+		if (has_log_file)
 		{
-			(void)io::fprintfn(&logger::file, "[%02d:%02d:%02d:%04d] [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), priority, str);
-			(void)logger::file.flush(); // flush everytime to capture crashes
+			(void)io::fprintfn(&log_file, "[%02d:%02d:%02d:%04d] [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), priority, str);
+			(void)log_file.flush();
 		}
 		if (priority < priority_level) return;
 		io::eprintfn("[%02d:%02d:%02d:%04d] [%s] %s", time.hour, time.min, time.sec, (time.usec / 1000), priority, str);

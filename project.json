@@ -4,34 +4,15 @@
     "Zathy",
     "ecoral360"
   ],
-  "cpu": "generic",
-  "dependencies": [
-    "dessert",
-    "c3_analyzer"
-  ],
-  "dependency-search-paths": [
-    "lib"
-  ],
-  "langrev": "1",
-  "opt": "O0",
+  "sources": [ "src/**" ],
+  "test-sources": [ "test/**" ],
   "output": "build",
-  "sources": [
-    "src/**"
-  ],
+  "build-dir": "build",
   "targets": {
     "c3_ls": {
-      "features": [
-        "ANALYZER_LIB",
-        "SEMA"
-      ],
       "type": "executable"
     }
   },
-  "test-sources": [
-    "test/**"
-  ],
-  "version": "0.1.0",
-  "warnings": [
-    "no-unused"
-  ]
+  "cpu": "generic",
+  "opt": "O0"
 }
