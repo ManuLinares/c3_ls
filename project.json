@@ -5,7 +5,7 @@
     "ecoral360",
     "Manu"
   ],
-  "version": "1.2",
+  "version": "1.2.1",
   "sources": [ "src/**" ],
   "test-sources": [ "test/**" ],
   "output": "build",
