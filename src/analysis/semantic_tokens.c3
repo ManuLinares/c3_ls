@@ -163,7 +163,7 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 			case STATIC:
 			case EXTERN:
 			case TLOCAL:
-				t_type = 16;  // modifier
+				t_type = 15;  // keyword
 				break;
 
 			case IDENT:
