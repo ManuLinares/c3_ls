@@ -1,0 +1,140 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ManuLinares/setup-c3@main
+        with:
+          version: nightly
+
+      - name: Run Test Suite
+        run: c3c test
+
+  build-linux-windows:
+    name: Build (Linux & Windows)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ManuLinares/setup-c3@main
+        with:
+          version: nightly
+
+      # 1. Linux x86_64
+      - name: Build Linux x86_64
+        run: |
+          c3c build -O2
+          mkdir -p dist
+          tar -czvf dist/c3_ls-linux-x86_64.tar.gz -C build c3_ls
+
+      # 2. Linux aarch64 (ARM64)
+      - name: Install aarch64 toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build Linux aarch64
+        run: |
+          CRTBEGIN_DIR=$(dirname $(aarch64-linux-gnu-gcc -print-file-name=crtbegin.o))
+          c3c build --target linux-aarch64 -O2 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR"
+          tar -czvf dist/c3_ls-linux-aarch64.tar.gz -C build-linux-arm64 c3_ls
+
+      # 3. Windows x86_64 (Cross-compile with static CRT)
+      - name: Fetch Windows MSVC SDK
+        run: c3c fetch-sdk windows --accept-license
+
+      - name: Build Windows x86_64
+        run: |
+          c3c build --target windows-x64 -O2 --wincrt=static --build-dir build-win64 --output-dir build-win64
+          zip -j dist/c3_ls-windows-x86_64.zip build-win64/c3_ls.exe
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-windows-binaries
+          path: dist/*
+
+  build-macos:
+    name: Build (macOS)
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ManuLinares/setup-c3@main
+        with:
+          version: nightly
+
+      # 1. macOS aarch64 (Apple Silicon)
+      - name: Build macOS aarch64
+        run: |
+          c3c build -O2
+          mkdir -p dist
+          tar -czvf dist/c3_ls-macos-aarch64.tar.gz -C build c3_ls
+
+      # 2. macOS x86_64 (Intel)
+      - name: Build macOS x86_64
+        run: |
+          c3c build --target macos-x64 -O2 --build-dir build-mac-x64 --output-dir build-mac-x64
+          tar -czvf dist/c3_ls-macos-x86_64.tar.gz -C build-mac-x64 c3_ls
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-binaries
+          path: dist/*
+
+  # Push rolling pre-release on main commits (for c3.nvim auto-installers)
+  release-latest:
+    name: Update Latest Pre-Release
+    if: github.ref == 'refs/heads/main'
+    needs: [build-linux-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release_assets
+          merge-multiple: true
+
+      - name: Update 'latest' release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          name: Latest Build
+          prerelease: true
+          make_latest: false
+          files: release_assets/*
+
+  # Tagged release (v0.1.0, etc.)
+  release-tagged:
+    name: Publish Tagged Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release_assets
+          merge-multiple: true
+
+      - name: Create Tagged Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release_assets/*
+          generate_release_notes: true
