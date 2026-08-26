@@ -25,6 +25,7 @@ import std::thread;
 import std::time;
 import uri;
 import std::os::process;
+import std::collections::object;
 
 bool is_ready;
 bool is_std_path_alloc;
@@ -61,6 +62,7 @@ struct LspShutdownResponse
 {
 	String jsonrpc;
 	int id;
+	Object* result;
 }
 
 struct LspHoverResponse
@@ -625,6 +627,7 @@ fn void dispatch(LspMessage* message)
 				LspShutdownResponse response = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
+					.result = null,
 				};
 				io_handler::write(translator::encode(response, tmem));
 			}
