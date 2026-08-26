@@ -28,10 +28,14 @@ import std::os::process;
 
 bool is_ready;
 bool is_std_path_alloc;
+bool is_compiler_path_alloc;
+bool cli_std_path_set;
+bool cli_compiler_path_set;
 bool running @local;
 LogLevel log_level;
 String log_path;
 String std_path;
+String compiler_path;
 LspProject project;
 
 struct LspInitializeResponse
@@ -222,10 +226,12 @@ fn void start(CliArgs args)
 
 		log_path = args.log_path;
 		std_path = args.stdlib_path;
+		compiler_path = args.compiler_path.len > 0 ? args.compiler_path : "c3c";
 		log_level = args.log_level;
 
 		log::info("LogPath = %s", log_path);
 		log::info("std_path = %s", std_path);
+		log::info("compiler_path = %s", compiler_path);
 		log::info("log_level = %s", log_level);
 
 		io_handler::init();
@@ -244,11 +250,18 @@ fn void start(CliArgs args)
 			std_path = std_path.trim_right("/\\");
 		}
 
+		cli_std_path_set = args.stdlib_path.len > 0;
+		cli_compiler_path_set = args.compiler_path.len > 0;
+
 		defer
 		{
 			if (is_std_path_alloc)
 			{
 				std_path.free(mem);
+			}
+			if (is_compiler_path_alloc)
+			{
+				compiler_path.free(mem);
 			}
 		};
 
@@ -334,6 +347,36 @@ fn void dispatch(LspMessage* message)
 					},
 				};
 				io_handler::write(translator::encode(resp, tmem));
+
+				if (try init_opts = message.params.initialize.initialization_options.get())
+				{
+					if (!cli_compiler_path_set && init_opts.compiler_path.len > 0)
+					{
+						if (is_compiler_path_alloc) compiler_path.free(mem);
+						compiler_path = init_opts.compiler_path.copy(mem);
+						is_compiler_path_alloc = true;
+						log::info("Updated compiler_path from initializationOptions: %s", compiler_path);
+						if (!cli_std_path_set && init_opts.stdlib_path.len == 0)
+						{
+							if (is_std_path_alloc)
+							{
+								std_path.free(mem);
+								is_std_path_alloc = false;
+							}
+							setup_stdlib_path();
+						}
+					}
+					if (!cli_std_path_set && init_opts.stdlib_path.len > 0)
+					{
+						if (is_std_path_alloc)
+						{
+							std_path.free(mem);
+						}
+						std_path = init_opts.stdlib_path.trim_right("/\\").copy(mem);
+						is_std_path_alloc = true;
+						log::info("Updated std_path from initializationOptions: %s", std_path);
+					}
+				}
 
 				if (try value = message.params.initialize.trace.get())
 				{
@@ -599,7 +642,7 @@ fn void setup_stdlib_path() => @pool()
 {
 	Process? process = process::spawn(
 	{
-		"c3c", "--version"
+		compiler_path, "--version"
 	}
 	);
 	if (catch err = process)

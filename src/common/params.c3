@@ -94,6 +94,12 @@ struct ClientInfo
 	String version;
 }
 
+struct InitializationOptions
+{
+	String compiler_path;
+	String stdlib_path;
+}
+
 struct InitializeParams
 {
 	int process_id;
@@ -102,6 +108,7 @@ struct InitializeParams
 	Maybe{DocumentUri} root_uri;
 	Maybe{TraceKind} trace;
 	Maybe{WorkspaceFolder[]} workspace_folders;
+	Maybe{InitializationOptions} initialization_options;
 }
 
 struct DidOpenParams

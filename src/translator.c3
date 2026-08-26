@@ -47,6 +47,11 @@ fn void LspMessage.free(&self)
 			}
 			self.params.initialize.client_info.name.free(self.allocator);
 			self.params.initialize.client_info.version.free(self.allocator);
+			if (self.params.initialize.initialization_options.has_value)
+			{
+				self.params.initialize.initialization_options.value.compiler_path.free(self.allocator);
+				self.params.initialize.initialization_options.value.stdlib_path.free(self.allocator);
+			}
 		case DID_OPEN:
 			self.params.did_open.document.uri.free(self.allocator);
 			self.params.did_open.document.language_id.free(self.allocator);
@@ -216,6 +221,19 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 						String cver = client_info.get_string("version") ?? "";
 						init_params.client_info.name = cname.copy(allocator);
 						init_params.client_info.version = cver.copy(allocator);
+					}
+
+					if (try init_opts = params_obj.get("initializationOptions"))
+					{
+						String c_path = init_opts.get_string("compiler-path") ?? init_opts.get_string("compilerPath") ?? init_opts.get_string("compiler_path") ?? "";
+						String s_path = init_opts.get_string("stdlib-path") ?? init_opts.get_string("stdlibPath") ?? init_opts.get_string("stdlib_path") ?? "";
+						if (c_path.len > 0 || s_path.len > 0)
+						{
+							init_params.initialization_options = maybe::value((InitializationOptions){
+								.compiler_path = c_path.copy(allocator),
+								.stdlib_path = s_path.copy(allocator),
+							});
+						}
 					}
 					msg.params.initialize = init_params;
 				}
