@@ -183,41 +183,41 @@ fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_nam
 	return null;
 }
 
-fn void inject_type_properties(List{CompletionItem} * items, NodeKind type_kind)
+fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind)
 {
 	items.push(
 	{
-		.label = "alignment",.kind = PROPERTY,.detail = "sz",.documentation = md("Alignment of the type in bytes.")
+		.label = "alignment", .kind = PROPERTY, .detail = "sz", .documentation = md("Alignment of the type in bytes."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "kind",.kind = PROPERTY,.detail = "TypeKind",.documentation = md("The underlying kind of the type")
+		.label = "kind", .kind = PROPERTY, .detail = "TypeKind", .documentation = md("The category / TypeKind of the type (e.g. POINTER, STRUCT, SIGNED_INT)."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "name",.kind = PROPERTY,.detail = "String",.documentation = md("The short name of the type.")
+		.label = "name", .kind = PROPERTY, .detail = "String", .documentation = md("The short unqualified name of the type as a string."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "qname",.kind = PROPERTY,.detail = "String",.documentation = md("The fully qualified name of the type.")
+		.label = "qname", .kind = PROPERTY, .detail = "String", .documentation = md("The fully qualified path name of the type as a string."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "size",.kind = PROPERTY,.detail = "sz",.documentation = md("Size of the type in bytes.")
+		.label = "size", .kind = PROPERTY, .detail = "sz", .documentation = md("Storage size of the type in bytes."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "typeid",.kind = PROPERTY,.detail = "typeid",.documentation = md("The unique type identifier.")
+		.label = "typeid", .kind = PROPERTY, .detail = "typeid", .documentation = md("The unique runtime / compile-time type identifier."), .data = "property"
 	}
 	);
 	items.push(
 	{
-		.label = "methods",.kind = PROPERTY,.detail = "any[]",.documentation = md("List of methods attached to this type.")
+		.label = "methods", .kind = PROPERTY, .detail = "any[]", .documentation = md("List of methods implemented for this type."), .data = "property"
 	}
 	);
 
@@ -226,67 +226,169 @@ fn void inject_type_properties(List{CompletionItem} * items, NodeKind type_kind)
 		case STRUCT_DECL:
 			items.push(
 			{
-				.label = "members",.kind = PROPERTY,.detail = "any[]",.documentation = md("Array of fields/members.")
+				.label = "members", .kind = PROPERTY, .detail = "any[]", .documentation = md("Array of fields/members in the struct or union."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "get_tag",.kind = METHOD,.detail = "fn any(String)",.documentation = md("Get attributes/tags.")
+				.label = "get_tag", .kind = METHOD, .detail = "fn any(String)", .documentation = md("Retrieve the value of a compile-time @tag on the type."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "has_tag",.kind = METHOD,.detail = "fn bool(String)",.documentation = md("Check if attribute exists.")
+				.label = "has_tag", .kind = METHOD, .detail = "fn bool(String)", .documentation = md("Check if a compile-time @tag exists on the type."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "is_substruct",.kind = PROPERTY,.detail = "bool"
+				.label = "is_substruct", .kind = PROPERTY, .detail = "bool", .documentation = md("True if the struct has an inline member."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "parent",.kind = PROPERTY,.detail = "typeid"
+				.label = "parent", .kind = PROPERTY, .detail = "typeid", .documentation = md("The typeid of the inline member if present."), .data = "property"
 			}
 			);
 		case ENUM_DECL:
 			items.push(
 			{
-				.label = "values",.kind = PROPERTY,.detail = "any[]",.documentation = md("List of all enum variants.")
+				.label = "values", .kind = PROPERTY, .detail = "any[]", .documentation = md("List containing all variants of the enum."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "len",.kind = PROPERTY,.detail = "sz",.documentation = md("Number of elements.")
+				.label = "len", .kind = PROPERTY, .detail = "sz", .documentation = md("Number of elements in the enum or array."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "members",.kind = PROPERTY,.detail = "any[]"
+				.label = "members", .kind = PROPERTY, .detail = "any[]", .documentation = md("List of member references in the enum."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "from_ordinal",.kind = METHOD,.detail = "fn type(sz)"
+				.label = "from_ordinal", .kind = METHOD, .detail = "fn type(sz)", .documentation = md("Converts an integer ordinal to the corresponding enum variant."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "lookup_field",.kind = METHOD,.detail = "fn any(String)"
+				.label = "lookup_field", .kind = METHOD, .detail = "fn any(String)", .documentation = md("Lookup an enum variant by associated field value."), .data = "property"
 			}
 			);
 		case FN_DECL:
 			items.push(
 			{
-				.label = "params",.kind = PROPERTY,.detail = "any[]",.documentation = md("Function parameter types.")
+				.label = "params", .kind = PROPERTY, .detail = "any[]", .documentation = md("Function pointer parameter types."), .data = "property"
 			}
 			);
 			items.push(
 			{
-				.label = "returns",.kind = PROPERTY,.detail = "typeid",.documentation = md("Function return type.")
+				.label = "returns", .kind = PROPERTY, .detail = "typeid", .documentation = md("Function pointer return type."), .data = "property"
 			}
 			);
 		default:
 			break;
 	}
+}
+
+fn bool is_inside_comment(String content, sz offset)
+{
+	if (offset > content.len) return false;
+
+	sz i = 0;
+	while (i < content.len && i <= offset)
+	{
+		// 1. Line comment // ... \n
+		if (i + 1 < content.len && content[i] == '/' && content[i + 1] == '/')
+		{
+			sz comment_start = i;
+			while (i < content.len && content[i] != '\n')
+			{
+				i++;
+			}
+			if (offset >= comment_start && offset <= i) return true;
+			continue;
+		}
+
+		// 2. Block comment /* ... */ (supports C3 nesting)
+		if (i + 1 < content.len && content[i] == '/' && content[i + 1] == '*')
+		{
+			sz comment_start = i;
+			i += 2;
+			int depth = 1;
+			while (i + 1 < content.len && depth > 0)
+			{
+				if (content[i] == '/' && content[i + 1] == '*')
+				{
+					depth++;
+					i += 2;
+					continue;
+				}
+				if (content[i] == '*' && content[i + 1] == '/')
+				{
+					depth--;
+					i += 2;
+					continue;
+				}
+				i++;
+			}
+			if (offset >= comment_start && (depth > 0 || offset <= i)) return true;
+			continue;
+		}
+
+		// 3. Doc contract <* ... *>
+		if (i + 1 < content.len && content[i] == '<' && content[i + 1] == '*')
+		{
+			sz comment_start = i;
+			i += 2;
+			int depth = 1;
+			while (i + 1 < content.len && depth > 0)
+			{
+				if (content[i] == '<' && content[i + 1] == '*')
+				{
+					depth++;
+					i += 2;
+					continue;
+				}
+				if (content[i] == '*' && content[i + 1] == '>')
+				{
+					depth--;
+					i += 2;
+					continue;
+				}
+				i++;
+			}
+			if (offset >= comment_start && (depth > 0 || offset <= i)) return true;
+			continue;
+		}
+
+		// 4. String literal " ... "
+		if (content[i] == '"')
+		{
+			i++;
+			while (i < content.len && content[i] != '"')
+			{
+				if (content[i] == '\\' && i + 1 < content.len) i++;
+				i++;
+			}
+			if (i < content.len) i++;
+			continue;
+		}
+
+		// 5. Raw string literal ` ... `
+		if (content[i] == '`')
+		{
+			i++;
+			while (i < content.len && content[i] != '`')
+			{
+				i++;
+			}
+			if (i < content.len) i++;
+			continue;
+		}
+
+		i++;
+	}
+
+	return false;
 }

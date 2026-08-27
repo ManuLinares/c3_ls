@@ -502,7 +502,16 @@ fn void dispatch(LspMessage* message)
 				Uri? file_uri = uri::parse(tmem, message.params.prepare_rename.text_document.uri);
 				if (catch file_uri) return;
 				LspRange? prep_res = rename::prepare_rename(&project, file_uri, message.params.prepare_rename.position);
-				if (catch prep_res) return;
+				if (catch prep_res)
+				{
+					LspShutdownResponse null_resp = {
+						.jsonrpc = message.rpc,
+						.id = message.has_id ? message.id : -1,
+						.result = null
+					};
+					io_handler::write(translator::encode(null_resp, tmem));
+					return;
+				}
 				LspPrepareRenameResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,

@@ -353,6 +353,14 @@ fn Node*? contract(Node* node)
 	if (!node) return null;
 	switch (node.kind)
 	{
+		case MODULE_DECL:
+			{
+				ModuleDecl* decl = node.as(ModuleDecl);
+				if (try val = decl.contract.get())
+				{
+					return val;
+				}
+			}
 		case FN_DECL:
 			{
 				FnDecl* decl = node.as(FnDecl);
@@ -384,6 +392,27 @@ fn Node*? contract(Node* node)
 				{
 					return val;
 				}
+			}
+		case VAR_DECL:
+			{
+				VarDecl* decl = node.as(VarDecl);
+				if (try val = decl.contract.get())
+				{
+					return val;
+				}
+			}
+		case FAULTDEF_DECL:
+			{
+				FaultdefDecl* decl = node.as(FaultdefDecl);
+				if (try val = decl.contract.get())
+				{
+					return val;
+				}
+			}
+		case ENUM_DECL:
+			{
+				EnumDecl* decl = node.as(EnumDecl);
+				if (try val = decl.contract.get()) return val;
 			}
 		default:
 			break;

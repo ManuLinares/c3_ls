@@ -190,3 +190,140 @@ fn void test_default_dependency_search_paths()
 	assert(conf.dependency_search_paths.value.len == 1);
 	assert(conf.dependency_search_paths.value[0] == "lib");
 }
+
+
+<*
+ Regression Test 7:
+ Verifies that typing incomplete `module` statements does not panic or crash.
+*>
+fn void test_incomplete_module_does_not_crash()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module some\n";
+	proj.workspace.process_file("/virtual/incomplete_mod.c3", source);
+	// No panic, file registers gracefully
+}
+
+<*
+ Regression Test 8:
+ Verifies that renaming a local variable only modifies occurrences inside its declaring scope.
+*>
+fn void test_local_var_rename_isolated_to_scope()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String file1 = `module app;
+fn void test() {
+  int i;
+  i = 123;
+  i = i + 1;
+}
+fn void other() {
+  int i = 50;
+  i += 1;
+}
+`;
+	String file2 = `module other_mod;
+fn void helper() {
+  int i = 0;
+}
+`;
+
+	proj.workspace.process_file("/virtual/rename_test1.c3", file1);
+	proj.workspace.process_file("/virtual/rename_test2.c3", file2);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/rename_test1.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = {.line = 2,.character = 6 };
+	WorkspaceEdit edit = rename::rename(&proj, doc_uri, pos, "counter")!!;
+
+	assert(edit.documentChanges.len == 1);
+	assert(edit.documentChanges[0].textDocument.uri.contains("rename_test1.c3"));
+	assert(edit.documentChanges[0].edits.len == 4);
+}
+
+<*
+ Regression Test 9:
+ Verifies enum dot-access (`State.`) and bare enum RHS auto-completion.
+*>
+fn void test_enum_completion_dot_and_bare_rhs()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+enum State { IDLE, RUNNING, STOPPED }
+fn void run() {
+  State s = 
+  s = State.
+}
+`;
+
+	proj.workspace.process_file("/virtual/enum_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Bare RHS completion on `State s = ` (line 3, char 12)
+	LspPosition rhs_pos = {.line = 3,.character = 12 };
+	CompletionItem[] rhs_items = completion::resolve(&proj, doc_uri, rhs_pos)!!;
+	bool found_idle_rhs = false;
+	foreach (item : rhs_items)
+	{
+		if (item.label == "IDLE") found_idle_rhs = true;
+	}
+	assert(found_idle_rhs);
+
+	// 2. Dot-access completion on `s = State.` (line 4, char 12)
+	LspPosition dot_pos = {.line = 4,.character = 12 };
+	CompletionItem[] dot_items = completion::resolve(&proj, doc_uri, dot_pos)!!;
+	bool found_running_dot = false;
+	foreach (item : dot_items)
+	{
+		if (item.label == "RUNNING") found_running_dot = true;
+	}
+	assert(found_running_dot);
+}
+
+<*
+ Regression Test 10:
+ Verifies for-loop init variables are visible in loop condition and comment completion is suppressed.
+*>
+fn void test_for_loop_var_visibility_and_comment_suppression()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void test() {
+  // some comment text
+  for (int my_iter = 0; my_
+}
+`;
+
+	proj.workspace.process_file("/virtual/for_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/for_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Comment completion -> returns 0 items
+	LspPosition comment_pos = {.line = 2,.character = 10 };
+	CompletionItem[] comment_items = completion::resolve(&proj, doc_uri, comment_pos)!!;
+	assert(comment_items.len == 0);
+
+	// 2. For-loop condition completion -> suggests `my_iter`
+	LspPosition for_pos = {.line = 3,.character = 27 };
+	CompletionItem[] for_items = completion::resolve(&proj, doc_uri, for_pos)!!;
+	bool found_my_iter = false;
+	foreach (item : for_items)
+	{
+		if (item.label == "my_iter") found_my_iter = true;
+	}
+	assert(found_my_iter);
+}

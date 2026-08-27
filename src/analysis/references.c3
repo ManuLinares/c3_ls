@@ -20,7 +20,26 @@ struct RefCollectorContext
 	String symbol_name;
 	String file_uri;
 	bool include_declaration;
-	List{LspLocation} * locations;
+	List{LspLocation}* locations;
+}
+
+fn bool is_local_decl(Node* node)
+{
+	if (!node) return false;
+	switch (node.kind)
+	{
+		case VAR_DECL:
+			{
+				VarDecl* vd = node.as(VarDecl);
+				return vd.var_kind != VAR_GLOBAL;
+			}
+		case TRY_EXPR:
+		case CATCH_EXPR:
+		case CONTRACT_PARAM:
+			return true;
+		default:
+			return false;
+	}
 }
 
 fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_data)
@@ -86,7 +105,7 @@ fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_dat
 						matched = true;
 						node_range = ie.ident.range;
 					}
-					else if (resolved != null && ctx.decl_node != null && resolved.kind == ctx.decl_node.kind)
+					else if (!is_local_decl(ctx.decl_node) && resolved != null && ctx.decl_node != null && resolved.kind == ctx.decl_node.kind && !is_local_decl(resolved))
 					{
 						String rname = cursor::spelling(resolved, tmem);
 						if (rname.len > 0 && rname == ctx.symbol_name)
@@ -227,6 +246,27 @@ fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos,
 
 	List{LspLocation} results;
 	results.tinit();
+
+	if (is_local_decl(decl_node))
+	{
+		RefCollectorContext ref_ctx = {
+			.project = project,
+			.sf = sf,
+			.decl_node = decl_node,
+			.symbol_name = symbol_name,
+			.file_uri = uri.to_raw_string(tmem),
+			.include_declaration = context.includeDeclaration,
+			.locations = &results
+		};
+
+		foreach (stmt : sf.ast.statements)
+		{
+			if (!stmt || stmt.kind == ERROR) continue;
+			cursor::visit(stmt, null, {.on_enter = &collect_references_callback }, &ref_ctx);
+		}
+
+		return results.array_view();
+	}
 
 	if (project.workspace.ctx)
 	{

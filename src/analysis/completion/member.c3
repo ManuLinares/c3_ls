@@ -62,7 +62,7 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	}
 }
 
-fn void inject_vector_completions(List{CompletionItem} * items, String prefix)
+fn void inject_vector_completions(List{CompletionItem}* items, String prefix)
 {
 	const String[*] COMPS = { "x", "y", "xy", "yx", "xx", "yy", "r", "g", "rg", "gr", "u", "v" };
 	foreach (c : COMPS)
@@ -106,7 +106,34 @@ fn void inject_vector_completions(List{CompletionItem} * items, String prefix)
 	}
 }
 
-fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
+fn void provide_enum_variants(List{CompletionItem}* items, Node* enum_node, String type_name, String prefix)
+{
+	if (!enum_node || enum_node.kind != ENUM_DECL) return;
+	EnumDecl* enum_decl = enum_node.as(EnumDecl);
+
+	foreach (variant : enum_decl.variants)
+	{
+		if (!variant || variant.kind != VAR_DECL) continue;
+		VarDecl* var_decl = variant.as(VarDecl);
+		String vname = var_decl.name ? var_decl.name.text : "";
+		if (vname.len > 0 && (prefix.len == 0 || vname.starts_with(prefix)))
+		{
+			items.push(
+			{
+				.label = vname,
+				.kind = ENUMMEMBER,
+				.detail = string::tformat("enum %s", type_name),
+				.insertText = vname,
+				.filterText = vname,
+				.sortText = string::tformat("0001_%s", vname),
+				.data = string::tformat("enum_variant:%s:%s", type_name, vname)
+			}
+			);
+		}
+	}
+}
+
+fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 {
 	if (ctx.access == NONE || ctx.base_identifier.len == 0) return false;
 
@@ -116,11 +143,33 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 			{
 				if (ctx.ws && ctx.ws.ctx)
 				{
-					if (try mod = ctx.ws.ctx.modules.get(ctx.base_identifier))
+					Module* mod = analysis::find_module_by_identifier(ctx.ws, "", ctx.base_identifier);
+					if (mod)
 					{
 						foreach (node : mod.nodes)
 						{
-							if (!node) continue;
+							if (!node || node.kind == ERROR) continue;
+
+							if (node.kind == FAULTDEF_DECL)
+							{
+								FaultdefDecl* fd = node.as(FaultdefDecl);
+								foreach (fault_node : fd.faults)
+								{
+									if (!fault_node || fault_node.kind != FAULT_DECL) continue;
+									if (!is_symbol_accessible(ctx.sf, ctx.caller_mod, fault_node, mod.name)) continue;
+
+									FaultDecl* fdecl = fault_node.as(FaultDecl);
+									String fname = fdecl.name ? fdecl.name.text : "";
+									if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+									{
+										add_symbol_completion(ctx, items, fname, fault_node, ctx.base_identifier, ctx.prefix);
+									}
+								}
+								continue;
+							}
+
+							if (!is_symbol_accessible(ctx.sf, ctx.caller_mod, node, mod.name)) continue;
+
 							String sym_name = cursor::spelling(node, tmem);
 							if (sym_name.len == 0) continue;
 							if (ctx.prefix.len == 0 || sym_name.starts_with(ctx.prefix))
@@ -138,29 +187,16 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 					Node* sym_node = syms.get(0).node;
 					if (sym_node.kind == ENUM_DECL)
 					{
-						EnumDecl* enum_decl = sym_node.as(EnumDecl);
-						foreach (variant : enum_decl.variants)
-						{
-							if (!variant || variant.kind != VAR_DECL) continue;
-							VarDecl* var_decl = variant.as(VarDecl);
-							String vname = var_decl.name ? var_decl.name.text : "";
-							if (vname.len > 0 && (ctx.prefix.len == 0 || vname.starts_with(ctx.prefix)))
-							{
-								items.push(
-								{
-									.label = vname,
-									.kind = ENUMMEMBER,
-									.detail = string::tformat("enum %s", ctx.base_identifier),
-									.insertText = vname,
-									.filterText = vname,
-									.sortText = string::tformat("0002_%s", vname)
-								}
-								);
-							}
-						}
+						provide_enum_variants(items, sym_node, ctx.base_identifier, ctx.prefix);
 					}
 
 					analysis::inject_type_properties(items, sym_node.kind);
+					return true;
+				}
+
+				if (constants::is_primitive(ctx.base_identifier))
+				{
+					analysis::inject_type_properties(items, NodeKind.VAR_DECL);
 					return true;
 				}
 
@@ -174,7 +210,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 
 				if (ctx.sf)
 				{
-					(void)query::find_local_decl_in_file(ctx.sf, ctx.base_identifier, &type_name);
+					(void)query::find_local_decl_in_file(ctx.sf, ctx.base_identifier, &type_name, ctx.ws.ctx);
 				}
 
 				if (type_name.len == 0)
@@ -188,6 +224,9 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 						case STRUCT_DECL:
 							target_struct = base_node;
 							type_name = ctx.base_identifier;
+						case ENUM_DECL:
+							provide_enum_variants(items, base_node, ctx.base_identifier, ctx.prefix);
+							return true;
 						case VAR_DECL:
 							{
 								VarDecl* vd = base_node.as(VarDecl);
@@ -198,73 +237,86 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 							}
 						default:
 							break;
-					}
-				}
-			}
-
-			if (query::is_vector_type(type_name))
-			{
-				inject_vector_completions(items, ctx.prefix);
-				return true;
-			}
-
-			if (type_name.len > 0 && !target_struct)
-			{
-				List{SymbolEntry} struct_syms = ctx.ws.find_symbol_by_name(type_name);
-				if (struct_syms.len() > 0) target_struct = struct_syms.get(0).node;
-			}
-
-			if (target_struct && target_struct.kind == STRUCT_DECL)
-			{
-				StructDecl* st = target_struct.as(StructDecl);
-				foreach (field : st.fields)
-				{
-					if (!field || field.kind != VAR_DECL) continue;
-					VarDecl* fdecl = field.as(VarDecl);
-					String fname = fdecl.name ? fdecl.name.text : "";
-					if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
-					{
-						String ftype = cursor::spelling(fdecl.type, tmem);
-						items.push(
-						{
-							.label = fname,
-							.kind = FIELD,
-							.detail = ftype,
-							.insertText = fname,
-							.filterText = fname,
-							.sortText = string::tformat("0001_%s", fname)
 						}
-						);
 					}
 				}
 
-				if (ctx.ws.ctx && ctx.ws.ctx.registry)
+				if (type_name.len > 0)
 				{
-					ctx.ws.ctx.registry.functions.@each(; qname, fn_info)
+					List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(type_name);
+					if (syms.len() > 0 && syms.get(0).node)
 					{
-						if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
+						Node* type_node = syms.get(0).node;
+						if (type_node.kind == ENUM_DECL)
 						{
-							FnDecl* fndecl = fn_info.node.as(FnDecl);
-							if (fndecl.associated_type)
+							provide_enum_variants(items, type_node, type_name, ctx.prefix);
+							return true;
+						}
+						else if (type_node.kind == STRUCT_DECL)
+						{
+							target_struct = type_node;
+						}
+					}
+				}
+
+				if (query::is_vector_type(type_name))
+				{
+					inject_vector_completions(items, ctx.prefix);
+					return true;
+				}
+
+				if (target_struct && target_struct.kind == STRUCT_DECL)
+				{
+					StructDecl* st = target_struct.as(StructDecl);
+					foreach (field : st.fields)
+					{
+						if (!field || field.kind != VAR_DECL) continue;
+						VarDecl* fdecl = field.as(VarDecl);
+						String fname = fdecl.name ? fdecl.name.text : "";
+						if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+						{
+							String ftype = cursor::spelling(fdecl.type, tmem);
+							items.push(
 							{
-								String assoc = cursor::raw_type_identifier(fndecl.associated_type) ?? "";
-								if (assoc == type_name)
+								.label = fname,
+								.kind = FIELD,
+								.detail = ftype,
+								.insertText = fname,
+								.filterText = fname,
+								.sortText = string::tformat("0001_%s", fname),
+								.data = string::tformat("field:%s:%s", type_name, fname)
+							}
+							);
+						}
+					}
+
+					if (ctx.ws.ctx && ctx.ws.ctx.registry)
+					{
+						ctx.ws.ctx.registry.functions.@each(; qname, fn_info)
+						{
+							if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
+							{
+								FnDecl* fndecl = fn_info.node.as(FnDecl);
+								if (fndecl.associated_type)
 								{
-									String mname = fndecl.name ? fndecl.name.text : "";
-									if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+									String assoc = cursor::raw_type_identifier(fndecl.associated_type) ?? "";
+									if (assoc == type_name)
 									{
-										add_symbol_completion(ctx, items, mname, fn_info.node, type_name, ctx.prefix);
+										String mname = fndecl.name ? fndecl.name.text : "";
+										if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+										{
+											add_symbol_completion(ctx, items, mname, fn_info.node, type_name, ctx.prefix);
+										}
 									}
 								}
 							}
-						}
-					};
-				}
+						};
+					}
 
-				return true;
+					return true;
+				}
+				return false;
 			}
-			return false;
-		}
 
 		default:
 			return false;

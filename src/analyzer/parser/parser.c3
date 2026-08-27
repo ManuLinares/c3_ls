@@ -540,6 +540,9 @@ fn void attach_contract(ParseContext* ctx, Node* node, Node* contract)
 		case VAR_DECL:
 			VarDecl* vd = node.as(VarDecl);
 			vd.contract.set(contract);
+		case ENUM_DECL:
+			EnumDecl* ed = node.as(EnumDecl);
+			ed.contract.set(contract);
 		default:
 			break;
 	}

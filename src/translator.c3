@@ -81,6 +81,10 @@ fn void LspMessage.free(&self)
 			self.params.completion_resolve.item.filterText.free(self.allocator);
 			self.params.completion_resolve.item.sortText.free(self.allocator);
 			self.params.completion_resolve.item.data.free(self.allocator);
+			if (self.params.completion_resolve.item.documentation.value.len > 0)
+			{
+				self.params.completion_resolve.item.documentation.value.free(self.allocator);
+			}
 		case HELP:
 			self.params.signature_help.text_document.uri.free(self.allocator);
 		case REFERENCES:
@@ -353,6 +357,21 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 					item.filterText = (params_obj.get_string("filterText") ?? "").copy(allocator);
 					item.sortText = (params_obj.get_string("sortText") ?? "").copy(allocator);
 					item.data = (params_obj.get_string("data") ?? "").copy(allocator);
+					String dval = params_obj.get_string("documentation") ?? "";
+					if (dval.len == 0)
+					{
+						if (try doc_obj = params_obj.get("documentation"))
+						{
+							dval = doc_obj.get_string("value") ?? "";
+						}
+					}
+					if (dval.len > 0)
+					{
+						item.documentation = {
+							.kind = MARKDOWN,
+							.value = dval.copy(allocator)
+						};
+					}
 					msg.params.completion_resolve.item = item;
 				}
 

@@ -133,3 +133,15 @@ fn void test_decode_semantic_tokens()
 	assert(res.message.id == 16);
 	assert(res.message.params.semantic_tokens.text_document.uri == "file:///test.c3");
 }
+
+fn void test_decode_completion_resolve_with_documentation()
+{
+	String body = `{"jsonrpc":"2.0","id":17,"method":"completionItem/resolve","params":{"label":"size","kind":10,"documentation":{"kind":"markdown","value":"Size in bytes"}}}`;
+	IoDecodeResult res = translator::decode(mem, body)!!;
+	defer res.message.free();
+
+	assert(res.message.method == COMPLETION_RESOLVE);
+	assert(res.message.params.completion_resolve.item.label == "size");
+	assert(res.message.params.completion_resolve.item.documentation.kind == "markdown");
+	assert(res.message.params.completion_resolve.item.documentation.value == "Size in bytes");
+}

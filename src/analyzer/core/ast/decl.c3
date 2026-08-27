@@ -145,6 +145,7 @@ struct VarDecl
 struct EnumDecl
 {
 	inline Node node;
+	NullableNode contract;
 	Ident* name;
 	NodeArray interfaces;  // optional implemented interfaces: "(" type ("," type)* ")"
 	bool is_inline_backing;

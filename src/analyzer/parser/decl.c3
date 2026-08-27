@@ -20,7 +20,7 @@ fn Node* parse_module_decl(ContextScope scope)
 	defer node.range.end = ctx.peek(-1).range.end;
 	node.path = parse_path_expr(scope);
 
-	if (!node.path)
+	if (!node.path || node.path.kind != PATH_EXPR)
 	{
 		diagnostics::error(ctx.context, ctx.current.range, "Expected a valid path");
 		node.flags.has_error = true;

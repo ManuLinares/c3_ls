@@ -53,6 +53,7 @@ fn void analyze_imports(SemaContext* ctx)
 
 		foreach (Node* path : imp.paths)
 		{
+			if (!path || path.kind != PATH_EXPR) continue;
 			PathExpr* expr = path.as(PathExpr);
 			String full_path = expr.path ? expr.path.text.strip_suffix("::") : "";
 			if (full_path.len == 0) continue;

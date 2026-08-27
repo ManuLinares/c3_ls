@@ -43,7 +43,9 @@ fn SymbolInformation[]? get_document_symbols(LspProject* project, Uri uri)
 			case MODULE_DECL:
 				{
 					ModuleDecl* md = stmt.as(ModuleDecl);
-					String mname = md.path ? md.path.as(PathExpr).path.text : "module";
+					String mname = (md.path && md.path.kind == PATH_EXPR && md.path.as(PathExpr).path)
+						? md.path.as(PathExpr).path.text
+						: "module";
 					symbols.push(
 					{
 						.name = mname,

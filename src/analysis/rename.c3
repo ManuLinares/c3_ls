@@ -12,6 +12,14 @@ import lsp;
 import lsp::analysis::references;
 import uri;
 
+fn bool touches(Range r, Location loc)
+{
+	if (loc.line < r.start.line || loc.line > r.end.line) return false;
+	if (loc.line == r.start.line && loc.column < r.start.column) return false;
+	if (loc.line == r.end.line && loc.column > r.end.column) return false;
+	return true;
+}
+
 fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 {
 	Location loc = {
@@ -22,7 +30,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf) return NOT_FOUND~;
 
-	Range target_range = {.start = loc,.end = loc };
+	Range target_range = {.start = loc, .end = loc };
 	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
 	if (!target_node || target_node.kind == ERROR) return NOT_FOUND~;
 
@@ -34,7 +42,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case IDENT_EXPR:
 			{
 				IdentExpr* ie = target_node.as(IdentExpr);
-				if (ie.ident && ie.ident.range.contains(loc))
+				if (ie.ident && touches(ie.ident.range, loc))
 				{
 					node_range = ie.ident.range;
 					is_renameable = true;
@@ -43,7 +51,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case TYPE_EXPR:
 			{
 				TypeExpr* te = target_node.as(TypeExpr);
-				if (te.type_kind == TYPE_IDENTIFIER && te.unresolved.name && te.unresolved.name.range.contains(loc))
+				if (te.type_kind == TYPE_IDENTIFIER && te.unresolved.name && touches(te.unresolved.name.range, loc))
 				{
 					node_range = te.unresolved.name.range;
 					is_renameable = true;
@@ -52,7 +60,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case VAR_DECL:
 			{
 				VarDecl* vd = target_node.as(VarDecl);
-				if (vd.name && vd.name.range.contains(loc))
+				if (vd.name && touches(vd.name.range, loc))
 				{
 					node_range = vd.name.range;
 					is_renameable = true;
@@ -61,7 +69,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case FN_DECL:
 			{
 				FnDecl* fd = target_node.as(FnDecl);
-				if (fd.name && fd.name.range.contains(loc))
+				if (fd.name && touches(fd.name.range, loc))
 				{
 					node_range = fd.name.range;
 					is_renameable = true;
@@ -70,7 +78,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case MACRO_DECL:
 			{
 				MacroDecl* md = target_node.as(MacroDecl);
-				if (md.name && md.name.range.contains(loc))
+				if (md.name && touches(md.name.range, loc))
 				{
 					node_range = md.name.range;
 					is_renameable = true;
@@ -79,7 +87,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case STRUCT_DECL:
 			{
 				StructDecl* sd = target_node.as(StructDecl);
-				if (sd.name && sd.name.range.contains(loc))
+				if (sd.name && touches(sd.name.range, loc))
 				{
 					node_range = sd.name.range;
 					is_renameable = true;
@@ -88,7 +96,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case ENUM_DECL:
 			{
 				EnumDecl* ed = target_node.as(EnumDecl);
-				if (ed.name && ed.name.range.contains(loc))
+				if (ed.name && touches(ed.name.range, loc))
 				{
 					node_range = ed.name.range;
 					is_renameable = true;
@@ -97,7 +105,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case TYPEDEF_DECL:
 			{
 				TypedefDecl* td = target_node.as(TypedefDecl);
-				if (td.name && td.name.range.contains(loc))
+				if (td.name && touches(td.name.range, loc))
 				{
 					node_range = td.name.range;
 					is_renameable = true;
@@ -106,7 +114,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		case ALIAS_DECL:
 			{
 				AliasDecl* ad = target_node.as(AliasDecl);
-				if (ad.name && ad.name.range.contains(loc))
+				if (ad.name && touches(ad.name.range, loc))
 				{
 					node_range = ad.name.range;
 					is_renameable = true;

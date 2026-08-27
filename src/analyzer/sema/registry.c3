@@ -42,8 +42,14 @@ fn void register(AnalyzerContext* context, SourceFile* sf) => @pool()
 		{
 			case MODULE_DECL:
 				ModuleDecl* mod_decl = statement.as(ModuleDecl);
-				PathExpr* path = mod_decl.path.as(PathExpr);
-				current_mod = mod::create(context, path.path.text);
+				if (mod_decl.path && mod_decl.path.kind == PATH_EXPR)
+				{
+					PathExpr* path = mod_decl.path.as(PathExpr);
+					if (path.path && path.path.text.len > 0)
+					{
+						current_mod = mod::create(context, path.path.text);
+					}
+				}
 			default:
 				break;
 		}
