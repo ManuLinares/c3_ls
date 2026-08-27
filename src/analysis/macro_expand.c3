@@ -712,72 +712,224 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 							sz_val = 16; align_val = 8;
 						default:
 							break;
-					}
-
-					if (sz_val > 0)
-					{
-						if (member_name == "size")
-						{
-							return string::tformat("%d (bytes)", sz_val);
 						}
-						return string::tformat("%d (bytes)", align_val);
-					}
-					else
-					{
-						return string::tformat("reflection property %s::%s", left_name, member_name);
-					}
-				}
 
-				if (member_name == "typeid")
-				{
-					return string::tformat("typeid (%s)", left_name);
-				}
-
-				Node* type_node = null;
-				if (ctx)
-				{
-					if (ctx.registry)
-					{
-						if (try ty_info = ctx.registry.types.get(left_name))
+						if (sz_val > 0)
 						{
-							type_node = ty_info.node;
-						}
-					}
-					if (!type_node)
-					{
-						ctx.modules.@each(; mod_name, mod)
-						{
-							if (!type_node && mod)
+							if (member_name == "size")
 							{
-								foreach (n : mod.nodes)
+								return string::tformat("%d (bytes)", sz_val);
+							}
+							return string::tformat("%d (bytes)", align_val);
+						}
+						else
+						{
+							return string::tformat("reflection property %s::%s", left_name, member_name);
+						}
+					}
+
+					if (member_name == "typeid")
+					{
+						return string::tformat("typeid (%s)", left_name);
+					}
+
+					if (member_name == "has_equals" || member_name == "is_ordered")
+					{
+						return "true (bool)";
+					}
+
+					if (member_name == "nan")
+					{
+						return "NaN (float)";
+					}
+
+					if (member_name == "inf")
+					{
+						return "Infinity (float)";
+					}
+
+					if (member_name == "min")
+					{
+						switch (left_name)
+						{
+							case "ichar": return "-128";
+							case "char":
+							case "ushort":
+							case "uint":
+							case "ulong":
+							case "uint128":
+							case "usz":
+							case "uptr": return "0";
+							case "short": return "-32768";
+							case "int": return "-2147483648";
+							case "long":
+							case "sz":
+							case "iptr": return "-9223372036854775808";
+							default: return string::tformat("%s::min", left_name);
+						}
+					}
+
+					if (member_name == "max")
+					{
+						switch (left_name)
+						{
+							case "ichar": return "127";
+							case "char": return "255";
+							case "short": return "32767";
+							case "ushort": return "65535";
+							case "int": return "2147483647";
+							case "uint": return "4294967295";
+							case "long":
+							case "sz":
+							case "iptr": return "9223372036854775807";
+							case "ulong":
+							case "usz":
+							case "uptr": return "18446744073709551615";
+							default: return string::tformat("%s::max", left_name);
+						}
+					}
+
+					Node* type_node = null;
+					if (ctx)
+					{
+						if (ctx.registry)
+						{
+							if (try ty_info = ctx.registry.types.get(left_name))
+							{
+								type_node = ty_info.node;
+							}
+						}
+						if (!type_node)
+						{
+							ctx.modules.@each(; mod_name, mod)
+							{
+								if (!type_node && mod)
 								{
-									if (!n || n.kind == ERROR) continue;
-									if (cursor::spelling(n, tmem) == left_name)
+									foreach (n : mod.nodes)
 									{
-										type_node = n;
-										break;
+										if (!n || n.kind == ERROR) continue;
+										if (cursor::spelling(n, tmem) == left_name)
+										{
+											type_node = n;
+											break;
+										}
 									}
 								}
-							}
-						};
+							};
+						}
+					}
+
+					if (type_node)
+					{
+						if (type_node.kind == ENUM_DECL && member_name == "len")
+						{
+							EnumDecl* ed = type_node.as(EnumDecl);
+							return string::tformat("%d (variants)", ed.variants.len);
+						}
+						if (type_node.kind == STRUCT_DECL && member_name == "members")
+						{
+							StructDecl* sd = type_node.as(StructDecl);
+							return string::tformat("%d (members)", sd.fields.len);
+						}
 					}
 				}
-
-				if (type_node)
+				else
 				{
-					if (type_node.kind == ENUM_DECL && member_name == "len")
+					String left_str = cursor::spelling(acc.left, tmem);
+					bool is_reflect = (acc.left && (acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
+					if (is_reflect)
 					{
-						EnumDecl* ed = type_node.as(EnumDecl);
-						return string::tformat("%d (variants)", ed.variants.len);
-					}
-					if (type_node.kind == STRUCT_DECL && member_name == "members")
-					{
-						StructDecl* sd = type_node.as(StructDecl);
-						return string::tformat("%d (members)", sd.fields.len);
+						String member_name = cursor::spelling(acc.member, tmem);
+						Node* inner_node = null;
+						if (acc.left.kind == CT_REFLECT_EXPR)
+						{
+							inner_node = acc.left.as(CtReflectExpr).inner_expr;
+						}
+						else if (acc.left.kind == CALL_EXPR && acc.left.as(CallExpr).args.len > 0)
+						{
+							inner_node = acc.left.as(CallExpr).args[0];
+						}
+
+						String inner_text = inner_node ? get_node_source_text(sf, inner_node) : "";
+
+						if (member_name == "bitoffset" || member_name == "bitsize")
+						{
+							String struct_name = "";
+							String field_name = inner_text;
+							if (try dot_idx = inner_text.rindex_of_char('.'))
+							{
+								struct_name = inner_text[:dot_idx].trim();
+								field_name = inner_text[dot_idx + 1..].trim();
+							}
+
+							Node* target_field = query::find_member_in_type(ctx, struct_name, field_name);
+							if (target_field && target_field.kind == VAR_DECL)
+							{
+								VarDecl* vd = target_field.as(VarDecl);
+								if (member_name == "bitoffset")
+								{
+									if (vd.init_expr && vd.init_expr.kind == LITERAL_EXPR)
+									{
+										return string::tformat("%d (bits)", (int)vd.init_expr.as(LiteralExpr).integer);
+									}
+									return "0 (bits)";
+								}
+								else if (member_name == "bitsize")
+								{
+									if (vd.bit_end && vd.bit_end.kind == LITERAL_EXPR && vd.init_expr && vd.init_expr.kind == LITERAL_EXPR)
+									{
+										int start_bit = (int)vd.init_expr.as(LiteralExpr).integer;
+										int end_bit = (int)vd.bit_end.as(LiteralExpr).integer;
+										return string::tformat("%d (bits)", end_bit - start_bit + 1);
+									}
+									return "1 (bits)";
+								}
+							}
+						}
+
+						if (member_name == "offset")
+						{
+							String struct_name = "";
+							String field_name = inner_text;
+							if (try dot_idx = inner_text.rindex_of_char('.'))
+							{
+								struct_name = inner_text[:dot_idx].trim();
+								field_name = inner_text[dot_idx + 1..].trim();
+							}
+
+							Node* target_field = query::find_member_in_type(ctx, struct_name, field_name);
+							if (target_field)
+							{
+								return string::tformat("offset of %s in %s", field_name, struct_name);
+							}
+						}
+
+						if (member_name == "name")
+						{
+							if (try dot_idx = inner_text.rindex_of_char('.'))
+							{
+								return string::tformat("\"%s\"", inner_text[dot_idx + 1..].trim());
+							}
+							return string::tformat("\"%s\"", inner_text);
+						}
+
+						if (member_name == "qname")
+						{
+							return string::tformat("\"%s\"", inner_text);
+						}
+
+						if (member_name == "size" || member_name == "alignment")
+						{
+							return string::tformat("%s of %s", member_name, inner_text);
+						}
+
+						if (member_name == "param_struct")
+						{
+							return string::tformat("typeid (param_struct_%s)", inner_text);
+						}
 					}
 				}
 			}
-		}
 
 		default:
 			break;

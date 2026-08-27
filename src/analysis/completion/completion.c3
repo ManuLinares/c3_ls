@@ -30,6 +30,7 @@ struct Context
 	String base_identifier;
 	String expected_type;
 	String caller_mod;
+	bool missing_second_colon;
 }
 
 fn void resolve_item(LspProject* project, CompletionItem* item)
@@ -330,6 +331,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.offset = offset,
 		.expected_type = expected_type,
 		.caller_mod = caller_mod,
+		.missing_second_colon = false,
 	};
 
 	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);

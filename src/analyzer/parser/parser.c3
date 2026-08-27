@@ -6,14 +6,13 @@ import std::collections::list;
 import std::collections::maybe;
 import analyzer::core;
 import analyzer::lexer;
-<*
- @param [&in] context : "The main context"
-*>
+
 fn ParseContext* create(AnalyzerContext* context)
 {
 	ParseContext* ctx = alloc::new(context.allocator, ParseContext);
 	ctx.allocator = context.allocator;
 	ctx.context = context;
+	ctx.current_section_visibility = Visibility.PUBLIC;
 	return ctx;
 }
 
@@ -310,6 +309,7 @@ fn bool parse(ParseContext* ctx, SourceFile* source_file) => @pool()
 	ctx.lexer = source_file.lexer;
 	ctx.ast = &source_file.ast;
 	ctx.context.current_source_file = source_file;
+	ctx.current_section_visibility = Visibility.PUBLIC;
 
 	if (ctx.lexer.tokens.last()!!.kind != EOF)
 	{
@@ -339,6 +339,67 @@ fn bool parse(ParseContext* ctx, SourceFile* source_file) => @pool()
 	return ctx.error_count == 0;
 }
 
+fn void update_section_visibility(ParseContext* ctx, ModuleDecl* md)
+{
+	Visibility sec_vis = Visibility.PUBLIC;
+	foreach (attr : md.attributes)
+	{
+		if (attr && attr.kind == ATTRIBUTE_DECL)
+		{
+			AttributeDecl* ad = attr.as(AttributeDecl);
+			if (ad.attribute_kind == AttributeKind.PRIVATE)
+			{
+				sec_vis = Visibility.PRIVATE;
+			}
+			else if (ad.attribute_kind == AttributeKind.LOCAL)
+			{
+				sec_vis = Visibility.LOCAL;
+			}
+			else if (ad.attribute_kind == AttributeKind.PUBLIC)
+			{
+				sec_vis = Visibility.PUBLIC;
+			}
+		}
+	}
+	ctx.current_section_visibility = sec_vis;
+}
+
+fn void apply_section_visibility_default(ParseContext* ctx, Node* node)
+{
+	if (!node || ctx.current_section_visibility == Visibility.PUBLIC) return;
+
+	NodeArray attrs;
+	switch (node.kind)
+	{
+		case FN_DECL: attrs = node.as(FnDecl).attributes;
+		case MACRO_DECL: attrs = node.as(MacroDecl).attributes;
+		case STRUCT_DECL: attrs = node.as(StructDecl).attributes;
+		case ENUM_DECL: attrs = node.as(EnumDecl).attributes;
+		case VAR_DECL: attrs = node.as(VarDecl).attributes;
+		case TYPEDEF_DECL: attrs = node.as(TypedefDecl).attributes;
+		case ALIAS_DECL: attrs = node.as(AliasDecl).attributes;
+		case INTERFACE_DECL: attrs = node.as(InterfaceDecl).attributes;
+		default: break;
+	}
+
+	bool has_explicit_vis = false;
+	foreach (attr : attrs)
+	{
+		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
+		AttributeDecl* ad = attr.as(AttributeDecl);
+		if (ad.attribute_kind == AttributeKind.PUBLIC || ad.attribute_kind == AttributeKind.PRIVATE || ad.attribute_kind == AttributeKind.LOCAL)
+		{
+			has_explicit_vis = true;
+			break;
+		}
+	}
+
+	if (!has_explicit_vis)
+	{
+		node.visibility = ctx.current_section_visibility;
+	}
+}
+
 fn void attach_leading_attributes(ParseContext* ctx, Node* node, List{Node*} * leading_attributes)
 {
 	if (!node || leading_attributes.len() == 0) return;
@@ -355,6 +416,8 @@ fn void attach_leading_attributes(ParseContext* ctx, Node* node, List{Node*} * l
 				node.visibility = Visibility.PRIVATE;
 			case AttributeKind.LOCAL:
 				node.visibility = Visibility.LOCAL;
+			case AttributeKind.PUBLIC:
+				node.visibility = Visibility.PUBLIC;
 			default:
 				break;
 		}
@@ -440,6 +503,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 	{
 		node = parse_var_decl(scope, null);
 		attach_leading_attributes(ctx, node, &leading_attributes);
+		apply_section_visibility_default(ctx, node);
 		return node;
 	}
 
@@ -461,6 +525,10 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 			node = parse_interface_decl(scope);
 		case MODULE:
 			node = parse_module_decl(scope);
+			if (node && node.kind == MODULE_DECL)
+			{
+				update_section_visibility(ctx, node.as(ModuleDecl));
+			}
 		case IMPORT:
 			node = parse_import_decl(scope);
 		case FAULTDEF:
@@ -512,6 +580,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 	}
 
 	attach_leading_attributes(ctx, node, &leading_attributes);
+	apply_section_visibility_default(ctx, node);
 	return node;
 }
 

@@ -6,6 +6,14 @@ import lsp::core;
 import lsp;
 
 import std::collections::list;
+
+struct ReflProp @local
+{
+	String name;
+	String detail;
+	String doc;
+}
+
 <*
  Precomputes line starting byte offsets in a single linear pass for O(1) lookups.
 *>
@@ -13,7 +21,7 @@ fn sz[] build_line_offsets(Allocator allocator, String content)
 {
 	List{sz} offsets;
 	offsets.init(allocator);
-	offsets.push(0);  // Line 0 starts at index 0
+	offsets.push(0);
 	for (sz i = 0; i < content.len; i++)
 	{
 		if (content[i] == '\n')
@@ -183,111 +191,116 @@ fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_nam
 	return null;
 }
 
-fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind)
+macro void @add_prop(items, String label, CompletionItemKind kind, String detail, MarkupContent doc, bool missing_colon)
 {
+	String ins = missing_colon ? string::tformat(":%s", label) : label;
 	items.push(
 	{
-		.label = "alignment", .kind = PROPERTY, .detail = "sz", .documentation = md("Alignment of the type in bytes."), .data = "property"
+		.label = label,
+		.kind = kind,
+		.detail = detail,
+		.documentation = doc,
+		.insertText = ins,
+		.filterText = label,
+		.sortText = string::tformat("0001_%s", label),
+		.data = "property"
 	}
 	);
-	items.push(
+}
+
+fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, String type_name = "", bool missing_second_colon = false)
+{
+	@add_prop(items, "alignment", PROPERTY, "sz", md("Alignment of the type in bytes."), missing_second_colon);
+	@add_prop(items, "kind", PROPERTY, "TypeKind", md("The category / TypeKind of the type (e.g. POINTER, STRUCT, SIGNED_INT)."), missing_second_colon);
+	@add_prop(items, "name", PROPERTY, "String", md("The short unqualified name of the type as a string."), missing_second_colon);
+	@add_prop(items, "qname", PROPERTY, "String", md("The fully qualified path name of the type as a string."), missing_second_colon);
+	@add_prop(items, "cname", PROPERTY, "String", md("External C name of the type as a string."), missing_second_colon);
+	@add_prop(items, "size", PROPERTY, "sz", md("Storage size of the type in bytes."), missing_second_colon);
+	@add_prop(items, "typeid", PROPERTY, "typeid", md("The unique runtime / compile-time type identifier."), missing_second_colon);
+	@add_prop(items, "methods", PROPERTY, "any[]", md("List of methods implemented for this type."), missing_second_colon);
+	@add_prop(items, "has_equals", PROPERTY, "bool", md("True if the type implements '==' and '!='."), missing_second_colon);
+	@add_prop(items, "is_ordered", PROPERTY, "bool", md("True if the type implements comparisons (<, <=, etc.)."), missing_second_colon);
+	@add_prop(items, "inner", PROPERTY, "typeid", md("Returns a typeid to an inner / pointee / base type."), missing_second_colon);
+	@add_prop(items, "generic_args", PROPERTY, "typeid[]", md("List of typeids representing the generic arguments used to instantiate this type."), missing_second_colon);
+	@add_prop(items, "generic_qname", PROPERTY, "String", md("Qualified name of the generic template."), missing_second_colon);
+	@add_prop(items, "is_generic", METHOD, "fn bool(any)", md("Returns true if the type was instantiated from the given template."), missing_second_colon);
+
+	bool is_float = (type_name == "float" || type_name == "double" || type_name == "float16" || type_name == "bfloat" || type_name == "float128");
+	bool is_int = (type_name == "int" || type_name == "uint" || type_name == "short" || type_name == "ushort" ||
+		type_name == "long" || type_name == "ulong" || type_name == "int128" || type_name == "uint128" ||
+		type_name == "char" || type_name == "ichar" || type_name == "sz" || type_name == "usz" ||
+		type_name == "iptr" || type_name == "uptr");
+
+	if (is_float || is_int || type_kind == VAR_DECL)
 	{
-		.label = "kind", .kind = PROPERTY, .detail = "TypeKind", .documentation = md("The category / TypeKind of the type (e.g. POINTER, STRUCT, SIGNED_INT)."), .data = "property"
+		@add_prop(items, "max", PROPERTY, type_name.len > 0 ? type_name : "any", md("The maximum value for the type."), missing_second_colon);
+		@add_prop(items, "min", PROPERTY, type_name.len > 0 ? type_name : "any", md("The minimum value for the type."), missing_second_colon);
 	}
-	);
-	items.push(
+
+	if (is_float)
 	{
-		.label = "name", .kind = PROPERTY, .detail = "String", .documentation = md("The short unqualified name of the type as a string."), .data = "property"
+		@add_prop(items, "nan", PROPERTY, type_name, md("Representation of floating point NaN."), missing_second_colon);
+		@add_prop(items, "inf", PROPERTY, type_name, md("Representation of floating point Infinity."), missing_second_colon);
 	}
-	);
-	items.push(
-	{
-		.label = "qname", .kind = PROPERTY, .detail = "String", .documentation = md("The fully qualified path name of the type as a string."), .data = "property"
-	}
-	);
-	items.push(
-	{
-		.label = "size", .kind = PROPERTY, .detail = "sz", .documentation = md("Storage size of the type in bytes."), .data = "property"
-	}
-	);
-	items.push(
-	{
-		.label = "typeid", .kind = PROPERTY, .detail = "typeid", .documentation = md("The unique runtime / compile-time type identifier."), .data = "property"
-	}
-	);
-	items.push(
-	{
-		.label = "methods", .kind = PROPERTY, .detail = "any[]", .documentation = md("List of methods implemented for this type."), .data = "property"
-	}
-	);
 
 	switch (type_kind)
 	{
 		case STRUCT_DECL:
-			items.push(
-			{
-				.label = "members", .kind = PROPERTY, .detail = "any[]", .documentation = md("Array of fields/members in the struct or union."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "get_tag", .kind = METHOD, .detail = "fn any(String)", .documentation = md("Retrieve the value of a compile-time @tag on the type."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "has_tag", .kind = METHOD, .detail = "fn bool(String)", .documentation = md("Check if a compile-time @tag exists on the type."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "is_substruct", .kind = PROPERTY, .detail = "bool", .documentation = md("True if the struct has an inline member."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "parent", .kind = PROPERTY, .detail = "typeid", .documentation = md("The typeid of the inline member if present."), .data = "property"
-			}
-			);
+			@add_prop(items, "members", PROPERTY, "any[]", md("Array of fields/members in the struct or union."), missing_second_colon);
+			@add_prop(items, "get_tag", METHOD, "fn any(String)", md("Retrieve the value of a compile-time @tag on the type."), missing_second_colon);
+			@add_prop(items, "has_tag", METHOD, "fn bool(String)", md("Check if a compile-time @tag exists on the type."), missing_second_colon);
+			@add_prop(items, "is_substruct", PROPERTY, "bool", md("True if the struct has an inline member."), missing_second_colon);
+			@add_prop(items, "parent", PROPERTY, "typeid", md("The typeid of the inline member if present."), missing_second_colon);
 		case ENUM_DECL:
-			items.push(
-			{
-				.label = "values", .kind = PROPERTY, .detail = "any[]", .documentation = md("List containing all variants of the enum."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "len", .kind = PROPERTY, .detail = "sz", .documentation = md("Number of elements in the enum or array."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "members", .kind = PROPERTY, .detail = "any[]", .documentation = md("List of member references in the enum."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "from_ordinal", .kind = METHOD, .detail = "fn type(sz)", .documentation = md("Converts an integer ordinal to the corresponding enum variant."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "lookup_field", .kind = METHOD, .detail = "fn any(String)", .documentation = md("Lookup an enum variant by associated field value."), .data = "property"
-			}
-			);
+			@add_prop(items, "values", PROPERTY, "any[]", md("List containing all variants of the enum."), missing_second_colon);
+			@add_prop(items, "len", PROPERTY, "sz", md("Number of elements in the enum or array."), missing_second_colon);
+			@add_prop(items, "names", PROPERTY, "String[]", md("Array of the names of all enum variants."), missing_second_colon);
+			@add_prop(items, "members", PROPERTY, "any[]", md("List of member references in the enum."), missing_second_colon);
+			@add_prop(items, "from_ordinal", METHOD, "fn type(sz)", md("Converts an integer ordinal to the corresponding enum variant."), missing_second_colon);
+			@add_prop(items, "lookup_field", METHOD, "fn any(String, any)", md("Lookup an enum variant by associated field value."), missing_second_colon);
 		case FN_DECL:
-			items.push(
-			{
-				.label = "params", .kind = PROPERTY, .detail = "any[]", .documentation = md("Function pointer parameter types."), .data = "property"
-			}
-			);
-			items.push(
-			{
-				.label = "returns", .kind = PROPERTY, .detail = "typeid", .documentation = md("Function pointer return type."), .data = "property"
-			}
-			);
+			@add_prop(items, "params", PROPERTY, "any[]", md("Function pointer parameter types."), missing_second_colon);
+			@add_prop(items, "returns", PROPERTY, "typeid", md("Function pointer return type."), missing_second_colon);
+			@add_prop(items, "param_struct", PROPERTY, "typeid", md("Struct type mirroring the parameter list."), missing_second_colon);
 		default:
 			break;
+	}
+}
+
+fn void inject_reflect_properties(List{CompletionItem}* items, String prefix = "")
+{
+	const ReflProp[*] PROPS = {
+		{ "alignment", "sz", "The alignment in bytes." },
+		{ "bitoffset", "sz", "The bit offset of a bitstruct member within its backing type." },
+		{ "bitsize", "sz", "The size in bits of a bitstruct member." },
+		{ "cname", "String", "The external linker name of a symbol." },
+		{ "get_tag", "fn any(String)", "Retrieve the value of a compile-time tag." },
+		{ "has_tag", "fn bool(String)", "Check if a compile-time tag exists." },
+		{ "name", "String", "The unqualified name of the symbol." },
+		{ "offset", "sz", "The byte offset of a member in a struct." },
+		{ "param_struct", "typeid", "The parameter struct type for a function." },
+		{ "qname", "String", "The fully qualified path name of the symbol." },
+		{ "size", "sz", "The size of the expression in bytes." },
+		{ "type", "typeid", "The typeid of the reflected expression." },
+	};
+
+	foreach (p : PROPS)
+	{
+		if (prefix.len == 0 || p.name.starts_with(prefix))
+		{
+			items.push(
+			{
+				.label = p.name,
+				.kind = PROPERTY,
+				.detail = p.detail,
+				.documentation = md(p.doc),
+				.insertText = p.name,
+				.filterText = p.name,
+				.sortText = string::tformat("0001_%s", p.name),
+				.data = "property"
+			}
+			);
+		}
 	}
 }
 
@@ -298,7 +311,6 @@ fn bool is_inside_comment(String content, sz offset)
 	sz i = 0;
 	while (i < content.len && i <= offset)
 	{
-		// 1. Line comment // ... \n
 		if (i + 1 < content.len && content[i] == '/' && content[i + 1] == '/')
 		{
 			sz comment_start = i;
@@ -310,7 +322,6 @@ fn bool is_inside_comment(String content, sz offset)
 			continue;
 		}
 
-		// 2. Block comment /* ... */ (supports C3 nesting)
 		if (i + 1 < content.len && content[i] == '/' && content[i + 1] == '*')
 		{
 			sz comment_start = i;
@@ -336,7 +347,6 @@ fn bool is_inside_comment(String content, sz offset)
 			continue;
 		}
 
-		// 3. Doc contract <* ... *>
 		if (i + 1 < content.len && content[i] == '<' && content[i + 1] == '*')
 		{
 			sz comment_start = i;
@@ -362,7 +372,6 @@ fn bool is_inside_comment(String content, sz offset)
 			continue;
 		}
 
-		// 4. String literal " ... "
 		if (content[i] == '"')
 		{
 			i++;
@@ -375,7 +384,6 @@ fn bool is_inside_comment(String content, sz offset)
 			continue;
 		}
 
-		// 5. Raw string literal ` ... `
 		if (content[i] == '`')
 		{
 			i++;

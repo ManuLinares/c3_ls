@@ -779,9 +779,20 @@ fn NodeArray parse_attributes(ContextScope scope, Node* parent_node, AttributePa
 		attr_node.name = ctx.ident(t);
 		attr_node.attribute_kind = core::get_attribute_from_string(t.value);
 
-		if (parent_node && attr_node.attribute_kind == AttributeKind.PRIVATE)
+		if (parent_node)
 		{
-			parent_node.visibility = Visibility.PRIVATE;
+			if (attr_node.attribute_kind == AttributeKind.PRIVATE)
+			{
+				parent_node.visibility = Visibility.PRIVATE;
+			}
+			else if (attr_node.attribute_kind == AttributeKind.LOCAL)
+			{
+				parent_node.visibility = Visibility.LOCAL;
+			}
+			else if (attr_node.attribute_kind == AttributeKind.PUBLIC)
+			{
+				parent_node.visibility = Visibility.PUBLIC;
+			}
 		}
 
 		if (consume(ctx, LPAREN))

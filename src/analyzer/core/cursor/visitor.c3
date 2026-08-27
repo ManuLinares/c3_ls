@@ -726,6 +726,80 @@ fn bool visit_exprs(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				if (range.end && !visit(range.end, parent, hooks, data)) return false;
 				break;
 			}
+		case CT_DEFINED_EXPR:
+			{
+				CtDefinedExpr* def = node.as(CtDefinedExpr);
+				foreach (e : def.expr_list)
+				{
+					if (!visit(e, parent, hooks, data)) return false;
+				}
+				break;
+			}
+		case CT_REFLECT_EXPR:
+			{
+				CtReflectExpr* ref = node.as(CtReflectExpr);
+				if (ref.inner_expr && !visit(ref.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_STRINGIFY_EXPR:
+			{
+				CtStringifyExpr* str = node.as(CtStringifyExpr);
+				if (str.inner_expr && !visit(str.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_FEATURE_EXPR:
+			{
+				CtFeatureExpr* feat = node.as(CtFeatureExpr);
+				if (feat.inner_expr && !visit(feat.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_EVAL_EXPR:
+			{
+				CtEvalExpr* ev = node.as(CtEvalExpr);
+				if (ev.inner_expr && !visit(ev.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case LENGTHOF_EXPR:
+			{
+				LengthofExpr* len = node.as(LengthofExpr);
+				if (len.inner_expr && !visit(len.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case OPTIONAL_EXPR:
+			{
+				OptionalExpr* opt = node.as(OptionalExpr);
+				if (opt.inner_expr && !visit(opt.inner_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case MAYBE_DEREF_EXPR:
+			{
+				MaybeDerefExpr* md = node.as(MaybeDerefExpr);
+				if (md.left && !visit(md.left, parent, hooks, data)) return false;
+				break;
+			}
+		case GENERIC_IDENT_EXPR:
+			{
+				GenericIdentExpr* gi = node.as(GenericIdentExpr);
+				foreach (e : gi.exprs)
+				{
+					if (!visit(e, parent, hooks, data)) return false;
+				}
+				break;
+			}
+		case EVAL_NAMED_ARG_EXPR:
+			{
+				EvalNamedArgExpr* ena = node.as(EvalNamedArgExpr);
+				if (ena.name && !visit(ena.name, parent, hooks, data)) return false;
+				if (ena.value && !visit(ena.value, parent, hooks, data)) return false;
+				break;
+			}
+		case CONTRACT_EXPR:
+			{
+				ContractExpr* ce = node.as(ContractExpr);
+				if (ce.exprs && !visit(ce.exprs, parent, hooks, data)) return false;
+				if (ce.expr_string && !visit(ce.expr_string, parent, hooks, data)) return false;
+				break;
+			}
 		default:
 			break;
 	}

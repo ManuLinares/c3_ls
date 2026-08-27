@@ -7,6 +7,7 @@ import analyzer::core::source_file;
 import analyzer::cursor;
 import analyzer::sema;
 import analyzer::sema::registry;
+import analyzer::sema::query;
 import analyzer::lexer;
 
 import std::collections::list;
@@ -115,7 +116,7 @@ fn SourceFile* LspWorkspace.get_source_file_by_path(&self, String path)
 	return self.ctx.files.get(path) ?? null;
 }
 
-fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name)
+fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, SourceFile* sf = null)
 {
 	List{SymbolEntry} results;
 	results.tinit();
@@ -126,58 +127,72 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name)
 	{
 		self.ctx.modules.@each(; mod_name, mod)
 		{
-			String qname = string::tformat("%s::%s", mod_name, name);
-			FunctionInfo* fn_info = self.ctx.registry.functions.get(qname) ?? null;
-			while (fn_info != null)
+			if (!sf || query::is_module_visible_to_file(self.ctx, sf, mod_name))
 			{
-				if (fn_info.node && fn_info.node.kind != ERROR)
+				String qname = string::tformat("%s::%s", mod_name, name);
+				FunctionInfo* fn_info = self.ctx.registry.functions.get(qname) ?? null;
+				while (fn_info != null)
 				{
-					results.push(
+					if (fn_info.node && fn_info.node.kind != ERROR)
 					{
-						.node = fn_info.node,.section_id = 0
+						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, fn_info.node, mod_name))
+						{
+							results.push(
+							{
+								.node = fn_info.node,.section_id = 0
+							}
+							);
+						}
 					}
-					);
+					fn_info = fn_info.next;
 				}
-				fn_info = fn_info.next;
-			}
 
-			TypeInfo* ty_info = self.ctx.registry.types.get(qname) ?? null;
-			while (ty_info != null)
-			{
-				if (ty_info.node && ty_info.node.kind != ERROR)
+				TypeInfo* ty_info = self.ctx.registry.types.get(qname) ?? null;
+				while (ty_info != null)
 				{
-					results.push(
+					if (ty_info.node && ty_info.node.kind != ERROR)
 					{
-						.node = ty_info.node,.section_id = 0
+						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, ty_info.node, mod_name))
+						{
+							results.push(
+							{
+								.node = ty_info.node,.section_id = 0
+							}
+							);
+						}
 					}
-					);
+					ty_info = ty_info.next;
 				}
-				ty_info = ty_info.next;
-			}
 
-			MacroInfo* mac_info = self.ctx.registry.macros.get(qname) ?? null;
-			while (mac_info != null)
-			{
-				if (mac_info.node && mac_info.node.kind != ERROR)
+				MacroInfo* mac_info = self.ctx.registry.macros.get(qname) ?? null;
+				while (mac_info != null)
 				{
-					results.push(
+					if (mac_info.node && mac_info.node.kind != ERROR)
 					{
-						.node = mac_info.node,.section_id = 0
+						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, mac_info.node, mod_name))
+						{
+							results.push(
+							{
+								.node = mac_info.node,.section_id = 0
+							}
+							);
+						}
 					}
-					);
+					mac_info = mac_info.next;
 				}
-				mac_info = mac_info.next;
 			}
 		};
 	}
 
 	self.ctx.modules.@each(; mod_name, mod)
 	{
-		if (mod)
+		if (mod && (!sf || query::is_module_visible_to_file(self.ctx, sf, mod_name)))
 		{
 			foreach (n : mod.nodes)
 			{
 				if (!n) continue;
+				if (sf && !query::is_symbol_accessible_from_file(self.ctx, sf, n, mod_name)) continue;
+
 				switch (n.kind)
 				{
 					case ENUM_DECL:
@@ -223,23 +238,24 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name)
 
 	if (results.len() == 0)
 	{
-		self.ctx.files.@each(; file_path, sf)
+		self.ctx.files.@each(; file_path, file_sf)
 		{
-			if (sf)
+			if (file_sf)
 			{
-				foreach (stmt : sf.ast.statements)
+				String file_mod = query::get_source_file_module_name(file_sf);
+				foreach (stmt : file_sf.ast.statements)
 				{
-					if (stmt && stmt.kind != ERROR)
+					if (!stmt || stmt.kind == ERROR) continue;
+					if (sf && !query::is_symbol_accessible_from_file(self.ctx, sf, stmt, file_mod)) continue;
+
+					String sname = cursor::spelling(stmt, tmem);
+					if (sname == name)
 					{
-						String sname = cursor::spelling(stmt, tmem);
-						if (sname == name)
+						results.push(
 						{
-							results.push(
-							{
-								.node = stmt,.section_id = 0
-							}
-							);
+							.node = stmt,.section_id = 0
 						}
+						);
 					}
 				}
 			}

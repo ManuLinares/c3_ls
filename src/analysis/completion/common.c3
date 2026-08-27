@@ -204,6 +204,11 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 			break;
 	}
 
+	if (ctx.missing_second_colon && ctx.access == STATIC)
+	{
+		insert_text = string::tformat(":%s", insert_text);
+	}
+
 	String detail_string = string::tformat("%s via %s", type_desc, base_identifier);
 	String filter_text = symbol_name.strip_prefix("@");
 

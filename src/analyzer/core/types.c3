@@ -65,6 +65,7 @@ struct ParseContext
 	Token current;
 	int pos;
 	int error_count;
+	Visibility current_section_visibility;
 }
 
 struct FunctionInfo
