@@ -4,8 +4,14 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
   workflow_dispatch:
 
 permissions:
@@ -43,7 +49,7 @@ jobs:
       - name: Build Linux x86_64 (Static musl)
         run: |
           MUSL_PATH=$(find /usr/lib -maxdepth 3 -name 'crt1.o' -path '*musl*' | head -1 | xargs dirname)
-          c3c build -O2 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" -z "-static" -z "-s"
+          c3c build -O3 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" -z "-static" -z "-s"
           mkdir -p dist
           tar -czvf dist/c3_ls-linux-x86_64.tar.gz -C build c3_ls
 
@@ -54,7 +60,7 @@ jobs:
       - name: Build Linux aarch64
         run: |
           CRTBEGIN_DIR=$(dirname $(aarch64-linux-gnu-gcc -print-file-name=crtbegin.o))
-          c3c build --target linux-aarch64 -O2 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR" -z "-s"
+          c3c build --target linux-aarch64 -O3 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR" -z "-s"
           tar -czvf dist/c3_ls-linux-aarch64.tar.gz -C build-linux-arm64 c3_ls
 
       # 3. Windows x86_64 (Cross-compile with static CRT)
@@ -63,7 +69,7 @@ jobs:
 
       - name: Build Windows x86_64
         run: |
-          c3c build --target windows-x64 -O2 --wincrt=static --build-dir build-win64 --output-dir build-win64
+          c3c build --target windows-x64 -O3 --wincrt=static --build-dir build-win64 --output-dir build-win64
           zip -j dist/c3_ls-windows-x86_64.zip build-win64/c3_ls.exe
 
       - name: Upload Artifacts
@@ -86,14 +92,14 @@ jobs:
       # 1. macOS aarch64 (Apple Silicon)
       - name: Build macOS aarch64
         run: |
-          c3c build -O2 -z "-s"
+          c3c build -O3 -z "-s"
           mkdir -p dist
           tar -czvf dist/c3_ls-macos-aarch64.tar.gz -C build c3_ls
 
       # 2. macOS x86_64 (Intel)
       - name: Build macOS x86_64
         run: |
-          c3c build --target macos-x64 -O2 --build-dir build-mac-x64 --output-dir build-mac-x64 -z "-s"
+          c3c build --target macos-x64 -O3 --build-dir build-mac-x64 --output-dir build-mac-x64 -z "-s"
           tar -czvf dist/c3_ls-macos-x86_64.tar.gz -C build-mac-x64 c3_ls
 
       - name: Upload macOS Artifacts

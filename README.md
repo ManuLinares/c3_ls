@@ -7,7 +7,7 @@ C3 language server.
 requires `c3c` in your path.
 
 ```sh
-c3c build
+c3c build -O2
 ```
 
 binary is in `build/c3_ls`.
@@ -15,9 +15,11 @@ binary is in `build/c3_ls`.
 ## flags
 
 * `--stdlib-path <path>`: path to C3 standard library.
+* `--compiler-path <path>`: path to `c3c` executable.
 * `--log-level <error|warn|info|debug>`: minimum log severity (default: `error`).
 * `--log-path <path>`: file path to write logs to.
 * `-v, --version`: print version and exit.
+* `-h, --help`: print help manual.
 
 ## features
 
