@@ -212,7 +212,7 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 		line_start--;
 	}
 
-	String line_prefix = sf.content[line_start:offset - line_start].trim_left();
+	String line_prefix = sf.content[line_start : offset - line_start].trim_left();
 
 	if (line_prefix == "import" || line_prefix.starts_with("import ") || line_prefix.starts_with("import\t"))
 	{
@@ -227,10 +227,10 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 			String[] words = lhs.tsplit(" ");
 			if (words.len >= 2)
 			{
-				String candidate_type = words[^2].trim();
+				String candidate_type = words[^ 2].trim();
 				if (candidate_type.len > 0 && (candidate_type[0].is_upper() || candidate_type.contains("::") || candidate_type == "fault"))
 				{
-					if (out_expected_type) *out_expected_type = candidate_type;
+					if (out_expected_type) * out_expected_type = candidate_type;
 					return TYPE_ASSIGNMENT;
 				}
 			}
@@ -241,7 +241,7 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 				(void)query::find_local_decl_in_file(sf, var_name, &resolved_type);
 				if (resolved_type.len > 0)
 				{
-					if (out_expected_type) *out_expected_type = resolved_type;
+					if (out_expected_type) * out_expected_type = resolved_type;
 					return TYPE_ASSIGNMENT;
 				}
 			}
@@ -251,7 +251,7 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 	return EXECUTION;
 }
 
-fn void provide_expected_type_completions(Context* ctx, List{CompletionItem}* items, String type_name)
+fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * items, String type_name)
 {
 	if (!ctx.ws || type_name.len == 0) return;
 

@@ -25,7 +25,7 @@ fn void main() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/refl_typefrom.c3");
 	defer doc_uri.free();
 
-	LspPosition packet_pos = { .line = 3, .character = 14 };
+	LspPosition packet_pos = {.line = 3,.character = 14 };
 	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, packet_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
@@ -49,7 +49,7 @@ fn void run() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/refl_comp.c3");
 	defer doc_uri.free();
 
-	LspPosition pos = { .line = 4, .character = 28 };
+	LspPosition pos = {.line = 4,.character = 28 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 
 	bool found_offset = false;
@@ -89,11 +89,11 @@ fn void run() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/refl_bitstruct.c3");
 	defer doc_uri.free();
 
-	LspPosition off_pos = { .line = 6, .character = 35 };
+	LspPosition off_pos = {.line = 6,.character = 35 };
 	String h_off = hover::hover(&proj, doc_uri, off_pos)!!;
 	assert(h_off.contains("0 (bits)"));
 
-	LspPosition len_pos = { .line = 7, .character = 35 };
+	LspPosition len_pos = {.line = 7,.character = 35 };
 	String h_len = hover::hover(&proj, doc_uri, len_pos)!!;
 	assert(h_len.contains("4 (bits)"));
 }
@@ -116,7 +116,7 @@ fn void run() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/refl_typeof.c3");
 	defer doc_uri.free();
 
-	LspPosition static_pos = { .line = 4, .character = 16 };
+	LspPosition static_pos = {.line = 4,.character = 16 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, static_pos)!!;
 
 	bool found_align = false;
@@ -161,9 +161,8 @@ fn void test() {
 
 	Uri app_uri = uri::from_file_path(mem, "/virtual/app_test.c3");
 	defer app_uri.free();
-
 	// 1. `List{int}::` static completion provides reflection properties
-	LspPosition list_pos = { .line = 3, .character = 13 };
+	LspPosition list_pos = {.line = 3,.character = 13 };
 	CompletionItem[] items = completion::resolve(&proj, app_uri, list_pos)!!;
 	bool found_generic_args = false;
 	bool found_size = false;
@@ -174,9 +173,8 @@ fn void test() {
 	}
 	assert(found_generic_args);
 	assert(found_size);
-
 	// 2. Unimported private `Point` does not jump to std::crypto::ed25519
-	LspPosition point_pos = { .line = 4, .character = 4 };
+	LspPosition point_pos = {.line = 4,.character = 4 };
 	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, point_pos)!!;
 	assert(locs.len == 0);
 }
@@ -199,12 +197,12 @@ fn void test_def() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/refl_def.c3");
 	defer doc_uri.free();
 
-	LspPosition id_pos = { .line = 4, .character = 18 };
+	LspPosition id_pos = {.line = 4,.character = 18 };
 	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, id_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 
-	LspPosition u_pos = { .line = 4, .character = 16 };
+	LspPosition u_pos = {.line = 4,.character = 16 };
 	String h = hover::hover(&proj, doc_uri, u_pos)!!;
 	assert(h.contains("User u"));
 }
@@ -225,7 +223,7 @@ fn void test() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/unresolved_comp.c3");
 	defer doc_uri.free();
 
-	LspPosition pos = { .line = 2, .character = 19 };
+	LspPosition pos = {.line = 2,.character = 19 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 	assert(items.len == 0);
 }
@@ -255,7 +253,7 @@ fn void main() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/chain_comp.c3");
 	defer doc_uri.free();
 
-	LspPosition pos = { .line = 11, .character = 16 };
+	LspPosition pos = {.line = 11,.character = 16 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 	assert(items.len >= 2);
 
@@ -294,7 +292,7 @@ fn void main() {
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/gen_inst_comp.c3");
 	defer doc_uri.free();
 
-	LspPosition pos = { .line = 10, .character = 4 };
+	LspPosition pos = {.line = 10,.character = 4 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 	assert(items.len >= 4);
 
@@ -343,15 +341,13 @@ fn void run() {
 
 	Uri app_uri = uri::from_file_path(mem, "/virtual/consumer.c3");
 	defer app_uri.free();
-
 	// 1. Public function in first section resolves cleanly
-	LspPosition fn_pos = { .line = 3, .character = 20 };
+	LspPosition fn_pos = {.line = 3,.character = 20 };
 	LspLocation[] fn_locs = goto_definition::goto_definition(&proj, app_uri, fn_pos)!!;
 	assert(fn_locs.len > 0);
 	assert(fn_locs[0].range.start.line == 1);
-
 	// 2. Struct in @private section of same file is not accessible to consumer
-	LspPosition sk_pos = { .line = 4, .character = 4 };
+	LspPosition sk_pos = {.line = 4,.character = 4 };
 	LspLocation[] sk_locs = goto_definition::goto_definition(&proj, app_uri, sk_pos)!!;
 	assert(sk_locs.len == 0);
 }
@@ -373,9 +369,8 @@ fn void run() {
 	proj.workspace.process_file("/virtual/colon_test.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/colon_test.c3");
 	defer doc_uri.free();
-
 	// 1. Single colon `Point:` -> insertText starts with `:` to complete `::`
-	LspPosition single_pos = { .line = 3, .character = 8 };
+	LspPosition single_pos = {.line = 3,.character = 8 };
 	CompletionItem[] single_items = completion::resolve(&proj, doc_uri, single_pos)!!;
 	bool found_single_align = false;
 	foreach (item : single_items)
@@ -387,9 +382,8 @@ fn void run() {
 		}
 	}
 	assert(found_single_align);
-
 	// 2. Double colon `Point::` -> insertText does NOT have leading `:`
-	LspPosition double_pos = { .line = 4, .character = 9 };
+	LspPosition double_pos = {.line = 4,.character = 9 };
 	CompletionItem[] double_items = completion::resolve(&proj, doc_uri, double_pos)!!;
 	bool found_double_align = false;
 	foreach (item : double_items)

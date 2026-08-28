@@ -68,7 +68,6 @@ fn void test_self_member_completion_in_method()
 	defer doc_uri.free();
 
 	proj.workspace.process_file("/virtual/comp_self.c3", source);
-
 	// 1. Completion on `self.`
 	LspPosition pos1 = {.line = 6,.character = 7 };
 	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
@@ -83,7 +82,6 @@ fn void test_self_member_completion_in_method()
 	}
 	assert(found_x1);
 	assert(found_y1);
-
 	// 2. Completion on `this.`
 	LspPosition pos2 = {.line = 9,.character = 7 };
 	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
@@ -119,7 +117,6 @@ fn void run() {
 	defer doc_uri.free();
 
 	proj.workspace.process_file("/virtual/comp_refl.c3", source);
-
 	// 1. Dot access on instance `s.` (line 4, col 4) -> must NOT include reflection properties
 	LspPosition dot_pos = {.line = 4,.character = 4 };
 	CompletionItem[] dot_items = completion::resolve(&proj, doc_uri, dot_pos)!!;
@@ -127,7 +124,6 @@ fn void run() {
 	{
 		assert(item.label != "alignment" && item.label != "typeid");
 	}
-
 	// 2. Static access on `Status::` (line 5, col 10) -> must include properties with valid docs
 	LspPosition static_pos = {.line = 5,.character = 10 };
 	CompletionItem[] static_items = completion::resolve(&proj, doc_uri, static_pos)!!;
@@ -160,7 +156,6 @@ fn void test_import_completion_and_submodules()
 
 	Uri app_uri = uri::from_file_path(mem, "/virtual/app_import.c3");
 	defer app_uri.free();
-
 	// 1. Completion on `import ` (line 1, col 7) -> lists modules and has doc contracts
 	LspPosition pos1 = {.line = 1,.character = 7 };
 	CompletionItem[] items1 = completion::resolve(&proj, app_uri, pos1)!!;
@@ -174,7 +169,6 @@ fn void test_import_completion_and_submodules()
 		}
 	}
 	assert(found_std_io);
-
 	// 2. Completion on `import std:` (line 2, col 11) -> suggests `:io` and `:math`
 	LspPosition pos2 = {.line = 2,.character = 11 };
 	CompletionItem[] items2 = completion::resolve(&proj, app_uri, pos2)!!;
@@ -188,7 +182,6 @@ fn void test_import_completion_and_submodules()
 		}
 	}
 	assert(found_colon_io);
-
 	// 3. Completion on `import std::` (line 3, col 12) -> suggests `io` and `math`
 	LspPosition pos3 = {.line = 3,.character = 12 };
 	CompletionItem[] items3 = completion::resolve(&proj, app_uri, pos3)!!;
@@ -239,7 +232,6 @@ fn void run() {
 	defer app1_uri.free();
 	Uri app2_uri = uri::from_file_path(mem, "/virtual/app2.c3");
 	defer app2_uri.free();
-
 	// 1. Normal import on `fault a = regex::` (line 3, col 19)
 	LspPosition pos1 = {.line = 3,.character = 19 };
 	CompletionItem[] items1 = completion::resolve(&proj, app1_uri, pos1)!!;
@@ -257,7 +249,6 @@ fn void run() {
 	}
 	assert(found_syntax_error);
 	assert(!found_private_in_app1);
-
 	// 2. `@public` import on `regex::` in app2 (line 3, col 9)
 	LspPosition pos2 = {.line = 3,.character = 9 };
 	CompletionItem[] items2 = completion::resolve(&proj, app2_uri, pos2)!!;
@@ -292,7 +283,6 @@ fn void test_fn() {
 	proj.workspace.process_file("/virtual/enum_docs.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_docs.c3");
 	defer doc_uri.free();
-
 	// 1. Completion on `a.` (line 10, char 3)
 	LspPosition pos = {.line = 10,.character = 3 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
@@ -309,11 +299,9 @@ fn void test_fn() {
 		}
 	}
 	assert(found_addevent);
-
 	// 2. Resolve ADDEVENT item documentation
 	completion::resolve_item(&proj, &addevent_item);
 	assert(addevent_item.documentation.value.contains("Add events to the back of the queue."));
-
 	// 3. Hover on `enum SdlEventAction` (line 1, col 6)
 	LspPosition enum_pos = {.line = 1,.character = 6 };
 	String h = hover::hover(&proj, doc_uri, enum_pos)!!;
@@ -351,9 +339,8 @@ const double C0 @private = -0x1ffffffd0c5e81.0p-54;
 	proj.workspace.process_file("/virtual/math_comment.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/math_comment.c3");
 	defer doc_uri.free();
-
 	// Line 14: ` * Permission to use, copy, modify, and distribute this` (char 55)
-	LspPosition pos = {.line = 14, .character = 55 };
+	LspPosition pos = {.line = 14,.character = 55 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 
 	assert(items.len == 0);

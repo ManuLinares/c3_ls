@@ -278,7 +278,7 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 	return type_name.len > 0 ? type_name : clean_id;
 }
 
-fn void inject_vector_completions(List{CompletionItem}* items, String prefix)
+fn void inject_vector_completions(List{CompletionItem} * items, String prefix)
 {
 	const String[*] COMPS = { "x", "y", "xy", "yx", "xx", "yy", "r", "g", "rg", "gr", "u", "v" };
 	foreach (c : COMPS)
@@ -322,7 +322,7 @@ fn void inject_vector_completions(List{CompletionItem}* items, String prefix)
 	}
 }
 
-fn void provide_enum_variants(List{CompletionItem}* items, Node* enum_node, String type_name, String prefix, bool missing_second_colon = false)
+fn void provide_enum_variants(List{CompletionItem} * items, Node* enum_node, String type_name, String prefix, bool missing_second_colon = false)
 {
 	if (!enum_node || enum_node.kind != ENUM_DECL)
 	{
@@ -356,7 +356,7 @@ fn void provide_enum_variants(List{CompletionItem}* items, Node* enum_node, Stri
 	}
 }
 
-fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
+fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 {
 	if (ctx.access == NONE || ctx.base_identifier.len == 0)
 	{

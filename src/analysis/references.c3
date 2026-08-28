@@ -20,7 +20,7 @@ struct RefCollectorContext
 	String symbol_name;
 	String file_uri;
 	bool include_declaration;
-	List{LspLocation}* locations;
+	List{LspLocation} * locations;
 }
 
 fn bool is_local_decl(Node* node)

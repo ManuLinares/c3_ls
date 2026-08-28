@@ -140,7 +140,11 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 				ctx.ast.error(start);
 				return false;
 			}
-			func.body = parse_compound_stmt(scope.with_flags({ .is_local = true }));
+			func.body = parse_compound_stmt(scope.with_flags(
+			{
+				.is_local = true
+			}
+			));
 			if (func.body)
 			{
 				func.range.end = func.body.range.end;
@@ -153,7 +157,11 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 				ctx.ast.error(start);
 				return false;
 			}
-			func.body = parse_short_body(scope.with_flags({ .is_local = true }), true);
+			func.body = parse_short_body(scope.with_flags(
+			{
+				.is_local = true
+			}
+			), true);
 			if (func.body)
 			{
 				func.range.end = func.body.range.end;

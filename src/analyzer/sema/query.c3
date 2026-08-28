@@ -132,14 +132,14 @@ fn Node* find_local_decl_in_file(SourceFile* sf, String name, String* out_type =
 	{
 		return null;
 	}
-	LocalSearchContext loc_search = { .context = context, .sf = sf, .name = name, .found_decl = null, .found_type = "" };
+	LocalSearchContext loc_search = {.context = context,.sf = sf,.name = name,.found_decl = null,.found_type = "" };
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR)
 		{
 			continue;
 		}
-		cursor::visit(stmt, null, { .on_enter = &find_local_decl_callback }, &loc_search);
+		cursor::visit(stmt, null, {.on_enter = &find_local_decl_callback }, &loc_search);
 		if (loc_search.found_decl)
 		{
 			if (out_type)
@@ -871,7 +871,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 	{
 		return null;
 	}
-	Range target_range = { .start = loc, .end = loc };
+	Range target_range = {.start = loc,.end = loc };
 	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
 	if (!target_node || target_node.kind == ERROR)
 	{
@@ -1046,14 +1046,14 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		}
 	}
 
-	AccessSearchContext acc_ctx = { .target_range = target_range, .found_access = null };
+	AccessSearchContext acc_ctx = {.target_range = target_range,.found_access = null };
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR)
 		{
 			continue;
 		}
-		cursor::visit(stmt, null, { .on_enter = &find_access_callback }, &acc_ctx);
+		cursor::visit(stmt, null, {.on_enter = &find_access_callback }, &acc_ctx);
 		if (acc_ctx.found_access)
 		{
 			break;
@@ -1098,8 +1098,8 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		Node* local_decl = null;
 		if (enclosing_func)
 		{
-			LocalSearchContext loc_search = { .context = context, .sf = sf, .name = symbol_name, .found_decl = null, .found_type = "" };
-			cursor::visit(enclosing_func, null, { .on_enter = &find_local_decl_callback }, &loc_search);
+			LocalSearchContext loc_search = {.context = context,.sf = sf,.name = symbol_name,.found_decl = null,.found_type = "" };
+			cursor::visit(enclosing_func, null, {.on_enter = &find_local_decl_callback }, &loc_search);
 			local_decl = loc_search.found_decl;
 		}
 		else

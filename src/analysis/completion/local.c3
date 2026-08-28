@@ -16,7 +16,7 @@ struct LocalCollectorContext
 {
 	Context* ctx;
 	Location loc;
-	List{CompletionItem}* items;
+	List{CompletionItem} * items;
 	HashSet{String} seen;
 }
 
@@ -158,7 +158,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 	return RECURSE;
 }
 
-fn void provide_locals(Context* ctx, List{CompletionItem}* items)
+fn void provide_locals(Context* ctx, List{CompletionItem} * items)
 {
 	if (ctx.access != NONE || !ctx.sf) return;
 

@@ -159,7 +159,11 @@ fn Node* parse_decl_or_expr_stmt(ContextScope scope)
 	Range start = t.range;
 	if (expr.kind == TYPE_EXPR)
 	{
-		Node* decl = parse_var_decl(scope.with_flags({ .is_local = true }), expr);
+		Node* decl = parse_var_decl(scope.with_flags(
+		{
+			.is_local = true
+		}
+		), expr);
 		return decl;
 	}
 
@@ -187,7 +191,11 @@ fn Node* parse_decl_stmt(ContextScope scope)
 	{
 		case IDENT:
 		case CT_IDENT:
-			return parse_var_decl(scope.with_flags({ .is_local = true }), type);
+			return parse_var_decl(scope.with_flags(
+			{
+				.is_local = true
+			}
+			), type);
 		default:
 			break;
 	}
@@ -216,7 +224,11 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 	while (!ctx.is(RBRACE) && !ctx.eof())
 	{
 		int start_pos = ctx.pos;
-		Node* stmt = parse_stmt(scope.with_flags({ .is_local = true }));
+		Node* stmt = parse_stmt(scope.with_flags(
+		{
+			.is_local = true
+		}
+		));
 		if (ctx.pos == start_pos)
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Unexpected token in block");

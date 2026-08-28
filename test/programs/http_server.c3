@@ -383,9 +383,9 @@ fn bool send_all_bytes(TcpSocket* sock, char[] data)
 			if (err == io::WOULD_BLOCK || err == io::INTERRUPTED)
 			{
 				Poll[1] p = {
-				{
-					.socket = sock.sock,.events = WRITE
-				}
+					{
+						.socket = sock.sock,.events = WRITE
+					}
 				};
 				if ((net::poll_ms(&p, 5000) ?? 0) == 0) return false;
 				continue;
@@ -395,9 +395,9 @@ fn bool send_all_bytes(TcpSocket* sock, char[] data)
 		if (n == 0)
 		{
 			Poll[1] p = {
-			{
-				.socket = sock.sock,.events = WRITE
-			}
+				{
+					.socket = sock.sock,.events = WRITE
+				}
 			};
 			if ((net::poll_ms(&p, 5000) ?? 0) == 0) return false;
 			continue;

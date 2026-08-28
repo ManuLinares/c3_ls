@@ -208,7 +208,7 @@ macro void @add_prop(items, String label, CompletionItemKind kind, String detail
 	);
 }
 
-fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, String type_name = "", bool missing_second_colon = false)
+fn void inject_type_properties(List{CompletionItem} * items, NodeKind type_kind, String type_name = "", bool missing_second_colon = false)
 {
 	@add_prop(items, "alignment", PROPERTY, "sz", md("Alignment of the type in bytes."), missing_second_colon);
 	@add_prop(items, "kind", PROPERTY, "TypeKind", md("The category / TypeKind of the type (e.g. POINTER, STRUCT, SIGNED_INT)."), missing_second_colon);
@@ -227,9 +227,9 @@ fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, 
 
 	bool is_float = (type_name == "float" || type_name == "double" || type_name == "float16" || type_name == "bfloat" || type_name == "float128");
 	bool is_int = (type_name == "int" || type_name == "uint" || type_name == "short" || type_name == "ushort" ||
-		type_name == "long" || type_name == "ulong" || type_name == "int128" || type_name == "uint128" ||
-		type_name == "char" || type_name == "ichar" || type_name == "sz" || type_name == "usz" ||
-		type_name == "iptr" || type_name == "uptr");
+	type_name == "long" || type_name == "ulong" || type_name == "int128" || type_name == "uint128" ||
+	type_name == "char" || type_name == "ichar" || type_name == "sz" || type_name == "usz" ||
+	type_name == "iptr" || type_name == "uptr");
 
 	if (is_float || is_int || type_kind == VAR_DECL)
 	{
@@ -267,10 +267,13 @@ fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, 
 	}
 }
 
-fn void inject_reflect_properties(List{CompletionItem}* items, String prefix = "")
+fn void inject_reflect_properties(List{CompletionItem} * items, String prefix = "")
 {
 	const ReflProp[*] PROPS = {
-		{ "alignment", "sz", "The alignment in bytes." },
+		{
+			"alignment", "sz", "The alignment in bytes."
+		}
+		,
 		{ "bitoffset", "sz", "The bit offset of a bitstruct member within its backing type." },
 		{ "bitsize", "sz", "The size in bits of a bitstruct member." },
 		{ "cname", "String", "The external linker name of a symbol." },

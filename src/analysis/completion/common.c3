@@ -68,9 +68,18 @@ fn bool is_symbol_accessible(SourceFile* caller_sf, String caller_mod, Node* tar
 		{
 			if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
 			AttributeDecl* ad = attr.as(AttributeDecl);
-			if (ad.attribute_kind == AttributeKind.LOCAL) { vis = LOCAL; break; }
-			if (ad.attribute_kind == AttributeKind.PRIVATE) { vis = PRIVATE; break; }
-			if (ad.attribute_kind == AttributeKind.PUBLIC) { vis = PUBLIC; break; }
+			if (ad.attribute_kind == AttributeKind.LOCAL)
+			{
+				vis = LOCAL; break;
+			}
+			if (ad.attribute_kind == AttributeKind.PRIVATE)
+			{
+				vis = PRIVATE; break;
+			}
+			if (ad.attribute_kind == AttributeKind.PUBLIC)
+			{
+				vis = PUBLIC; break;
+			}
 		}
 	}
 
@@ -89,7 +98,7 @@ fn bool is_symbol_accessible(SourceFile* caller_sf, String caller_mod, Node* tar
 	return true;
 }
 
-fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
+fn void provide_keywords(Context* ctx, List{CompletionItem} * items)
 {
 	if (ctx.access != NONE) return;
 
@@ -131,7 +140,7 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 	}
 }
 
-fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String symbol_name, Node* node, String base_identifier, String prefix = "")
+fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String symbol_name, Node* node, String base_identifier, String prefix = "")
 {
 	if (!node) return;
 

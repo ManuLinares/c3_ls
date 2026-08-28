@@ -30,7 +30,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf) return NOT_FOUND~;
 
-	Range target_range = {.start = loc, .end = loc };
+	Range target_range = {.start = loc,.end = loc };
 	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
 	if (!target_node || target_node.kind == ERROR) return NOT_FOUND~;
 

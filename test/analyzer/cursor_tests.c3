@@ -130,3 +130,4 @@ fn void signature_test()
 	test::eq(foo3.signature_text()!!, "fn Bar foo3(FoFn x = fn () => abort(), Foo y = {})");
 }
 
+

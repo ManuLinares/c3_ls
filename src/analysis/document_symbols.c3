@@ -44,8 +44,8 @@ fn SymbolInformation[]? get_document_symbols(LspProject* project, Uri uri)
 				{
 					ModuleDecl* md = stmt.as(ModuleDecl);
 					String mname = (md.path && md.path.kind == PATH_EXPR && md.path.as(PathExpr).path)
-						? md.path.as(PathExpr).path.text
-						: "module";
+					? md.path.as(PathExpr).path.text
+					: "module";
 					symbols.push(
 					{
 						.name = mname,

@@ -12,7 +12,7 @@ import lsp::core;
 import lsp;
 import uri;
 
-fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFile* sf = null, sz offset = 0)
+fn void provide_module_paths(Context* ctx, List{CompletionItem} * items, SourceFile* sf = null, sz offset = 0)
 {
 	if (!ctx.ws || !ctx.ws.ctx) return;
 
@@ -28,7 +28,7 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFi
 			line_start--;
 		}
 
-		String line_prefix = sf.content[line_start:offset - line_start].trim_left();
+		String line_prefix = sf.content[line_start : offset - line_start].trim_left();
 		if (line_prefix.starts_with("import"))
 		{
 			String import_text = line_prefix.strip_prefix("import").trim_left();
@@ -39,11 +39,11 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFi
 
 			if (import_text.ends_with("::"))
 			{
-				base_path = import_text[:^2].trim();
+				base_path = import_text[:^ 2].trim();
 			}
 			else if (import_text.ends_with(":"))
 			{
-				base_path = import_text[:^1].trim();
+				base_path = import_text[:^ 1].trim();
 				missing_second_colon = true;
 			}
 			else if (try scope_idx = import_text.rindex_of("::"))

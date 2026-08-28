@@ -191,7 +191,6 @@ fn void test_default_dependency_search_paths()
 	assert(conf.dependency_search_paths.value[0] == "lib");
 }
 
-
 <*
  Regression Test 7:
  Verifies that typing incomplete `module` statements does not panic or crash.
@@ -269,7 +268,6 @@ fn void run() {
 	proj.workspace.process_file("/virtual/enum_comp.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_comp.c3");
 	defer doc_uri.free();
-
 	// 1. Bare RHS completion on `State s = ` (line 3, char 12)
 	LspPosition rhs_pos = {.line = 3,.character = 12 };
 	CompletionItem[] rhs_items = completion::resolve(&proj, doc_uri, rhs_pos)!!;
@@ -279,7 +277,6 @@ fn void run() {
 		if (item.label == "IDLE") found_idle_rhs = true;
 	}
 	assert(found_idle_rhs);
-
 	// 2. Dot-access completion on `s = State.` (line 4, char 12)
 	LspPosition dot_pos = {.line = 4,.character = 12 };
 	CompletionItem[] dot_items = completion::resolve(&proj, doc_uri, dot_pos)!!;
@@ -311,12 +308,10 @@ fn void test() {
 	proj.workspace.process_file("/virtual/for_comp.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/for_comp.c3");
 	defer doc_uri.free();
-
 	// 1. Comment completion -> returns 0 items
 	LspPosition comment_pos = {.line = 2,.character = 10 };
 	CompletionItem[] comment_items = completion::resolve(&proj, doc_uri, comment_pos)!!;
 	assert(comment_items.len == 0);
-
 	// 2. For-loop condition completion -> suggests `my_iter`
 	LspPosition for_pos = {.line = 3,.character = 27 };
 	CompletionItem[] for_items = completion::resolve(&proj, doc_uri, for_pos)!!;
