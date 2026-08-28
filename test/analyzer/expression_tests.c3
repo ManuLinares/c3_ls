@@ -34,6 +34,9 @@ fn void test_literals()
 		float h = 3.14159f32;
 		double i = 2e+10f64;
 		float j = 0x1.Ap-2f;
+		float jx = 0x1.Ap-2F;
+		double jxx = 0x1.Ap-2d;
+		double jxxx = 0x1.Ap-2D;
 
 		// Strings
 		String k = "Hello";
@@ -136,7 +139,7 @@ fn void test_literals()
 			test::eq(lit.literal_kind, LiteralKind.REAL_LITERAL);
 			test::eq_approx(lit.real, 2e+10);
 		}
-		else if (var_name == "j")
+		else if (var_name == "j" || var_name == "jx" || var_name == "jxx" || var_name == "jxxx")
 		{
 			test::eq(lit.literal_kind, LiteralKind.REAL_LITERAL);
 			test::eq_approx(lit.real, 0.40625);  // 0x1.Ap-2 is 1.625 * 0.25 = 0.40625
