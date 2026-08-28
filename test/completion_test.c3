@@ -539,3 +539,124 @@ fn void test() {
 	}
 	assert(found2);
 }
+
+fn void test_pointer_and_numeric_literal_dot_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+struct Point { int x; int y; }
+fn void Point.reset(&self) { self.x = 0; self.y = 0; }
+fn double double.custom_double_func(self) => self * 2.0;
+
+fn void test_ptr() {
+  Point pt;
+  Point* p = &pt;
+  p.
+}
+
+fn void test_num() {
+  (3.14).
+}
+`;
+
+	proj.workspace.process_file("/virtual/ptr_and_num.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/ptr_and_num.c3");
+	defer doc_uri.free();
+
+	// 1. Completion on pointer `p.` (line 8, character 4)
+	LspPosition ptr_pos = { .line = 8, .character = 4 };
+	CompletionItem[] ptr_items = completion::resolve(&proj, doc_uri, ptr_pos)!!;
+	bool found_x = false;
+	bool found_reset = false;
+	foreach (item : ptr_items)
+	{
+		if (item.label == "x") found_x = true;
+		if (item.label == "reset") found_reset = true;
+	}
+	assert(found_x);
+	assert(found_reset);
+
+	// 2. Completion on `(3.14).` (line 12, character 9)
+	LspPosition num_pos = { .line = 12, .character = 9 };
+	CompletionItem[] num_items = completion::resolve(&proj, doc_uri, num_pos)!!;
+	bool found_dbl = false;
+	foreach (item : num_items)
+	{
+		if (item.label == "custom_double_func") found_dbl = true;
+	}
+	assert(found_dbl);
+}
+
+fn void test_multiline_dot_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void test() {
+  String text = "hello";
+  text
+    .
+}
+`;
+
+	proj.workspace.process_file("/virtual/multiline_dot.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/multiline_dot.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 4, .character = 5 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_len = false;
+	foreach (item : items)
+	{
+		if (item.label == "len") found_len = true;
+		assert(item.label != "while" && item.label != "import");
+	}
+	assert(found_len);
+}
+
+fn void test_multiline_string_chain_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module demo;
+fn String String.trim(String self) => self;
+fn String String.strip_prefix(String self, String p) => self;
+fn String String.treplace(String self, String from, String to) => self;
+fn bool String.starts_with(String self, String p) => true;
+
+fn void demo() {
+    String text = "   Hello World from C3!   ";
+    sz result = text
+        .trim()
+        .strip_prefix("Hello")
+        .treplace("World", "C3!")
+        .
+}
+`;
+
+	proj.workspace.process_file("/virtual/multiline_chain.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/multiline_chain.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 12, .character = 9 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_len = false;
+	bool found_starts_with = false;
+	foreach (item : items)
+	{
+		if (item.label == "len") found_len = true;
+		if (item.label == "starts_with") found_starts_with = true;
+	}
+
+	assert(found_len);
+	assert(found_starts_with);
+}

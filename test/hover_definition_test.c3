@@ -256,3 +256,284 @@ fn void test_goto_definition_struct_member_designated_init()
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 2);
 }
+
+fn void test_hover_and_signature_help_on_literal_methods() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn double double.trunc(double self) => self;
+fn void run() {
+  double asd = 3.14.trunc();
+}
+`;
+
+	proj.workspace.process_file("/virtual/lit_method.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/lit_method.c3");
+	defer doc_uri.free();
+
+	// 1. Hover on `trunc` (line 3, character 21)
+	LspPosition hover_pos = { .line = 3, .character = 21 };
+	String h = hover::hover(&proj, doc_uri, hover_pos)!!;
+	assert(h.contains("double.trunc"));
+
+	// 2. Signature help inside `3.14.trunc(` (line 3, character 26)
+	LspPosition sig_pos = { .line = 3, .character = 26 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].label.contains("double.trunc"));
+}
+
+fn void test_hover_and_signature_help_on_primitive_methods() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn double double.custom_clamp(self, double min, double max) => self;
+
+fn void test() {
+  double asd = 3.14;
+  asd.custom_clamp(1.0, 5.0);
+}
+`;
+
+	proj.workspace.process_file("/virtual/prim_method_test.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/prim_method_test.c3");
+	defer doc_uri.free();
+
+	// 1. Hover on `custom_clamp` (line 5, character 8)
+	LspPosition hover_pos = { .line = 5, .character = 8 };
+	String h = hover::hover(&proj, doc_uri, hover_pos)!!;
+	assert(h.contains("double.custom_clamp"));
+
+	// 2. Go to definition on `custom_clamp` -> line 1
+	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	assert(locs.len > 0);
+	assert(locs[0].range.start.line == 1);
+
+	// 3. Signature help inside `asd.custom_clamp(` (line 5, character 19)
+	LspPosition sig_pos = { .line = 5, .character = 19 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].label.contains("double.custom_clamp"));
+}
+
+fn void test_some_reported_trunc_and_custom_clamp() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String math_code = `module std::math;
+fn double double.trunc(double self) => self;
+macro clamp(val, min, max) => val;
+`;
+
+	String source = `module app;
+import std::io;
+
+fn double double.custom_clamp(self, double min, double max) => self;
+
+fn void oidoidoidoid()
+{
+	double asd = (3.14f).trunc();
+	io::printn(asd);
+}
+
+fn void test() {
+    double asd = 3.14;
+    asd.custom_clamp(1.0, 5.0);
+}
+`;
+
+	proj.workspace.process_file("/virtual/math.c3", math_code);
+	proj.workspace.process_file("/virtual/user_test.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/user_test.c3");
+	defer doc_uri.free();
+
+	// 1. Hover on `trunc` in `(3.14f).trunc()` (line 7, character 24)
+	LspPosition trunc_pos = { .line = 7, .character = 24 };
+	String trunc_hover = hover::hover(&proj, doc_uri, trunc_pos)!!;
+	assert(trunc_hover.contains("trunc"));
+
+	// 2. Hover on `custom_clamp` in `asd.custom_clamp(...)` (line 13, character 10)
+	LspPosition clamp_pos = { .line = 13, .character = 10 };
+	String clamp_hover = hover::hover(&proj, doc_uri, clamp_pos)!!;
+	assert(clamp_hover.contains("double.custom_clamp"));
+
+	// 3. Go to definition on `custom_clamp` -> line 3
+	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
+	assert(locs.len > 0);
+	assert(locs[0].range.start.line == 3);
+
+	// 4. Signature help inside `asd.custom_clamp(` (line 13, character 22)
+	LspPosition sig_pos = { .line = 13, .character = 22 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].parameters.len == 2); // `min` and `max` (`self` omitted)
+	assert(sig_res.signatures[0].parameters[0].label.contains("min"));
+}
+
+fn void test_another_exact_snippet_with_import_std() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String math_code = `module std::math;
+fn double double.trunc(double self) => self;
+macro clamp(val, min, max) => val;
+`;
+
+	String user_code = `module asdasasdasdasd;
+import std;
+
+fn void oidoidoidoid()
+{
+	double asd = 3.14.trunc();
+	io::printn(asd);
+}
+
+fn double double.custom_clamp(self, double min, double max) => math::clamp(self, min, max);
+
+fn void test() {
+    double asd = 3.14;
+    asd.custom_clamp();
+}
+`;
+
+	proj.workspace.process_file("/virtual/math.c3", math_code);
+	proj.workspace.process_file("/virtual/user_exact.c3", user_code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/user_exact.c3");
+	defer doc_uri.free();
+
+	// 1. Hover on `trunc` in `3.14.trunc()` (line 5, character 20)
+	LspPosition trunc_pos = { .line = 5, .character = 20 };
+	String trunc_hover = hover::hover(&proj, doc_uri, trunc_pos)!!;
+	assert(trunc_hover.contains("trunc"));
+
+	// 2. Go to definition on `trunc` -> jumps to math.c3
+	LspLocation[] trunc_locs = goto_definition::goto_definition(&proj, doc_uri, trunc_pos)!!;
+	assert(trunc_locs.len > 0);
+	assert(trunc_locs[0].uri.contains("math.c3"));
+
+	// 3. Hover on `custom_clamp` in `asd.custom_clamp()` (line 13, character 10)
+	LspPosition clamp_pos = { .line = 13, .character = 10 };
+	String clamp_hover = hover::hover(&proj, doc_uri, clamp_pos)!!;
+	assert(clamp_hover.contains("double.custom_clamp"));
+
+	// 4. Go to definition on `custom_clamp` -> jumps to line 9
+	LspLocation[] clamp_locs = goto_definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
+	assert(clamp_locs.len > 0);
+	assert(clamp_locs[0].range.start.line == 9);
+
+	// 5. Signature help inside `asd.custom_clamp(` (line 13, character 21)
+	LspPosition sig_pos = { .line = 13, .character = 21 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].parameters.len == 2);
+	assert(sig_res.signatures[0].parameters[0].label.contains("min"));
+}
+
+fn void test_method_with_arbitrary_receiver_name() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+struct Point { int x; int y; }
+fn void Point.offset(Point* p, int dx, int dy) {
+  p.x += dx;
+  p.y += dy;
+}
+
+fn void run() {
+  Point pt;
+  pt.offset(5, 10);
+}
+`;
+
+	proj.workspace.process_file("/virtual/custom_pname.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/custom_pname.c3");
+	defer doc_uri.free();
+
+	// Line 9: `  pt.offset(5, 10);`
+	LspPosition sig_pos = { .line = 9, .character = 12 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].parameters.len == 2); // `dx` and `dy` (`p` is omitted)
+	assert(sig_res.signatures[0].parameters[0].label.contains("dx"));
+	assert(sig_res.signatures[0].parameters[1].label.contains("dy"));
+}
+
+
+fn void test_my_exact_vscode_file_flow() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module asdasasdasdasd;
+import std;
+
+fn void oidoidoidoid()
+{
+	double asd = 3.14.trunc();
+	io::printn(asd);
+}
+
+fn double double.custom_clamp(self, double min, double max) => math::clamp(self, min, max);
+
+fn void test() {
+    double asd = 3;
+    asd.custom_clamp(2, 5);
+}
+`;
+
+	proj.workspace.process_file("/virtual/user_exact_vscode.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/user_exact_vscode.c3");
+	defer doc_uri.free();
+
+	// 1. Completion on `asd.` (line 13, character 8)
+	LspPosition comp_pos = { .line = 13, .character = 8 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, comp_pos)!!;
+	CompletionItem clamp_item;
+	bool found_clamp = false;
+	foreach (item : items)
+	{
+		if (item.label == "custom_clamp")
+		{
+			clamp_item = item;
+			found_clamp = true;
+			break;
+		}
+	}
+	assert(found_clamp);
+
+	// 2. Completion item resolve (documentation popup)
+	completion::resolve_item(&proj, &clamp_item);
+	assert(clamp_item.documentation.value.contains("double.custom_clamp"));
+
+	// 3. Hover on `custom_clamp` in `asd.custom_clamp(2, 5);` (line 13, character 12)
+	LspPosition hover_pos = { .line = 13, .character = 12 };
+	String h = hover::hover(&proj, doc_uri, hover_pos)!!;
+	assert(h.contains("double.custom_clamp"));
+
+	// 4. Go to definition on `custom_clamp` -> jumps to line 9
+	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	assert(locs.len > 0);
+	assert(locs[0].range.start.line == 9);
+
+	// 5. Signature help inside `asd.custom_clamp(` (line 13, character 21)
+	LspPosition sig_pos = { .line = 13, .character = 21 };
+	SignatureHelpResult sig_res = signature_help::signature_help(&proj, doc_uri, sig_pos)!!;
+	assert(sig_res.signatures.len > 0);
+	assert(sig_res.signatures[0].parameters.len == 2);
+	assert(sig_res.signatures[0].parameters[0].label.contains("min"));
+}

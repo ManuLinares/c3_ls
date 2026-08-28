@@ -5,6 +5,7 @@ import analyzer::cursor;
 import analyzer::sema::query;
 
 import std::collections::list;
+import std::collections::map;
 import std::io;
 
 import lsp::core;
@@ -15,8 +16,75 @@ struct InlayHintCollector
 {
 	LspProject* project;
 	SourceFile* sf;
+	String caller_mod;
+	String current_assoc_type;
 	LspRange range;
 	List{InlayHint} * hints;
+	HashMap{String, String} local_types;
+}
+
+fn Node* resolve_inlay_callee(InlayHintCollector* ctx, CallExpr* call)
+{
+	if (!call || !call.callee || !ctx.project.workspace.ctx) return null;
+	AnalyzerContext* actx = ctx.project.workspace.ctx;
+
+	switch (call.callee.kind)
+	{
+		case IDENT_EXPR:
+			{
+				IdentExpr* ie = call.callee.as(IdentExpr);
+				String iname = ie.ident ? ie.ident.text : "";
+				if (iname.len == 0) return null;
+
+				if (ie.path_expr && ie.path_expr.kind == PATH_EXPR)
+				{
+					String ptext = ie.path_expr.as(PathExpr).path ? ie.path_expr.as(PathExpr).path.text : "";
+					String qname = string::tformat("%s%s", ptext, iname);
+					if (actx.registry)
+					{
+						if (try fn_info = actx.registry.functions.get(qname)) return fn_info.node;
+						if (try mac_info = actx.registry.macros.get(qname)) return mac_info.node;
+					}
+				}
+				else
+				{
+					if (ctx.caller_mod.len > 0 && actx.registry)
+					{
+						String local_qname = string::tformat("%s::%s", ctx.caller_mod, iname);
+						if (try fn_info = actx.registry.functions.get(local_qname)) return fn_info.node;
+						if (try mac_info = actx.registry.macros.get(local_qname)) return mac_info.node;
+					}
+
+					if (actx.registry)
+					{
+						if (try fn_info = actx.registry.functions.get(iname)) return fn_info.node;
+						if (try mac_info = actx.registry.macros.get(iname)) return mac_info.node;
+					}
+				}
+				return query::resolve_callee_by_name(actx, ctx.sf, iname);
+			}
+
+		case ACCESS_EXPR:
+			{
+				AccessExpr* acc = call.callee.as(AccessExpr);
+				String recv_name = cursor::spelling(acc.left, tmem);
+				String member_name = cursor::spelling(acc.member, tmem);
+				if (recv_name.len == 0 || member_name.len == 0) return null;
+
+				String recv_type = ctx.local_types.get(recv_name) ?? "";
+				if (recv_type.len > 0)
+				{
+					Node* mnode = query::find_method_in_type(actx, recv_type, member_name, ctx.sf);
+					if (mnode) return mnode;
+				}
+
+				String full_name = string::tformat("%s.%s", recv_name, member_name);
+				return query::resolve_callee_by_name(actx, ctx.sf, full_name);
+			}
+
+		default:
+			return null;
+	}
 }
 
 fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_data)
@@ -31,95 +99,138 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 
 	switch (c.kind)
 	{
+		// Leaf nodes and non-executable declarations have no sub-calls: skip recursion
+		case MODULE_DECL:
+		case IMPORT_DECL:
+		case ATTRDEF_DECL:
+		case FAULTDEF_DECL:
+		case FAULT_DECL:
+		case TYPEDEF_DECL:
+		case ALIAS_DECL:
+		case ENUM_DECL:
+		case STRUCT_DECL:
+		case INTERFACE_DECL:
+		case LITERAL_EXPR:
+		case IDENT_EXPR:
+		case PATH_EXPR:
+		case BUILTIN_EXPR:
+		case COMPILER_CONST_EXPR:
+		case CONTINUE_BREAK_STMT:
+		case NEXTCASE_STMT:
+		case NOP_STMT:
+			return CONTINUE;
+
+		case FN_DECL:
+			{
+				FnDecl* fd = c.as(FnDecl);
+				if (fd.associated_type)
+				{
+					ctx.current_assoc_type = cursor::spelling(fd.associated_type, tmem);
+					ctx.local_types.set("self", ctx.current_assoc_type);
+					ctx.local_types.set("this", ctx.current_assoc_type);
+				}
+				foreach (param : fd.params)
+				{
+					if (!param || param.kind != VAR_DECL) continue;
+					VarDecl* vd = param.as(VarDecl);
+					if (vd.name && vd.type)
+					{
+						String tname = cursor::spelling(vd.type, tmem);
+						if (tname.len > 0) ctx.local_types.set(vd.name.text, tname);
+					}
+				}
+			}
+
+		case VAR_DECL:
+			{
+				VarDecl* vd = c.as(VarDecl);
+				if (vd.name && vd.type)
+				{
+					String tname = cursor::spelling(vd.type, tmem);
+					if (tname.len > 0) ctx.local_types.set(vd.name.text, tname);
+				}
+			}
+
 		case CALL_EXPR:
 			{
 				CallExpr* call = c.as(CallExpr);
 				if (!call.callee || call.args.len == 0) break;
 
-				String callee_name = "";
-				switch (call.callee.kind)
+				Node* callee_node = resolve_inlay_callee(ctx, call);
+				if (!callee_node) break;
+
+				NodeArray params = {};
+				switch (callee_node.kind)
 				{
-				case IDENT_EXPR:
-					{
-						IdentExpr* ie = call.callee.as(IdentExpr);
-						callee_name = ie.ident ? ie.ident.text : "";
-					}
-				case ACCESS_EXPR:
-					{
-						AccessExpr* acc = call.callee.as(AccessExpr);
-						String recv_name = cursor::spelling(acc.left, tmem);
-						String member_name = cursor::spelling(acc.member, tmem);
-						if (recv_name.len > 0 && member_name.len > 0)
+					case FN_DECL:
+						params = callee_node.as(FnDecl).params;
+					case MACRO_DECL:
+						params = callee_node.as(MacroDecl).params;
+					case VAR_DECL:
 						{
-							callee_name = string::tformat("%s.%s", recv_name, member_name);
+							VarDecl* vd = callee_node.as(VarDecl);
+							if (vd.type && vd.type.kind == TYPE_EXPR)
+							{
+								TypeExpr* te = vd.type.as(TypeExpr);
+								if (te.type_kind == TYPE_FUNCTION)
+								{
+									params = te.func.params;
+								}
+							}
 						}
-					}
-				default:
-					break;
-			}
+					default:
+						break;
+				}
 
-			if (callee_name.len == 0) break;
+				if (params.len == 0) break;
 
-			Node* callee_node = query::resolve_callee_by_name(ctx.project.workspace.ctx, ctx.sf, callee_name);
-			if (!callee_node) break;
-
-			NodeArray params = {};
-			switch (callee_node.kind)
-			{
-				case FN_DECL:
-					params = callee_node.as(FnDecl).params;
-				case MACRO_DECL:
-					params = callee_node.as(MacroDecl).params;
-				default:
-					break;
-			}
-
-			if (params.len == 0) break;
-
-			sz param_offset = 0;
-			if (call.callee.kind == ACCESS_EXPR && params.len > 0)
-			{
-				if (params[0] && params[0].kind == VAR_DECL)
+				sz param_offset = 0;
+				bool is_method = false;
+				if (callee_node.kind == FN_DECL && callee_node.as(FnDecl).associated_type != null)
 				{
-					VarDecl* first_p = params[0].as(VarDecl);
-					if (first_p.var_flags.is_self || (first_p.name && (first_p.name.text == "self" || first_p.name.text == "this")))
+					is_method = true;
+				}
+				else if (callee_node.kind == MACRO_DECL && @ok(callee_node.as(MacroDecl).associated_type.get()))
+				{
+					is_method = true;
+				}
+
+				if (call.callee.kind == ACCESS_EXPR && is_method && params.len > 0)
+				{
+					param_offset = 1;
+				}
+
+				for (sz i = 0; i < call.args.len; i++)
+				{
+					sz param_idx = i + param_offset;
+					if (param_idx >= params.len) break;
+
+					Node* arg = call.args[i];
+					if (!arg || arg.kind == ERROR) continue;
+
+					if (arg.kind == NAMED_ARG_EXPR || arg.kind == EVAL_NAMED_ARG_EXPR) continue;
+
+					Node* param_node = params[param_idx];
+					if (!param_node || param_node.kind != VAR_DECL) continue;
+					VarDecl* pdecl = param_node.as(VarDecl);
+
+					String pname = pdecl.name ? pdecl.name.text.strip_prefix("#").strip_prefix("$") : "";
+					if (pname.len == 0) continue;
+
+					ctx.hints.push(
 					{
-						param_offset = 1;
+						.position = {
+							.line = arg.range.start.line >= 0 ? (uint)arg.range.start.line : 0,
+							.character = arg.range.start.column >= 0 ? (uint)arg.range.start.column : 0
+						},
+						.label = string::tformat("%s:", pname),
+						.kind = PARAMETER,
+						.paddingLeft = false,
+						.paddingRight = true
 					}
+					);
 				}
 			}
-
-			for (sz i = 0; i < call.args.len; i++)
-			{
-				sz param_idx = i + param_offset;
-				if (param_idx >= params.len) break;
-
-				Node* arg = call.args[i];
-				if (!arg || arg.kind == ERROR) continue;
-
-				if (arg.kind == NAMED_ARG_EXPR || arg.kind == EVAL_NAMED_ARG_EXPR) continue;
-
-				Node* param_node = params[param_idx];
-				if (!param_node || param_node.kind != VAR_DECL) continue;
-				VarDecl* pdecl = param_node.as(VarDecl);
-
-				String pname = pdecl.name ? pdecl.name.text : "";
-				if (pname.len == 0 || pname == "self" || pname == "this") continue;
-
-				ctx.hints.push(
-				{
-					.position = {
-						.line = arg.range.start.line >= 0 ? (uint)arg.range.start.line : 0,
-						.character = arg.range.start.column >= 0 ? (uint)arg.range.start.column : 0
-					},
-					.label = string::tformat("%s:", pname),
-					.kind = PARAMETER,
-					.paddingLeft = false,
-					.paddingRight = true
-				}
-				);
-			}
-		}
 		default:
 			break;
 	}
@@ -135,12 +246,16 @@ fn InlayHint[]? get_inlay_hints(LspProject* project, Uri uri, LspRange range)
 	List{InlayHint} hints;
 	hints.tinit();
 
+	String caller_mod = query::get_source_file_module_name(sf);
+
 	InlayHintCollector collector = {
 		.project = project,
 		.sf = sf,
+		.caller_mod = caller_mod,
 		.range = range,
 		.hints = &hints
 	};
+	collector.local_types.tinit();
 
 	foreach (stmt : sf.ast.statements)
 	{

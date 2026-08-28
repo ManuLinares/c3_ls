@@ -17,61 +17,74 @@ import uri;
 fn sz scan_base_expression_start(String text, sz end_idx)
 {
 	sz idx = end_idx;
+	while (idx > 0 && (text[idx - 1] == ' ' || text[idx - 1] == '\t'))
+	{
+		idx--;
+	}
+
 	while (idx > 0)
 	{
-		if (text[idx - 1] == ')')
+		if (text[idx - 1] == ')' || text[idx - 1] == ']' || text[idx - 1] == '}')
 		{
-			int depth = 1;
-			idx--;
-			while (idx > 0 && depth > 0)
+			while (idx > 0 && (text[idx - 1] == ')' || text[idx - 1] == ']' || text[idx - 1] == '}'))
 			{
-				idx--;
-				if (text[idx] == ')')
+				if (text[idx - 1] == ')')
 				{
-					depth++;
+					int depth = 1;
+					idx--;
+					while (idx > 0 && depth > 0)
+					{
+						idx--;
+						if (text[idx] == ')')
+						{
+							depth++;
+						}
+						else if (text[idx] == '(')
+						{
+							depth--;
+						}
+					}
 				}
-				else if (text[idx] == '(')
+				else if (text[idx - 1] == '}')
 				{
-					depth--;
+					int depth = 1;
+					idx--;
+					while (idx > 0 && depth > 0)
+					{
+						idx--;
+						if (text[idx] == '}')
+						{
+							depth++;
+						}
+						else if (text[idx] == '{')
+						{
+							depth--;
+						}
+					}
+				}
+				else if (text[idx - 1] == ']')
+				{
+					int depth = 1;
+					idx--;
+					while (idx > 0 && depth > 0)
+					{
+						idx--;
+						if (text[idx] == ']')
+						{
+							depth++;
+						}
+						else if (text[idx] == '[')
+						{
+							depth--;
+						}
+					}
 				}
 			}
-			continue;
-		}
-		else if (text[idx - 1] == '}')
-		{
-			int depth = 1;
-			idx--;
-			while (idx > 0 && depth > 0)
+
+			while (idx > 0 && (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$'))
 			{
 				idx--;
-				if (text[idx] == '}')
-				{
-					depth++;
-				}
-				else if (text[idx] == '{')
-				{
-					depth--;
-				}
 			}
-			continue;
-		}
-		else if (text[idx - 1] == ']')
-		{
-			int depth = 1;
-			idx--;
-			while (idx > 0 && depth > 0)
-			{
-				idx--;
-				if (text[idx] == ']')
-				{
-					depth++;
-				}
-				else if (text[idx] == '[')
-				{
-					depth--;
-				}
-			}
-			continue;
 		}
 		else if (text[idx - 1] == '"')
 		{
@@ -85,7 +98,6 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 				}
 				idx--;
 			}
-			continue;
 		}
 		else if (text[idx - 1] == '\'')
 		{
@@ -99,7 +111,6 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 				}
 				idx--;
 			}
-			continue;
 		}
 		else if (text[idx - 1] == '`')
 		{
@@ -109,7 +120,6 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 				idx--;
 			}
 			if (idx > 0) idx--;
-			continue;
 		}
 		else if (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$')
 		{
@@ -123,13 +133,27 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 			break;
 		}
 
-		if (idx >= 2 && text[idx - 2] == ':' && text[idx - 1] == ':')
+		sz p = idx;
+		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t'))
 		{
-			idx -= 2;
+			p--;
 		}
-		else if (idx >= 1 && text[idx - 1] == '.')
+
+		if (p >= 2 && text[p - 2] == ':' && text[p - 1] == ':')
 		{
-			idx -= 1;
+			idx = p - 2;
+			while (idx > 0 && text[idx - 1].is_space())
+			{
+				idx--;
+			}
+		}
+		else if (p >= 1 && text[p - 1] == '.')
+		{
+			idx = p - 1;
+			while (idx > 0 && text[idx - 1].is_space())
+			{
+				idx--;
+			}
 		}
 		else
 		{
@@ -163,6 +187,11 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 		cursor_idx--;
 	}
 
+	while (cursor_idx > 0 && (text[cursor_idx - 1] == ' ' || text[cursor_idx - 1] == '\t'))
+	{
+		cursor_idx--;
+	}
+
 	String text_before = text[:cursor_idx];
 
 	if (text_before.ends_with("::"))
@@ -185,6 +214,11 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	else
 	{
 		return;
+	}
+
+	while (cursor_idx > 0 && text[cursor_idx - 1].is_space())
+	{
+		cursor_idx--;
 	}
 
 	sz base_end = cursor_idx;
@@ -245,8 +279,11 @@ fn sz? find_top_level_dot(String expr)
 			case '.':
 				if (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0)
 				{
+					// Skip ranges (..) and ellipses (...)
 					if (i + 1 < expr.len && expr[i + 1] == '.') continue;
 					if (i > 0 && expr[i - 1] == '.') continue;
+					// Skip float literal decimals (e.g. 3.14)
+					if (i > 0 && expr[i - 1].is_digit() && i + 1 < expr.len && expr[i + 1].is_digit()) continue;
 					return i;
 				}
 			default: break;
@@ -255,24 +292,36 @@ fn sz? find_top_level_dot(String expr)
 	return NOT_FOUND~;
 }
 
+
 fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 {
-	if (base_id.len == 0)
-	{
-		return "";
-	}
+	if (base_id.len == 0) return "";
 
 	String clean_id = base_id.trim();
 
-	// String literals (even containing internal dots: "asd.", "file.tar.gz")
+	// Unwrap parentheses e.g. `(3.14)` -> `3.14`
+	while (clean_id.starts_with("(") && clean_id.ends_with(")") && clean_id.len >= 2)
+	{
+		clean_id = clean_id[1 : ^2].trim();
+	}
+
+	// 1. Literals
 	if ((clean_id.starts_with("\"") && clean_id.ends_with("\"")) || (clean_id.starts_with("`") && clean_id.ends_with("`")))
 	{
 		return "String";
 	}
-	// Character literals ('a', '.')
 	if (clean_id.starts_with("'") && clean_id.ends_with("'") && clean_id.len >= 2)
 	{
 		return "char";
+	}
+	if (clean_id.len > 0 && (clean_id[0].is_digit() || (clean_id.starts_with("-") && clean_id.len > 1 && clean_id[1].is_digit())))
+	{
+		if (clean_id.ends_with("f") || clean_id.ends_with("f32")) return "float";
+		if (clean_id.contains(".") || clean_id.ends_with("d") || clean_id.ends_with("f64")) return "double";
+		if (clean_id.ends_with("ul") || clean_id.ends_with("UL")) return "ulong";
+		if (clean_id.ends_with("l") || clean_id.ends_with("L")) return "long";
+		if (clean_id.ends_with("u") || clean_id.ends_with("U")) return "uint";
+		return "int";
 	}
 
 	if (clean_id.starts_with("$Typeof") || clean_id.starts_with("$Typefrom"))
@@ -295,6 +344,26 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 		return "";
 	}
 
+	if (clean_id.ends_with(")") && clean_id.contains("("))
+	{
+		if (try paren_idx = clean_id.index_of_char('('))
+		{
+			String fn_name = clean_id[:paren_idx].trim();
+			if (ctx.ws && ctx.ws.ctx && ctx.ws.ctx.registry)
+			{
+				if (try fn_info = ctx.ws.ctx.registry.functions.get(fn_name))
+				{
+					if (fn_info.node && fn_info.node.kind == FN_DECL)
+					{
+						FnDecl* fd = fn_info.node.as(FnDecl);
+						if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? "";
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Chained dot expressions (a.b.c)
 	if (try dot_idx = find_top_level_dot(clean_id))
 	{
 		String root_id = clean_id[:dot_idx].trim();
@@ -314,9 +383,24 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 				remaining = "";
 			}
 
+			if (try paren_idx = seg.index_of_char('('))
+			{
+				seg = seg[:paren_idx].trim();
+			}
+
 			if (try brace_idx = current_type.index_of_char('{'))
 			{
 				current_type = current_type[:brace_idx].trim();
+			}
+			if ((current_type == "String" || current_type.ends_with("[]")) && seg == "len")
+			{
+				current_type = "sz";
+				continue;
+			}
+			if (current_type == "String" && seg == "ptr")
+			{
+				current_type = "char*";
+				continue;
 			}
 
 			Node* member = query::find_member_in_type(ctx.ws.ctx, current_type, seg, ctx.sf);
@@ -327,7 +411,11 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 			}
 			else
 			{
-				Node* mnode = query::find_method_in_type(ctx.ws.ctx, current_type, seg, ctx.sf);
+				Location loc = {
+					.line = (int)ctx.position.line,
+					.column = (int)ctx.position.character
+				};
+				Node* mnode = query::find_method_in_type(ctx.ws.ctx, current_type, seg, ctx.sf, loc);
 				if (mnode && mnode.kind == FN_DECL)
 				{
 					FnDecl* fd = mnode.as(FnDecl);
@@ -347,11 +435,16 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 	{
 		clean_id = clean_id[:brace_idx].trim();
 	}
+	clean_id = clean_id.trim_right("*& \t");
 
 	String type_name = "";
 	if (ctx.sf)
 	{
-		(void)query::find_local_decl_in_file(ctx.sf, clean_id, &type_name, ctx.ws.ctx);
+		Location loc = {
+			.line = (int)ctx.position.line,
+			.column = (int)ctx.position.character
+		};
+		(void)query::find_local_decl_in_file(ctx.sf, clean_id, &type_name, ctx.ws.ctx, loc);
 	}
 
 	if (type_name.len == 0 && ctx.ws)
@@ -416,8 +509,11 @@ fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, St
 	String assoc_raw = cursor::raw_type_identifier(assoc_type_node) ?? "";
 	String assoc_spell = cursor::spelling(assoc_type_node, tmem);
 
-	if (assoc_raw.len > 0 && (assoc_raw == clean_type || assoc_raw == type_name)) return true;
-	if (assoc_spell.len > 0 && (assoc_spell == clean_type || assoc_spell == type_name)) return true;
+	String target_clean = clean_type.trim_right("*& \t");
+	String target_raw = type_name.trim_right("*& \t");
+
+	if (assoc_raw.len > 0 && (assoc_raw == target_clean || assoc_raw == target_raw)) return true;
+	if (assoc_spell.len > 0 && (assoc_spell == target_clean || assoc_spell == target_raw)) return true;
 
 	if (query::is_vector_type(clean_type))
 	{
@@ -431,11 +527,12 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, Str
 {
 	if (!ctx.ws || !ctx.ws.ctx || type_name.len == 0) return;
 
-	String clean_type = type_name;
-	if (try brace_idx = type_name.index_of_char('{'))
+	String clean_type = type_name.trim_right("*& \t");
+	if (try brace_idx = clean_type.index_of_char('{'))
 	{
-		clean_type = type_name[:brace_idx].trim();
+		clean_type = clean_type[:brace_idx].trim();
 	}
+	clean_type = clean_type.trim_right("*& \t");
 
 	Registry* reg = ctx.ws.ctx.registry;
 	if (reg)
@@ -720,6 +817,42 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 				if (query::is_vector_type(clean_type))
 				{
 					inject_vector_swizzles(items, ctx.prefix);
+				}
+
+				if (clean_type == "String" || clean_type.ends_with("[]") || clean_type.contains("["))
+				{
+					if (ctx.prefix.len == 0 || ((String)"len").starts_with(ctx.prefix))
+					{
+						items.push(
+						{
+							.label = "len",
+							.kind = PROPERTY,
+							.detail = "sz",
+							.insertText = "len",
+							.filterText = "len",
+							.sortText = "0001_len",
+							.data = "property"
+						}
+						);
+					}
+					if (clean_type == "String" || clean_type.ends_with("[]"))
+					{
+						if (ctx.prefix.len == 0 || ((String)"ptr").starts_with(ctx.prefix))
+						{
+							String ptr_type = clean_type == "String" ? "char*" : string::tformat("%s*", clean_type.strip_suffix("[]"));
+							items.push(
+							{
+								.label = "ptr",
+								.kind = PROPERTY,
+								.detail = ptr_type,
+								.insertText = "ptr",
+								.filterText = "ptr",
+								.sortText = "0001_ptr",
+								.data = "property"
+							}
+							);
+						}
+					}
 				}
 
 				if (type_node && type_node.kind == STRUCT_DECL)

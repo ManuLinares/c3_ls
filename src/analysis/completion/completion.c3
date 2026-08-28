@@ -436,20 +436,11 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	String expected_type = "";
 	ScopeKind scope = detect_completion_scope(sf, offset, &expected_type);
 
-	String caller_mod = "";
-	foreach (stmt : sf.ast.statements)
-	{
-		if (stmt && stmt.kind == MODULE_DECL)
-		{
-			ModuleDecl* md = stmt.as(ModuleDecl);
-			if (md.path && md.path.kind == PATH_EXPR)
-			{
-				PathExpr* pe = md.path.as(PathExpr);
-				if (pe.path) caller_mod = pe.path.text;
-			}
-			break;
-		}
-	}
+	Location loc = {
+		.line = (int)pos.line,
+		.column = (int)pos.character
+	};
+	String caller_mod = query::get_module_name_at_location(sf, loc);
 
 	Context ctx = {
 		.uri = uri,

@@ -42,17 +42,39 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 
 	if (target_uri == "file:///" || target_uri.len <= 8) return {};
 
+	Range target_range = decl_node.range;
+	if (decl_node.kind == FN_DECL && decl_node.as(FnDecl).name)
+	{
+		target_range = decl_node.as(FnDecl).name.range;
+	}
+	else if (decl_node.kind == MACRO_DECL && decl_node.as(MacroDecl).name)
+	{
+		target_range = decl_node.as(MacroDecl).name.range;
+	}
+	else if (decl_node.kind == VAR_DECL && decl_node.as(VarDecl).name)
+	{
+		target_range = decl_node.as(VarDecl).name.range;
+	}
+	else if (decl_node.kind == STRUCT_DECL && decl_node.as(StructDecl).name)
+	{
+		target_range = decl_node.as(StructDecl).name.range;
+	}
+	else if (decl_node.kind == ENUM_DECL && decl_node.as(EnumDecl).name)
+	{
+		target_range = decl_node.as(EnumDecl).name.range;
+	}
+
 	LspLocation[] locations = alloc::alloc_array(tmem, LspLocation, 1);
 	locations[0] = {
 		.uri = target_uri,
 		.range = {
 			.start = {
-				.line = (uint)decl_node.range.start.line,
-				.character = (uint)decl_node.range.start.column
+				.line = (uint)target_range.start.line,
+				.character = (uint)target_range.start.column
 			},
 			.end = {
-				.line = (uint)decl_node.range.end.line,
-				.character = (uint)decl_node.range.end.column
+				.line = (uint)target_range.end.line,
+				.character = (uint)target_range.end.column
 			}
 		}
 	};

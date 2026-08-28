@@ -126,13 +126,33 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 	return RECURSE;
 }
 
-fn Node* find_local_decl_in_file(SourceFile* sf, String name, String* out_type = null, AnalyzerContext* context = null)
+fn Node* find_local_decl_in_file(SourceFile* sf, String name, String* out_type = null, AnalyzerContext* context = null, Location loc = { -1, -1 })
 {
 	if (!sf || name.len == 0)
 	{
 		return null;
 	}
 	LocalSearchContext loc_search = {.context = context,.sf = sf,.name = name,.found_decl = null,.found_type = "" };
+	if (loc.line >= 0)
+	{
+		foreach (stmt : sf.ast.statements)
+		{
+			if (stmt && stmt.range.contains(loc))
+			{
+				cursor::visit(stmt, null, {.on_enter = &find_local_decl_callback }, &loc_search);
+				if (loc_search.found_decl)
+				{
+					if (out_type)
+					{
+						*out_type = loc_search.found_type;
+					}
+					return loc_search.found_decl;
+				}
+				break;
+			}
+		}
+	}
+
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR)
@@ -215,6 +235,32 @@ fn String get_source_file_module_name(SourceFile* sf)
 		}
 	}
 	return "";
+}
+
+fn String get_module_name_at_location(SourceFile* sf, Location loc)
+{
+	if (!sf) return "";
+	String current_mod = "";
+	foreach (stmt : sf.ast.statements)
+	{
+		if (stmt && stmt.kind == MODULE_DECL)
+		{
+			if (loc.line < 0 || stmt.range.start.line <= loc.line)
+			{
+				ModuleDecl* md = stmt.as(ModuleDecl);
+				if (md.path && md.path.kind == PATH_EXPR && md.path.as(PathExpr).path)
+				{
+					current_mod = md.path.as(PathExpr).path.text;
+				}
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+	if (current_mod.len > 0) return current_mod;
+	return get_source_file_module_name(sf);
 }
 
 fn bool is_same_module(SourceFile* sf, String target_mod)
@@ -362,34 +408,90 @@ fn bool is_symbol_accessible_from_file(AnalyzerContext* context, SourceFile* sf,
 		return false;
 	}
 
+	// Public methods attached to types are accessible to any value of that type duh
+	if (target_node.kind == FN_DECL && target_node.as(FnDecl).associated_type != null)
+	{
+		return true;
+	}
+	if (target_node.kind == MACRO_DECL && @ok(target_node.as(MacroDecl).associated_type.get()))
+	{
+		return true;
+	}
+
 	return is_module_visible_to_file(context, sf, target_mod);
+}
+
+fn List{String} get_source_file_imported_modules(SourceFile* sf)
+{
+	List{String} list;
+	list.tinit();
+	if (!sf) return list;
+
+	list.push("std::core");
+
+	foreach (stmt : sf.ast.statements)
+	{
+		if (!stmt || stmt.kind != IMPORT_DECL) continue;
+		ImportDecl* imp = stmt.as(ImportDecl);
+		foreach (p : imp.paths)
+		{
+			if (!p || p.kind != PATH_EXPR) continue;
+			PathExpr* pe = p.as(PathExpr);
+			String imp_path = pe.path ? pe.path.text.strip_suffix("::") : "";
+			if (imp_path.len > 0)
+			{
+				list.push(imp_path);
+			}
+		}
+	}
+	return list;
 }
 
 fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, String type_name)
 {
-	if (!context || type_name.len == 0)
-	{
-		return null;
-	}
+	if (!context || type_name.len == 0) return null;
 
-	String clean_type = type_name;
-	if (try idx = type_name.index_of_char('{'))
+	String clean_type = type_name.trim_right("*& \t");
+	if (try idx = clean_type.index_of_char('{'))
 	{
-		clean_type = type_name[:idx].trim();
+		clean_type = clean_type[:idx].trim();
 	}
-
-	String suffix = string::tformat("::%s", clean_type);
+	clean_type = clean_type.trim_right("*& \t");
 
 	if (context.registry)
 	{
-		if (try ty_info = context.registry.types.get(clean_type))
+		if (clean_type.contains("::"))
 		{
-			if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+			if (try ty_info = context.registry.types.get(clean_type))
 			{
-				return ty_info.node;
+				if (ty_info.node) return ty_info.node;
 			}
 		}
 
+		String caller_mod = sf ? get_source_file_module_name(sf) : "";
+		if (caller_mod.len > 0)
+		{
+			String local_qname = string::tformat("%s::%s", caller_mod, clean_type);
+			if (try ty_info = context.registry.types.get(local_qname))
+			{
+				if (ty_info.node) return ty_info.node;
+			}
+		}
+
+		if (sf)
+		{
+			List{String} imports = get_source_file_imported_modules(sf);
+			foreach (imp : imports)
+			{
+				String imp_qname = string::tformat("%s::%s", imp, clean_type);
+				if (try ty_info = context.registry.types.get(imp_qname))
+				{
+					if (ty_info.node) return ty_info.node;
+				}
+			}
+		}
+
+		String suffix = string::tformat("::%s", clean_type);
 		TypeInfo* matched = null;
 		context.registry.types.@each(; qname, tinfo)
 		{
@@ -401,162 +503,193 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 				}
 			}
 		};
-		if (matched && matched.node)
-		{
-			return matched.node;
-		}
+		if (matched && matched.node) return matched.node;
 	}
 
-	Node* type_node = null;
-	context.modules.@each(; mod_name, mod)
-	{
-		if (!type_node && mod)
-		{
-			foreach (node : mod.nodes)
-			{
-				if (!node || node.kind == ERROR)
-				{
-					continue;
-				}
-				if (sf && !is_symbol_accessible_from_file(context, sf, node, mod_name))
-				{
-					continue;
-				}
-
-				String sname = cursor::spelling(node, tmem);
-				if (sname == clean_type)
-				{
-					type_node = node;
-					break;
-				}
-			}
-		}
-	};
-
-	return type_node;
+	return null;
 }
 
-fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String method_name, SourceFile* sf = null)
+fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name, String type_suffix)
 {
-	if (!context || type_name.len == 0 || method_name.len == 0)
+	FunctionInfo* curr = head;
+	while (curr != null)
 	{
-		return null;
+		if (curr.node && curr.node.kind == FN_DECL)
+		{
+			FnDecl* fd = curr.node.as(FnDecl);
+			if (fd.associated_type)
+			{
+				String assoc = cursor::raw_type_identifier(fd.associated_type) ?? cursor::spelling(fd.associated_type, tmem);
+				assoc = assoc.trim_right("*& \t");
+				String target_clean = type_name.trim_right("*& \t");
+				if (assoc == target_clean || assoc.ends_with(type_suffix) || (is_vector_type(type_name) && is_vector_type(assoc)))
+				{
+					return curr.node;
+				}
+			}
+		}
+		curr = curr.next;
 	}
+	return null;
+}
 
-	if (try idx = type_name.index_of_char('{'))
+fn Node* check_macro_list_for_method(MacroInfo* head, String type_name, String type_suffix)
+{
+	MacroInfo* curr = head;
+	while (curr != null)
 	{
-		type_name = type_name[:idx].trim();
+		if (curr.node && curr.node.kind == MACRO_DECL)
+		{
+			MacroDecl* md = curr.node.as(MacroDecl);
+			if (try assoc_node = md.associated_type.get())
+			{
+				String assoc = cursor::raw_type_identifier(assoc_node) ?? cursor::spelling(assoc_node, tmem);
+				assoc = assoc.trim_right("*& \t");
+				String target_clean = type_name.trim_right("*& \t");
+				if (assoc == target_clean || assoc.ends_with(type_suffix) || (is_vector_type(type_name) && is_vector_type(assoc)))
+				{
+					return curr.node;
+				}
+			}
+		}
+		curr = curr.next;
 	}
+	return null;
+}
+
+fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String method_name, SourceFile* sf = null, Location loc = { -1, -1 })
+{
+	if (!context || type_name.len == 0 || method_name.len == 0) return null;
+
+	String clean_type = type_name.trim_right("*& \t");
+	if (try idx = clean_type.index_of_char('{'))
+	{
+		clean_type = clean_type[:idx].trim();
+	}
+	clean_type = clean_type.trim_right("*& \t");
 
 	String clean_mname = method_name.strip_prefix("@");
-	String type_suffix = string::tformat("::%s", type_name);
+	String at_mname = string::tformat("@%s", clean_mname);
+	String type_suffix = string::tformat("::%s", clean_type);
 
-	context.modules.@each(; mod_name, mod)
+	if (context.registry)
 	{
-		if (mod)
+		// 1. Check current caller module at location
+		String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+		if (caller_mod.len > 0)
 		{
-			foreach (node : mod.nodes)
+			String qname1 = string::tformat("%s::%s", caller_mod, clean_mname);
+			if (try fn_info = context.registry.functions.get(qname1))
 			{
-				if (!node || node.kind == ERROR)
-				{
-					continue;
-				}
-				if (sf && !is_symbol_accessible_from_file(context, sf, node, mod_name))
-				{
-					continue;
-				}
+				if (Node* m = check_fn_list_for_method(fn_info, clean_type, type_suffix)) return m;
+			}
+			if (try mac_info = context.registry.macros.get(qname1))
+			{
+				if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+			}
+			String qname2 = string::tformat("%s::%s", caller_mod, at_mname);
+			if (try mac_info = context.registry.macros.get(qname2))
+			{
+				if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+			}
+		}
 
-				if (node.kind == FN_DECL)
+		// 2. Check imported modules in file
+		if (sf)
+		{
+			List{String} imports = get_source_file_imported_modules(sf);
+			foreach (imp : imports)
+			{
+				String qname1 = string::tformat("%s::%s", imp, clean_mname);
+				if (try fn_info = context.registry.functions.get(qname1))
 				{
-					FnDecl* fd = node.as(FnDecl);
-					if (fd.name && fd.name.text.strip_prefix("@") == clean_mname && fd.associated_type)
-					{
-						String assoc = cursor::raw_type_identifier(fd.associated_type) ?? "";
-						if (assoc == type_name || assoc.ends_with(type_suffix))
-						{
-							return node;
-						}
-					}
+					if (Node* m = check_fn_list_for_method(fn_info, clean_type, type_suffix)) return m;
 				}
-				else if (node.kind == MACRO_DECL)
+				if (try mac_info = context.registry.macros.get(qname1))
 				{
-					MacroDecl* md = node.as(MacroDecl);
-					if (md.name && md.name.text.strip_prefix("@") == clean_mname)
+					if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+				}
+				String qname2 = string::tformat("%s::%s", imp, at_mname);
+				if (try mac_info = context.registry.macros.get(qname2))
+				{
+					if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+				}
+			}
+		}
+
+		// 3. Search across all registered functions/macros ending with ::clean_mname
+		String suffix1 = string::tformat("::%s", clean_mname);
+		String suffix2 = string::tformat("::%s", at_mname);
+		Node* found_m = null;
+
+		context.registry.functions.@each(; qname, fn_info)
+		{
+			if (!found_m && (qname == clean_mname || qname.ends_with(suffix1)))
+			{
+				if (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod))
+				{
+					found_m = check_fn_list_for_method(fn_info, clean_type, type_suffix);
+				}
+			}
+		};
+		if (found_m) return found_m;
+
+		context.registry.macros.@each(; qname, mac_info)
+		{
+			if (!found_m && (qname == clean_mname || qname.ends_with(suffix1) || qname.ends_with(suffix2)))
+			{
+				if (!sf || is_symbol_accessible_from_file(context, sf, mac_info.node, mac_info.mod))
+				{
+					found_m = check_macro_list_for_method(mac_info, clean_type, type_suffix);
+				}
+			}
+		};
+		if (found_m) return found_m;
+	}
+
+	// 4. Inherited members on structs/typedefs
+	Node* type_node = find_type_node_in_context(context, sf, clean_type);
+	if (type_node)
+	{
+		if (type_node.kind == STRUCT_DECL)
+		{
+			StructDecl* sd = type_node.as(StructDecl);
+			foreach (inter : sd.interfaces)
+			{
+				String sub_type = cursor::raw_type_identifier(inter) ?? "";
+				if (sub_type.len > 0 && sub_type != clean_type)
+				{
+					Node* m = find_method_in_type(context, sub_type, method_name, sf, loc);
+					if (m) return m;
+				}
+			}
+			foreach (field : sd.fields)
+			{
+				if (!field || field.kind != VAR_DECL) continue;
+				VarDecl* vd = field.as(VarDecl);
+				if (vd.var_flags.is_inline && vd.type)
+				{
+					String sub_type = cursor::raw_type_identifier(vd.type) ?? "";
+					if (sub_type.len > 0 && sub_type != clean_type)
 					{
-						if (try assoc_node = md.associated_type.get())
-						{
-							String assoc = cursor::raw_type_identifier(assoc_node) ?? "";
-							if (assoc == type_name || assoc.ends_with(type_suffix))
-							{
-								return node;
-							}
-						}
+						Node* m = find_method_in_type(context, sub_type, method_name, sf, loc);
+						if (m) return m;
 					}
 				}
 			}
 		}
-	};
-
-	Node* type_node = find_type_node_in_context(context, sf, type_name);
-
-	if (type_node)
-	{
-		switch (type_node.kind)
+		else if (type_node.kind == TYPEDEF_DECL)
 		{
-			case STRUCT_DECL:
+			TypedefDecl* td = type_node.as(TypedefDecl);
+			if (td.is_inline && td.base_type)
+			{
+				String base_type = cursor::raw_type_identifier(td.base_type) ?? "";
+				if (base_type.len > 0 && base_type != clean_type)
 				{
-					StructDecl* sd = type_node.as(StructDecl);
-					foreach (inter : sd.interfaces)
-					{
-						String sub_type = cursor::raw_type_identifier(inter) ?? "";
-						if (sub_type.len > 0 && sub_type != type_name)
-						{
-							Node* m = find_method_in_type(context, sub_type, method_name, sf);
-							if (m)
-							{
-								return m;
-							}
-						}
-					}
-					foreach (field : sd.fields)
-					{
-						if (!field || field.kind != VAR_DECL)
-						{
-							continue;
-						}
-						VarDecl* vd = field.as(VarDecl);
-						if (vd.var_flags.is_inline && vd.type)
-						{
-							String sub_type = cursor::raw_type_identifier(vd.type) ?? "";
-							if (sub_type.len > 0 && sub_type != type_name)
-							{
-								Node* m = find_method_in_type(context, sub_type, method_name, sf);
-								if (m)
-								{
-									return m;
-								}
-							}
-						}
-					}
+					Node* m = find_method_in_type(context, base_type, method_name, sf, loc);
+					if (m) return m;
 				}
-			case TYPEDEF_DECL:
-				{
-					TypedefDecl* td = type_node.as(TypedefDecl);
-					if (td.is_inline && td.base_type)
-					{
-						String base_type = cursor::raw_type_identifier(td.base_type) ?? "";
-						if (base_type.len > 0 && base_type != type_name)
-						{
-							Node* m = find_method_in_type(context, base_type, method_name, sf);
-							if (m)
-							{
-								return m;
-							}
-						}
-					}
-				}
-			default:
-				break;
+			}
 		}
 	}
 
@@ -622,40 +755,73 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	return null;
 }
 
-fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
+fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr, Location loc = { -1, -1 })
 {
 	if (!expr || expr.kind == ERROR)
 	{
 		return "";
 	}
 
+	Location effective_loc = (loc.line >= 0) ? loc : (expr ? expr.range.start : (Location){ -1, -1 });
+
 	switch (expr.kind)
 	{
+		case LITERAL_EXPR:
+			{
+				LiteralExpr* lit = expr.as(LiteralExpr);
+				switch (lit.literal_kind)
+				{
+					case INT_LITERAL: return "int";
+					case REAL_LITERAL: return "double";
+					case STRING_LITERAL: return "String";
+					case BOOL_LITERAL: return "bool";
+					case BYTES_LITERAL: return "char[]";
+					case NULL_LITERAL: return "void*";
+					default: return "";
+				}
+			}
+
+		case GROUP_EXPR:
+			{
+				GroupExpr* ge = expr.as(GroupExpr);
+				return get_type_of_expr(context, sf, ge.inner, effective_loc);
+			}
+
+		case CAST_EXPR:
+			{
+				CastExpr* ce = expr.as(CastExpr);
+				if (ce.inner)
+				{
+					return cursor::spelling(ce.inner, tmem);
+				}
+				return "";
+			}
+
 		case TYPE_EXPR:
 			return cursor::raw_type_identifier(expr) ?? "";
 
 		case UNARY_EXPR:
 			{
 				UnaryExpr* ue = expr.as(UnaryExpr);
-				return get_type_of_expr(context, sf, ue.expr);
+				return get_type_of_expr(context, sf, ue.expr, effective_loc);
 			}
 
 		case POST_UNARY_EXPR:
 			{
 				PostUnaryExpr* pue = expr.as(PostUnaryExpr);
-				return get_type_of_expr(context, sf, pue.unary.expr);
+				return get_type_of_expr(context, sf, pue.unary.expr, effective_loc);
 			}
 
 		case DESIGNATOR_EXPR:
 			{
 				DesignatorExpr* des = expr.as(DesignatorExpr);
-				return get_type_of_expr(context, sf, des.path);
+				return get_type_of_expr(context, sf, des.path, effective_loc);
 			}
 
 		case MAYBE_DEREF_EXPR:
 			{
 				MaybeDerefExpr* deref = expr.as(MaybeDerefExpr);
-				return get_type_of_expr(context, sf, deref.left);
+				return get_type_of_expr(context, sf, deref.left, effective_loc);
 			}
 
 		case IDENT_EXPR:
@@ -713,38 +879,38 @@ fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
 								}
 							default:
 								break;
+							}
 						}
 					}
 				}
-			}
 
-			String local_type;
-			if (sf && find_local_decl_in_file(sf, id_name, &local_type, context))
-			{
-				if (local_type.len > 0)
+				String local_type;
+				if (sf && find_local_decl_in_file(sf, id_name, &local_type, context, effective_loc))
 				{
-					return local_type;
-				}
-			}
-
-			if (context && context.registry)
-			{
-				if (try ty_info = context.registry.types.get(id_name))
-				{
-					if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+					if (local_type.len > 0)
 					{
-						return id_name;
+						return local_type;
 					}
 				}
-			}
 
-			return id_name;
-		}
+				if (context && context.registry)
+				{
+					if (try ty_info = context.registry.types.get(id_name))
+					{
+						if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+						{
+							return id_name;
+						}
+					}
+				}
+
+				return id_name;
+			}
 
 		case ACCESS_EXPR:
 			{
 				AccessExpr* acc = expr.as(AccessExpr);
-				String parent_type = get_type_of_expr(context, sf, acc.left);
+				String parent_type = get_type_of_expr(context, sf, acc.left, effective_loc);
 				if (parent_type.len == 0)
 				{
 					return "";
@@ -754,6 +920,15 @@ fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
 				if (mem_name.len == 0)
 				{
 					return "";
+				}
+
+				if ((parent_type == "String" || parent_type.ends_with("[]")) && mem_name == "len")
+				{
+					return "sz";
+				}
+				if (parent_type == "String" && mem_name == "ptr")
+				{
+					return "char*";
 				}
 
 				Node* member = find_member_in_type(context, parent_type, mem_name, sf);
@@ -766,7 +941,7 @@ fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
 					}
 				}
 
-				Node* mnode = find_method_in_type(context, parent_type, mem_name, sf);
+				Node* mnode = find_method_in_type(context, parent_type, mem_name, sf, effective_loc);
 				if (mnode && mnode.kind == FN_DECL)
 				{
 					FnDecl* fd = mnode.as(FnDecl);
@@ -791,11 +966,11 @@ fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
 				case ACCESS_EXPR:
 					{
 						AccessExpr* acc = call.callee.as(AccessExpr);
-						String parent_type = get_type_of_expr(context, sf, acc.left);
+						String parent_type = get_type_of_expr(context, sf, acc.left, effective_loc);
 						String method_name = cursor::spelling(acc.member, tmem);
 						if (parent_type.len > 0 && method_name.len > 0)
 						{
-							Node* mnode = find_method_in_type(context, parent_type, method_name, sf);
+							Node* mnode = find_method_in_type(context, parent_type, method_name, sf, effective_loc);
 							if (mnode && mnode.kind == FN_DECL)
 							{
 								FnDecl* fd = mnode.as(FnDecl);
@@ -826,9 +1001,9 @@ fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr)
 					}
 				default:
 					break;
+				}
+				return "";
 			}
-			return "";
-		}
 
 		default:
 			return "";
@@ -1063,11 +1238,11 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 	if (acc_ctx.found_access && acc_ctx.found_access.kind == ACCESS_EXPR)
 	{
 		AccessExpr* acc = acc_ctx.found_access.as(AccessExpr);
-		String receiver_type = get_type_of_expr(context, sf, acc.left);
+		String receiver_type = get_type_of_expr(context, sf, acc.left, loc);
 
 		if (receiver_type.len > 0)
 		{
-			Node* mnode = find_method_in_type(context, receiver_type, symbol_name, sf);
+			Node* mnode = find_method_in_type(context, receiver_type, symbol_name, sf, loc);
 			if (mnode)
 			{
 				return mnode;
@@ -1328,13 +1503,197 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 	return null;
 }
 
-fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String callee_name)
+fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String expr_str, Location loc = { -1, -1 })
+{
+	String clean = expr_str.trim();
+	while (clean.starts_with("(") && clean.ends_with(")") && clean.len >= 2)
+	{
+		clean = clean[1 : ^2].trim();
+	}
+	if (clean.len == 0) return "";
+
+	if ((clean.starts_with("\"") && clean.ends_with("\"")) || (clean.starts_with("`") && clean.ends_with("`")))
+	{
+		return "String";
+	}
+	if (clean.starts_with("'") && clean.ends_with("'") && clean.len >= 2)
+	{
+		return "char";
+	}
+	if (clean.len > 0 && (clean[0].is_digit() || (clean.starts_with("-") && clean.len > 1 && clean[1].is_digit())))
+	{
+		if (clean.ends_with("f") || clean.ends_with("f32")) return "float";
+		if (clean.contains(".") || clean.ends_with("d") || clean.ends_with("f64")) return "double";
+		if (clean.ends_with("ul") || clean.ends_with("UL")) return "ulong";
+		if (clean.ends_with("l") || clean.ends_with("L")) return "long";
+		if (clean.ends_with("u") || clean.ends_with("U")) return "uint";
+		return "int";
+	}
+
+	sz dot_idx = 0;
+	bool has_dot = false;
+	int pdepth = 0;
+	int bdepth = 0;
+	for (sz i = 0; i < clean.len; i++)
+	{
+		char c = clean[i];
+		if (c == '(')
+		{
+			pdepth++;
+		}
+		else if (c == ')' && pdepth > 0)
+		{
+			pdepth--;
+		}
+		else if (c == '[')
+		{
+			bdepth++;
+		}
+		else if (c == ']' && bdepth > 0)
+		{
+			bdepth--;
+		}
+		else if (c == '.' && pdepth == 0 && bdepth == 0)
+		{
+			if (i > 0 && clean[i - 1].is_digit() && i + 1 < clean.len && clean[i + 1].is_digit()) continue;
+			dot_idx = i;
+			has_dot = true;
+			break;
+		}
+	}
+
+	if (has_dot)
+	{
+		String root = clean[:dot_idx].trim();
+		String remaining = clean[dot_idx + 1..].trim();
+		String curr_type = resolve_type_of_chain(context, sf, root, loc);
+
+		while (curr_type.len > 0 && remaining.len > 0)
+		{
+			String seg = remaining;
+			pdepth = 0;
+			bdepth = 0;
+			bool next_has_dot = false;
+			sz next_dot = 0;
+			for (sz i = 0; i < remaining.len; i++)
+			{
+				char c = remaining[i];
+				if (c == '(')
+				{
+					pdepth++;
+				}
+				else if (c == ')' && pdepth > 0)
+				{
+					pdepth--;
+				}
+				else if (c == '[')
+				{
+					bdepth++;
+				}
+				else if (c == ']' && bdepth > 0)
+				{
+					bdepth--;
+				}
+				else if (c == '.' && pdepth == 0 && bdepth == 0)
+				{
+					if (i > 0 && remaining[i - 1].is_digit() && i + 1 < remaining.len && remaining[i + 1].is_digit()) continue;
+					next_dot = i;
+					next_has_dot = true;
+					break;
+				}
+			}
+
+			if (next_has_dot)
+			{
+				seg = remaining[:next_dot].trim();
+				remaining = remaining[next_dot + 1..].trim();
+			}
+			else
+			{
+				remaining = "";
+			}
+
+			if (try paren_idx = seg.index_of_char('('))
+			{
+				seg = seg[:paren_idx].trim();
+			}
+
+			if (try brace_idx = curr_type.index_of_char('{'))
+			{
+				curr_type = curr_type[:brace_idx].trim();
+			}
+			curr_type = curr_type.trim_right("*& \t");
+
+			if ((curr_type == "String" || curr_type.ends_with("[]")) && seg == "len")
+			{
+				curr_type = "sz";
+				continue;
+			}
+			if (curr_type == "String" && seg == "ptr")
+			{
+				curr_type = "char*";
+				continue;
+			}
+
+			Node* member = find_member_in_type(context, curr_type, seg, sf);
+			if (member && member.kind == VAR_DECL)
+			{
+				VarDecl* vd = member.as(VarDecl);
+				curr_type = vd.type ? cursor::raw_type_identifier(vd.type) ?? "" : "";
+			}
+			else
+			{
+				Node* mnode = find_method_in_type(context, curr_type, seg, sf, loc);
+				if (mnode && mnode.kind == FN_DECL)
+				{
+					FnDecl* fd = mnode.as(FnDecl);
+					curr_type = fd.ret_type ? cursor::raw_type_identifier(fd.ret_type) ?? "" : "";
+				}
+				else
+				{
+					return "";
+				}
+			}
+		}
+		return curr_type;
+	}
+
+	if (try paren_idx = clean.index_of_char('('))
+	{
+		String fn_name = clean[:paren_idx].trim();
+		if (context && context.registry)
+		{
+			if (try fn_info = context.registry.functions.get(fn_name))
+			{
+				if (fn_info.node && fn_info.node.kind == FN_DECL)
+				{
+					FnDecl* fd = fn_info.node.as(FnDecl);
+					if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? "";
+				}
+			}
+		}
+		return "";
+	}
+
+	String local_type = "";
+	if (sf && find_local_decl_in_file(sf, clean, &local_type, context, loc))
+	{
+		if (local_type.len > 0) return local_type;
+	}
+
+	return clean;
+}
+
+fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String callee_name, Location loc = { -1, -1 })
 {
 	if (!context || callee_name.len == 0)
 	{
 		return null;
 	}
 
+	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+
+	// 1. Fully qualified call (e.g. `tcp::connect` or `std::io::printfn`)
 	if (try idx = callee_name.index_of("::"))
 	{
 		String mod_name = callee_name[:idx];
@@ -1369,10 +1728,7 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 			}
 			foreach (stmt : mod.nodes)
 			{
-				if (!stmt || stmt.kind == ERROR)
-				{
-					continue;
-				}
+				if (!stmt || stmt.kind == ERROR) continue;
 				String sname = cursor::spelling(stmt, tmem);
 				if (sname == fn_name || sname.strip_prefix("@") == fn_name.strip_prefix("@"))
 				{
@@ -1380,37 +1736,49 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 				}
 			}
 		}
+		return null;
 	}
 
-	if (try dot_idx = callee_name.index_of_char('.'))
+	// 2. Method call (`obj.method` or `3.14.trunc`)
+	if (try dot_idx = callee_name.rindex_of_char('.'))
 	{
-		String recv_name = callee_name[:dot_idx];
-		String method_name = callee_name[dot_idx + 1..];
+		String recv_name = callee_name[:dot_idx].trim();
+		String method_name = callee_name[dot_idx + 1..].trim();
 
-		Node* mnode = find_method_in_type(context, recv_name, method_name, sf);
-		if (mnode)
+		while (recv_name.starts_with("(") && recv_name.ends_with(")") && recv_name.len >= 2)
 		{
-			return mnode;
+			recv_name = recv_name[1 : ^2].trim();
 		}
 
-		String recv_type = "";
-		if (sf)
-		{
-			(void)find_local_decl_in_file(sf, recv_name, &recv_type, context);
-		}
+		Node* mnode = find_method_in_type(context, recv_name, method_name, sf, loc);
+		if (mnode) return mnode;
+
+		String recv_type = resolve_type_of_chain(context, sf, recv_name, loc);
 
 		if (recv_type.len > 0)
 		{
-			mnode = find_method_in_type(context, recv_type, method_name, sf);
-			if (mnode)
-			{
-				return mnode;
-			}
+			mnode = find_method_in_type(context, recv_type, method_name, sf, loc);
+			if (mnode) return mnode;
 		}
+		return null;
 	}
 
+	// 3. Fast-path lookup in current module and global registry
 	if (context.registry)
 	{
+		if (caller_mod.len > 0)
+		{
+			String local_qname = string::tformat("%s::%s", caller_mod, callee_name);
+			if (try fn_info = context.registry.functions.get(local_qname))
+			{
+				return fn_info.node;
+			}
+			if (try mac_info = context.registry.macros.get(local_qname))
+			{
+				return mac_info.node;
+			}
+		}
+
 		if (try fn_info = context.registry.functions.get(callee_name))
 		{
 			if (fn_info.node && (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod)))
@@ -1435,30 +1803,6 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 			}
 		}
 	}
-
-	context.modules.@each(; mod_name, mod)
-	{
-		if (mod)
-		{
-			foreach (stmt : mod.nodes)
-			{
-				if (!stmt || stmt.kind == ERROR)
-				{
-					continue;
-				}
-				if (sf && !is_symbol_accessible_from_file(context, sf, stmt, mod_name))
-				{
-					continue;
-				}
-
-				String sname = cursor::spelling(stmt, tmem);
-				if (sname == callee_name || sname.strip_prefix("@") == callee_name.strip_prefix("@"))
-				{
-					return stmt;
-				}
-			}
-		}
-	};
 
 	return null;
 }

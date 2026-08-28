@@ -121,10 +121,61 @@ fn CallTargetInfo parse_call_context(String text, sz offset)
 	sz callee_start = callee_end;
 	while (callee_start > 0)
 	{
-		char c = text[callee_start - 1];
-		if (c.is_alnum() || c == '_' || c == ':' || c == '.' || c == '@' || c == '#' || c == '$')
+		if (text[callee_start - 1] == ')')
 		{
 			callee_start--;
+			int scan_depth = 1;
+			while (callee_start > 0 && scan_depth > 0)
+			{
+				if (text[callee_start - 1] == ')')
+				{
+					scan_depth++;
+				}
+				else if (text[callee_start - 1] == '(')
+				{
+					scan_depth--;
+				}
+				callee_start--;
+			}
+			continue;
+		}
+		else if (text[callee_start - 1] == ']')
+		{
+			callee_start--;
+			int scan_depth = 1;
+			while (callee_start > 0 && scan_depth > 0)
+			{
+				if (text[callee_start - 1] == ']')
+				{
+					scan_depth++;
+				}
+				else if (text[callee_start - 1] == '[')
+				{
+					scan_depth--;
+				}
+				callee_start--;
+			}
+			continue;
+		}
+		else if (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$')
+		{
+			while (callee_start > 0 && (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$'))
+			{
+				callee_start--;
+			}
+		}
+		else
+		{
+			break;
+		}
+
+		if (callee_start >= 2 && text[callee_start - 2] == ':' && text[callee_start - 1] == ':')
+		{
+			callee_start -= 2;
+		}
+		else if (callee_start >= 1 && text[callee_start - 1] == '.')
+		{
+			callee_start -= 1;
 		}
 		else
 		{
@@ -151,7 +202,11 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 	CallTargetInfo target_info = parse_call_context(sf.content, offset);
 	if (!target_info.is_valid) return {.signatures = {} };
 
-	Node* callee_node = query::resolve_callee_by_name(project.workspace.ctx, sf, target_info.callee_name);
+	Location loc = {
+		.line = (int)pos.line,
+		.column = (int)pos.character
+	};
+	Node* callee_node = query::resolve_callee_by_name(project.workspace.ctx, sf, target_info.callee_name, loc);
 	if (!callee_node) return {.signatures = {} };
 
 	String symbol_name = target_info.callee_name;
@@ -170,13 +225,27 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 	List{ParameterInformation} params;
 	params.tinit();
 
+	bool is_method_call = target_info.callee_name.contains(".");
+	bool is_method_decl = false;
+	if (callee_node.kind == FN_DECL && callee_node.as(FnDecl).associated_type != null)
+	{
+		is_method_decl = true;
+	}
+	else if (callee_node.kind == MACRO_DECL && @ok(callee_node.as(MacroDecl).associated_type.get()))
+	{
+		is_method_decl = true;
+	}
+
+	sz start_param_idx = (is_method_call && is_method_decl) ? 1 : 0;
+
 	switch (callee_node.kind)
 	{
 		case FN_DECL:
 			{
 				FnDecl* fn_decl = callee_node.as(FnDecl);
-				foreach (p : fn_decl.params)
+				for (sz i = start_param_idx; i < fn_decl.params.len; i++)
 				{
+					Node* p = fn_decl.params[i];
 					if (!p || p.kind != VAR_DECL) continue;
 					VarDecl* vd = p.as(VarDecl);
 					String pname = vd.name ? vd.name.text : "";
@@ -205,8 +274,9 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 		case MACRO_DECL:
 			{
 				MacroDecl* mac_decl = callee_node.as(MacroDecl);
-				foreach (p : mac_decl.params)
+				for (sz i = start_param_idx; i < mac_decl.params.len; i++)
 				{
+					Node* p = mac_decl.params[i];
 					if (!p || p.kind != VAR_DECL) continue;
 					VarDecl* vd = p.as(VarDecl);
 					String pname = vd.name ? vd.name.text : "";
