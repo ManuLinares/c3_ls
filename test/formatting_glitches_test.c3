@@ -303,3 +303,187 @@ fn float _atan2f(float y, float x) {
 	assert(formatted.contains("return m & 1 ? -(float)math::HALF_PI : (float)math::HALF_PI;"));
 	assert(formatted.contains("default: return (z - PI_LO_F) - PI_F;"));
 }
+
+fn void test_comment_newline_preservation() @test
+{
+	String code = `module app;
+fn int main(String[] args)
+{
+	{}
+
+	// comment
+	{};
+
+	// comment
+	return 0;
+}
+
+// comment
+`;
+
+	String formatted = format_code(code);
+	assert(formatted.contains("{}\n\n\t// comment\n\t{};"));
+	assert(formatted.contains("{};\n\n\t// comment\n\treturn 0;"));
+	assert(formatted.contains("}\n\n// comment"));
+}
+
+fn void test_ternary_with_const_ident_spacing() @test
+{
+	String code = `module app;
+fn float choose(uint m, float z) {
+	return m & 1 ? -(float)math::HALF_PI : (float)math::HALF_PI;
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("return m & 1 ? -(float)math::HALF_PI : (float)math::HALF_PI;"));
+	assert(!formatted.contains("HALF_PI:"));
+}
+
+fn void test_named_args_and_labels_no_space_before_colon() @test
+{
+	String code = `module app;
+fn void run() {
+	init(tmem, capacity: 16, load_factor: 0.75f);
+	mem::load(bytes, $align: 1);
+	while OUTER: (true) {
+		break OUTER;
+	}
+	do DONE: {
+		break DONE;
+	};
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("capacity: 16, load_factor: 0.75f"));
+	assert(!formatted.contains("capacity :"));
+	assert(!formatted.contains("load_factor :"));
+	assert(formatted.contains("$align: 1"));
+	assert(!formatted.contains("$align :"));
+	assert(formatted.contains("while OUTER: (true)"));
+	assert(!formatted.contains("while OUTER :"));
+	assert(formatted.contains("do DONE:"));
+	assert(!formatted.contains("do DONE :"));
+}
+
+fn void test_inline_brace_comment_spacing() @test
+{
+	String code = `module app;
+fn void test() {
+	{}
+
+	// comment after blank line
+	{};
+
+	// another comment
+	return;
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("{}\n\n\t// comment after blank line\n\t{};"));
+	assert(formatted.contains("{};\n\n\t// another comment\n\treturn;"));
+	assert(!formatted.contains("{}  //"));
+}
+
+fn void test_bitstruct_field_colons_tight() @test
+{
+	String code = `module app;
+bitstruct Flags : char {
+	bool text: 0;
+	bool hcrc: 1;
+	uint reserved: 5..7;
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("bool text: 0;"));
+	assert(!formatted.contains("text :"));
+	assert(formatted.contains("bool hcrc: 1;"));
+	assert(formatted.contains("uint reserved: 5..7;"));
+	assert(!formatted.contains("reserved :"));
+}
+
+fn void test_named_arguments_colons_tight() @test
+{
+	String code = `module app;
+fn void test() {
+	allocator.release(ptr, aligned: true);
+	return self.init_with_values(tmem, ...$vaarg, capacity: capacity, load_factor: load_factor);
+	mem::load(bytes, $align: 1);
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("aligned: true"));
+	assert(!formatted.contains("aligned :"));
+	assert(formatted.contains("capacity: capacity, load_factor: load_factor"));
+	assert(!formatted.contains("capacity :"));
+	assert(!formatted.contains("load_factor :"));
+	assert(formatted.contains("$align: 1"));
+	assert(!formatted.contains("$align :"));
+}
+
+fn void test_state_leak_does_not_corrupt_subsequent_colons() @test
+{
+	String code = `module app;
+
+fn void? check(int? x) {
+	int? a = x;
+	if (a?) return null;
+	return null;
+}
+
+struct Empty {}
+
+bitstruct Flags : char {
+	bool text: 0;
+	bool hcrc: 1;
+}
+
+fn void test_calls() {
+	allocator.release(ptr, aligned: true);
+	init(tmem, capacity: 16, load_factor: 0.75f);
+	mem::load(bytes, $align: 1);
+	while OUTER: (true) {
+		break OUTER;
+	}
+}
+`;
+
+	String formatted = format_code(code);
+	assert(formatted.contains("bool text: 0;"));
+	assert(!formatted.contains("text :"));
+	assert(formatted.contains("aligned: true"));
+	assert(!formatted.contains("aligned :"));
+	assert(formatted.contains("capacity: 16, load_factor: 0.75f"));
+	assert(!formatted.contains("capacity :"));
+	assert(formatted.contains("$align: 1"));
+	assert(!formatted.contains("$align :"));
+	assert(formatted.contains("while OUTER: (true)"));
+	assert(!formatted.contains("while OUTER :"));
+}
+
+fn void test_ternary_containing_slice_does_not_corrupt_subsequent_colons() @test
+{
+	String code = `module app;
+
+fn void test_slice_in_ternary(bool flag, char[] buf) {
+	char[] res = flag ? buf[:8192] : buf[8192:];
+}
+
+bitstruct OpIndex : char {
+	char tag: 6..7;
+	char index: 0..5;
+}
+
+fn void test_named(int x) {
+	call(capacity: 16, load_factor: 0.75f);
+}
+`;
+
+	String formatted = format_code(code);
+	assert(formatted.contains("flag ? buf[:8192] : buf[8192:]"));
+	assert(formatted.contains("char tag: 6..7;"));
+	assert(!formatted.contains("tag :"));
+	assert(formatted.contains("char index: 0..5;"));
+	assert(!formatted.contains("index :"));
+	assert(formatted.contains("capacity: 16, load_factor: 0.75f"));
+	assert(!formatted.contains("capacity :"));
+}

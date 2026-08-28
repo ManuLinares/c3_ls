@@ -656,19 +656,22 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	if (curr == COLON)
 	{
 		if (prev == DEFAULT || prev == CT_DEFAULT || prev == CASE || prev == CT_CASE) return false;
-		if (ctx.in_ct_header) return false;
-		if (ctx.in_case_header) return false;
-		if (ctx.is_decl_header) return true;
-		if (ctx.ct_foreach_colons == 1 && (prev == CT_IDENT || prev == CT_TYPE_IDENT || prev == IDENT)) return true;
+		if (ctx.in_ct_header || ctx.in_case_header) return false;
+		if (ctx.ct_foreach_colons == 2) return false;
+		if (ctx.ct_foreach_colons == 1) return true;
 		if (ctx.bracket_depth > 0)
 		{
-			if (prev == LBRACKET) return false;
+			if (prev == LBRACKET || ctx.next_token.kind == RBRACKET) return false;
 			return true;
 		}
-		if (ctx.foreach_paren_depth > 0 || ctx.ternary_depth > 0)
+		if (ctx.foreach_paren_depth > 0) return true;
+		if (ctx.paren_depth > 0 && (prev == IDENT || prev == CT_IDENT || prev == HASH_IDENT || prev == AT_IDENT))
 		{
-			return true;
+			return false;
 		}
+		if (ctx.ternary_depth > 0) return true;
+		if (prev == CONST_IDENT) return false;
+		if (ctx.is_decl_header) return true;
 		return false;
 	}
 
@@ -762,8 +765,29 @@ FormattingOptions options
 			{
 				ctx.indent_level = 0;
 			}
+
 			if (tok.kind == DOCS_START)
 			{
+				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+					? (tok.range.start.line - ctx.prev_token.range.end.line)
+					: 0;
+
+				if (line_diff >= 2)
+				{
+					if (ctx.at_line_start)
+					{
+						newline(&ctx, 1);
+					}
+					else
+					{
+						newline(&ctx, 2);
+					}
+				}
+				else if (line_diff == 1 && !ctx.at_line_start)
+				{
+					newline(&ctx, 1);
+				}
+
 				if (ctx.at_line_start) indent(&ctx);
 
 				sz end_doc_idx = i;
@@ -820,19 +844,54 @@ FormattingOptions options
 			{
 				ctx.ct_foreach_colons = 1;
 			}
+
 			if (tok.kind == LINE_COMMENT)
 			{
-				if (ctx.at_line_start)
+				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+					? (tok.range.start.line - ctx.prev_token.range.end.line)
+					: 0;
+
+				if (line_diff >= 2)
 				{
+					if (ctx.at_line_start)
+					{
+						newline(&ctx, 1);
+					}
+					else
+					{
+						newline(&ctx, 2);
+					}
+					indent(&ctx);
+				}
+				else if (line_diff == 1)
+				{
+					if (!ctx.at_line_start)
+					{
+						newline(&ctx, 1);
+					}
 					indent(&ctx);
 				}
 				else
 				{
-					ctx.out.append("  ");
+					if (ctx.at_line_start)
+					{
+						indent(&ctx);
+					}
+					else
+					{
+						ctx.out.append("  ");
+					}
 				}
+
 				ctx.out.append(tok.value.trim_right("\r\n"));
 				ctx.consecutive_newlines = 0;
-				newline(&ctx, 1);
+
+				int next_line_diff = (next_tok.kind != EOF)
+					? (next_tok.range.start.line - tok.range.end.line)
+					: 1;
+
+				newline(&ctx, next_line_diff >= 2 ? 2 : 1);
+
 				ctx.prev_prev_token = ctx.prev_token;
 				ctx.prev_kind = tok.kind;
 				ctx.prev_token = tok;
@@ -841,21 +900,49 @@ FormattingOptions options
 
 			if (tok.kind == BLOCK_COMMENT)
 			{
-				if (ctx.at_line_start)
+				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+					? (tok.range.start.line - ctx.prev_token.range.end.line)
+					: 0;
+
+				if (line_diff >= 2)
 				{
+					if (ctx.at_line_start)
+					{
+						newline(&ctx, 1);
+					}
+					else
+					{
+						newline(&ctx, 2);
+					}
+					indent(&ctx);
+				}
+				else if (line_diff == 1)
+				{
+					if (!ctx.at_line_start)
+					{
+						newline(&ctx, 1);
+					}
 					indent(&ctx);
 				}
 				else
 				{
-					ctx.out.append_char(' ');
+					if (ctx.at_line_start)
+					{
+						indent(&ctx);
+					}
+					else
+					{
+						ctx.out.append_char(' ');
+					}
 				}
+
 				ctx.out.append(tok.value);
 				ctx.consecutive_newlines = 0;
 
 				if (next_tok.kind != EOF && next_tok.range.start.line > tok.range.end.line)
 				{
-					int line_diff = next_tok.range.start.line - tok.range.end.line;
-					newline(&ctx, line_diff >= 2 ? 2 : 1);
+					int next_line_diff = next_tok.range.start.line - tok.range.end.line;
+					newline(&ctx, next_line_diff >= 2 ? 2 : 1);
 				}
 
 				ctx.prev_prev_token = ctx.prev_token;
@@ -863,6 +950,7 @@ FormattingOptions options
 				ctx.prev_token = tok;
 				continue;
 			}
+
 			if (tok.kind == CT_ELSE)
 			{
 				if (ctx.indent_level > 0) ctx.indent_level--;
@@ -892,6 +980,8 @@ FormattingOptions options
 
 			if (tok.kind == RBRACE)
 			{
+				ctx.ternary_depth = 0;
+				ctx.is_decl_header = false;
 				if (ctx.generic_depth == 0)
 				{
 					closed_bk = pop_brace(&ctx);
@@ -948,10 +1038,17 @@ FormattingOptions options
 				if (ctx.bracket_depth > 0) ctx.bracket_depth--;
 			}
 
-			if (tok.kind == QUESTION && !is_type_ending_token(ctx.prev_kind) && ctx.prev_kind != RBRACE)
+			if (tok.kind == LBRACKET || tok.kind == LVEC)
+			{
+				ctx.bracket_depth++;
+			}
+
+			if ((tok.kind == QUESTION && !is_type_ending_token(ctx.prev_kind) && ctx.prev_kind != RBRACE && is_expr_operand_end(ctx.prev_kind)) ||
+			tok.kind == CT_TERNARY)
 			{
 				ctx.ternary_depth++;
 			}
+
 			if (tok.kind != RBRACE && i > start_idx && ctx.prev_kind != ERROR &&
 			ctx.prev_kind != LINE_COMMENT && ctx.prev_kind != BLOCK_COMMENT && ctx.prev_kind != DOCS_END)
 			{
@@ -972,20 +1069,24 @@ FormattingOptions options
 					newline(&ctx, 1);
 				}
 			}
+
 			if (tok.kind == LBRACE)
 			{
+				ctx.ternary_depth = 0;
+				ctx.is_decl_header = false;
 				bool is_decl_block = is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
 
 				bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
-				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal || next_tok.kind == RBRACE) && !ctx.is_switch_header;
+				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header;
 
 				if (!is_generic && !is_init && next_tok.kind != RBRACE && !ctx.at_line_start)
 				{
 					newline(&ctx);
 				}
 			}
+
 			if (tok.kind == CASE || tok.kind == DEFAULT || tok.kind == CT_CASE || tok.kind == CT_DEFAULT)
 			{
 				if (ctx.in_case_body)
@@ -996,6 +1097,7 @@ FormattingOptions options
 				ctx.in_case_header = true;
 				if (!ctx.at_line_start) newline(&ctx);
 			}
+
 			if (ctx.at_line_start)
 			{
 				indent(&ctx);
@@ -1018,8 +1120,10 @@ FormattingOptions options
 					ctx.out.append_char(' ');
 				}
 			}
+
 			ctx.out.append(tok.value);
 			ctx.consecutive_newlines = 0;
+
 			if (just_closed_brace && (closed_bk == BLOCK || closed_bk == SWITCH_BLOCK))
 			{
 				if (next_tok.kind != ELSE && next_tok.kind != WHILE && next_tok.kind != EOS && next_tok.kind != EOF)
@@ -1035,9 +1139,10 @@ FormattingOptions options
 					}
 				}
 			}
+
 			if (tok.kind == COLON)
 			{
-				if (ctx.ternary_depth > 0)
+				if (ctx.ternary_depth > 0 && ctx.bracket_depth == 0 && ctx.paren_depth == 0)
 				{
 					ctx.ternary_depth--;
 				}
@@ -1049,12 +1154,10 @@ FormattingOptions options
 				}
 				else if (ctx.ct_foreach_colons == 1)
 				{
-					// First colon in `$foreach $var : $collection:` -> stays inline
 					ctx.ct_foreach_colons = 2;
 				}
 				else if (ctx.ct_foreach_colons == 2)
 				{
-					// Second colon in `$foreach $var : $collection:` -> opens block
 					ctx.ct_foreach_colons = 0;
 					ctx.indent_level++;
 					newline(&ctx, 1);
@@ -1072,15 +1175,18 @@ FormattingOptions options
 					}
 				}
 			}
+
 			if (tok.kind == CT_ELSE)
 			{
 				ctx.indent_level++;
 				newline(&ctx, 1);
 			}
+
 			if (tok.kind == CT_ENDIF || tok.kind == CT_ENDFOR || tok.kind == CT_ENDFOREACH || tok.kind == CT_ENDSWITCH)
 			{
 				newline(&ctx, 1);
 			}
+
 			if (tok.kind == LPAREN)
 			{
 				ctx.paren_depth++;
@@ -1094,13 +1200,10 @@ FormattingOptions options
 				}
 			}
 
-			if (tok.kind == LBRACKET || tok.kind == LVEC)
-			{
-				ctx.bracket_depth++;
-			}
-
 			if (tok.kind == LBRACE)
 			{
+				ctx.ternary_depth = 0;
+				ctx.is_decl_header = false;
 				bool is_decl_block = is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
@@ -1157,8 +1260,10 @@ FormattingOptions options
 			{
 				ctx.decl_generic_depth--;
 			}
+
 			if (tok.kind == EOS)
 			{
+				ctx.ternary_depth = 0;
 				ctx.is_decl_header = false;
 				if (ctx.for_paren_depth == 0 && ctx.paren_depth == 0)
 				{
