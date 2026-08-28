@@ -389,7 +389,7 @@ fn Node* parse_literal_expr(ContextScope scope) => @pool()
 					{
 						clean_string = clean_string[:^ 3];
 					}
-					if (clean_string.ends_with("f") || clean_string.ends_with("d"))
+					if (clean_string.ends_with("f") || clean_string.ends_with("F") || clean_string.ends_with("d") || clean_string.ends_with("D"))
 					{
 						switch (token.kind)
 						{
