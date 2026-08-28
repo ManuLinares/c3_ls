@@ -80,6 +80,8 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 	{
 		if (sf)
 		{
+			String file_mod = query::get_source_file_module_name(sf);
+			String mod_ident = file_mod.len > 0 ? file_mod : "global";
 			foreach (stmt : sf.ast.statements)
 			{
 				if (stmt)
@@ -89,7 +91,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 					{
 						if (seen_symbols.add(sname))
 						{
-							add_symbol_completion(ctx, items, sname, stmt, "global", ctx.prefix);
+							add_symbol_completion(ctx, items, sname, stmt, mod_ident, ctx.prefix);
 						}
 					}
 				}

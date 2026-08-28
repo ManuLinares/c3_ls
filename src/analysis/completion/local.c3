@@ -46,7 +46,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 							.detail = vtype,
 							.insertText = vname,
 							.filterText = vname,
-							.sortText = string::tformat("0001_%s", vname)
+							.sortText = string::tformat("0001_%s", vname),
+							.data = string::tformat("local:%s", vname)
 						}
 						);
 					}
@@ -71,7 +72,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 								.detail = vtype,
 								.insertText = vname,
 								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname)
+								.sortText = string::tformat("0001_%s", vname),
+								.data = string::tformat("local:%s", vname)
 							}
 							);
 						}
@@ -97,7 +99,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 								.detail = vtype,
 								.insertText = vname,
 								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname)
+								.sortText = string::tformat("0001_%s", vname),
+								.data = string::tformat("local:%s", vname)
 							}
 							);
 						}
@@ -122,7 +125,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 								.detail = "sz",
 								.insertText = iname,
 								.filterText = iname,
-								.sortText = string::tformat("0001_%s", iname)
+								.sortText = string::tformat("0001_%s", iname),
+								.data = string::tformat("local:%s", iname)
 							}
 							);
 						}
@@ -144,7 +148,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 								.detail = vtype,
 								.insertText = vname,
 								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname)
+								.sortText = string::tformat("0001_%s", vname),
+								.data = string::tformat("local:%s", vname)
 							}
 							);
 						}

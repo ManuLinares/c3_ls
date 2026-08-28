@@ -7,6 +7,7 @@ import analyzer::sema::query;
 
 import std::collections::list;
 import std::collections::map;
+import std::collections::set;
 
 import lsp::core;
 import lsp;
@@ -70,6 +71,44 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 					depth--;
 				}
 			}
+			continue;
+		}
+		else if (text[idx - 1] == '"')
+		{
+			idx--;
+			while (idx > 0)
+			{
+				if (text[idx - 1] == '"' && (idx == 1 || text[idx - 2] != '\\'))
+				{
+					idx--;
+					break;
+				}
+				idx--;
+			}
+			continue;
+		}
+		else if (text[idx - 1] == '\'')
+		{
+			idx--;
+			while (idx > 0)
+			{
+				if (text[idx - 1] == '\'' && (idx == 1 || text[idx - 2] != '\\'))
+				{
+					idx--;
+					break;
+				}
+				idx--;
+			}
+			continue;
+		}
+		else if (text[idx - 1] == '`')
+		{
+			idx--;
+			while (idx > 0 && text[idx - 1] != '`')
+			{
+				idx--;
+			}
+			if (idx > 0) idx--;
 			continue;
 		}
 		else if (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$')
@@ -162,6 +201,60 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	}
 }
 
+fn sz? find_top_level_dot(String expr)
+{
+	int paren_depth = 0;
+	int bracket_depth = 0;
+	int brace_depth = 0;
+	bool in_str = false;
+	bool in_char = false;
+	bool in_raw = false;
+
+	for (sz i = 0; i < expr.len; i++)
+	{
+		char c = expr[i];
+		if (in_raw)
+		{
+			if (c == '`') in_raw = false;
+			continue;
+		}
+		if (in_str)
+		{
+			if (c == '\\' && i + 1 < expr.len) { i++; continue; }
+			if (c == '"') in_str = false;
+			continue;
+		}
+		if (in_char)
+		{
+			if (c == '\\' && i + 1 < expr.len) { i++; continue; }
+			if (c == '\'') in_char = false;
+			continue;
+		}
+
+		switch (c)
+		{
+			case '`': in_raw = true;
+			case '"': in_str = true;
+			case '\'': in_char = true;
+			case '(': paren_depth++;
+			case ')': if (paren_depth > 0) paren_depth--;
+			case '[': bracket_depth++;
+			case ']': if (bracket_depth > 0) bracket_depth--;
+			case '{': brace_depth++;
+			case '}': if (brace_depth > 0) brace_depth--;
+			case '.':
+				if (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0)
+				{
+					if (i + 1 < expr.len && expr[i + 1] == '.') continue;
+					if (i > 0 && expr[i - 1] == '.') continue;
+					return i;
+				}
+			default: break;
+		}
+	}
+	return NOT_FOUND~;
+}
+
 fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 {
 	if (base_id.len == 0)
@@ -169,16 +262,29 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 		return "";
 	}
 
-	if (base_id.starts_with("$Typeof") || base_id.starts_with("$Typefrom"))
+	String clean_id = base_id.trim();
+
+	// String literals (even containing internal dots: "asd.", "file.tar.gz")
+	if ((clean_id.starts_with("\"") && clean_id.ends_with("\"")) || (clean_id.starts_with("`") && clean_id.ends_with("`")))
+	{
+		return "String";
+	}
+	// Character literals ('a', '.')
+	if (clean_id.starts_with("'") && clean_id.ends_with("'") && clean_id.len >= 2)
+	{
+		return "char";
+	}
+
+	if (clean_id.starts_with("$Typeof") || clean_id.starts_with("$Typefrom"))
 	{
 		String inner = "";
-		if (try open_p = base_id.index_of_char('('))
+		if (try open_p = clean_id.index_of_char('('))
 		{
-			if (try close_p = base_id.rindex_of_char(')'))
+			if (try close_p = clean_id.rindex_of_char(')'))
 			{
 				if (close_p > open_p)
 				{
-					inner = base_id[open_p + 1 : close_p - open_p - 1].trim();
+					inner = clean_id[open_p + 1 : close_p - open_p - 1].trim();
 				}
 			}
 		}
@@ -189,16 +295,16 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 		return "";
 	}
 
-	if (try dot_idx = base_id.index_of_char('.'))
+	if (try dot_idx = find_top_level_dot(clean_id))
 	{
-		String root_id = base_id[:dot_idx].trim();
+		String root_id = clean_id[:dot_idx].trim();
 		String current_type = resolve_type_from_identifier_or_chain(ctx, root_id);
-		String remaining = base_id[dot_idx + 1..];
+		String remaining = clean_id[dot_idx + 1..];
 
 		while (current_type.len > 0 && remaining.len > 0)
 		{
 			String seg = remaining;
-			if (try next_dot = remaining.index_of_char('.'))
+			if (try next_dot = find_top_level_dot(remaining))
 			{
 				seg = remaining[:next_dot].trim();
 				remaining = remaining[next_dot + 1..];
@@ -217,7 +323,7 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 			if (member && member.kind == VAR_DECL)
 			{
 				VarDecl* vd = member.as(VarDecl);
-				current_type = vd.type ? (cursor::raw_type_identifier(vd.type) ?? "") : "";
+				current_type = vd.type ? cursor::spelling(vd.type, tmem) : "";
 			}
 			else
 			{
@@ -225,7 +331,7 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 				if (mnode && mnode.kind == FN_DECL)
 				{
 					FnDecl* fd = mnode.as(FnDecl);
-					current_type = fd.ret_type ? (cursor::raw_type_identifier(fd.ret_type) ?? "") : "";
+					current_type = fd.ret_type ? cursor::spelling(fd.ret_type, tmem) : "";
 				}
 				else
 				{
@@ -237,10 +343,9 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 		return current_type;
 	}
 
-	String clean_id = base_id;
-	if (try brace_idx = base_id.index_of_char('{'))
+	if (try brace_idx = clean_id.index_of_char('{'))
 	{
-		clean_id = base_id[:brace_idx].trim();
+		clean_id = clean_id[:brace_idx].trim();
 	}
 
 	String type_name = "";
@@ -266,7 +371,7 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 						VarDecl* vd = base_node.as(VarDecl);
 						if (vd.type)
 						{
-							type_name = cursor::raw_type_identifier(vd.type) ?? "";
+							type_name = cursor::spelling(vd.type, tmem);
 						}
 					}
 				default:
@@ -278,9 +383,14 @@ fn String resolve_type_from_identifier_or_chain(Context* ctx, String base_id)
 	return type_name.len > 0 ? type_name : clean_id;
 }
 
-fn void inject_vector_completions(List{CompletionItem} * items, String prefix)
+fn void inject_vector_swizzles(List{CompletionItem} * items, String prefix)
 {
-	const String[*] COMPS = { "x", "y", "xy", "yx", "xx", "yy", "r", "g", "rg", "gr", "u", "v" };
+	const String[*] COMPS = {
+		"x", "y", "z", "w", "r", "g", "b", "a", "u", "v",
+		"xy", "yx", "xx", "yy", "xz", "yz", "zx", "zy", "zz",
+		"xyz", "xzy", "yxz", "yzx", "zxy", "zyx",
+		"xyzw", "rgba"
+	};
 	foreach (c : COMPS)
 	{
 		if (prefix.len == 0 || c.starts_with(prefix))
@@ -289,35 +399,149 @@ fn void inject_vector_completions(List{CompletionItem} * items, String prefix)
 			{
 				.label = c,
 				.kind = FIELD,
-				.detail = "component",
+				.detail = "swizzle",
 				.insertText = c,
 				.filterText = c,
-				.sortText = string::tformat("0001_%s", c)
+				.sortText = string::tformat("0001_%s", c),
+				.data = "property"
 			}
 			);
 		}
 	}
+}
 
-	const String[*] METHODS = {
-		"length", "length_sq", "distance", "distance_sq", "normalize", "dot", "cross", "angle",
-		"lerp", "reflect", "rotate", "transform", "clamp_length", "move_towards",
-		"sum", "product", "min", "max", "ceil", "floor", "round", "trunc"
-	};
-	foreach (m : METHODS)
+fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, String type_name)
+{
+	if (!assoc_type_node) return false;
+	String assoc_raw = cursor::raw_type_identifier(assoc_type_node) ?? "";
+	String assoc_spell = cursor::spelling(assoc_type_node, tmem);
+
+	if (assoc_raw.len > 0 && (assoc_raw == clean_type || assoc_raw == type_name)) return true;
+	if (assoc_spell.len > 0 && (assoc_spell == clean_type || assoc_spell == type_name)) return true;
+
+	if (query::is_vector_type(clean_type))
 	{
-		if (prefix.len == 0 || m.starts_with(prefix))
+		if (query::is_vector_type(assoc_spell) || query::is_vector_type(assoc_raw)) return true;
+	}
+
+	return false;
+}
+
+fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, String type_name, HashSet{String} * seen_methods)
+{
+	if (!ctx.ws || !ctx.ws.ctx || type_name.len == 0) return;
+
+	String clean_type = type_name;
+	if (try brace_idx = type_name.index_of_char('{'))
+	{
+		clean_type = type_name[:brace_idx].trim();
+	}
+
+	Registry* reg = ctx.ws.ctx.registry;
+	if (reg)
+	{
+		reg.functions.@each(; qname, fn_info)
 		{
-			items.push(
+			FunctionInfo* curr = fn_info;
+			while (curr != null)
 			{
-				.label = m,
-				.kind = FUNCTION,
-				.detail = "vec method",
-				.insertText = string::tformat("%s($1)", m),
-				.insertTextFormat = SNIPPET,
-				.filterText = m,
-				.sortText = string::tformat("0002_%s", m)
+				if (curr.node && curr.node.kind == FN_DECL)
+				{
+					FnDecl* fndecl = curr.node.as(FnDecl);
+					if (fndecl.associated_type && is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
+					{
+						if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
+						{
+							String mname = fndecl.name ? fndecl.name.text : "";
+							if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+							{
+								if (seen_methods.add(mname))
+								{
+									add_symbol_completion(ctx, items, mname, curr.node, clean_type, ctx.prefix);
+								}
+							}
+						}
+					}
+				}
+				curr = curr.next;
 			}
-			);
+		};
+
+		reg.macros.@each(; qname, mac_info)
+		{
+			MacroInfo* curr = mac_info;
+			while (curr != null)
+			{
+				if (curr.node && curr.node.kind == MACRO_DECL)
+				{
+					MacroDecl* mac = curr.node.as(MacroDecl);
+					if (try assoc_node = mac.associated_type.get())
+					{
+						if (is_matching_associated_type(assoc_node, clean_type, type_name))
+						{
+							if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
+							{
+								String mname = mac.name ? mac.name.text : "";
+								if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+								{
+									if (seen_methods.add(mname))
+									{
+										add_symbol_completion(ctx, items, mname, curr.node, clean_type, ctx.prefix);
+									}
+								}
+							}
+						}
+					}
+				}
+				curr = curr.next;
+			}
+		};
+	}
+
+	Node* type_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, clean_type);
+	if (type_node)
+	{
+		switch (type_node.kind)
+		{
+			case TYPEDEF_DECL:
+				{
+					TypedefDecl* td = type_node.as(TypedefDecl);
+					if (td.is_inline && td.base_type)
+					{
+						String base_type_str = cursor::raw_type_identifier(td.base_type) ?? cursor::spelling(td.base_type, tmem);
+						if (base_type_str.len > 0 && base_type_str != clean_type)
+						{
+							provide_methods_for_type(ctx, items, base_type_str, seen_methods);
+						}
+					}
+				}
+			case STRUCT_DECL:
+				{
+					StructDecl* sd = type_node.as(StructDecl);
+					foreach (field : sd.fields)
+					{
+						if (!field || field.kind != VAR_DECL) continue;
+						VarDecl* vd = field.as(VarDecl);
+						if (vd.var_flags.is_inline && vd.type)
+						{
+							String sub_type = cursor::raw_type_identifier(vd.type) ?? "";
+							if (sub_type.len > 0 && sub_type != clean_type)
+							{
+								provide_methods_for_type(ctx, items, sub_type, seen_methods);
+							}
+						}
+					}
+					foreach (inter : sd.interfaces)
+					{
+						String inter_type = cursor::raw_type_identifier(inter) ?? "";
+						if (inter_type.len > 0 && inter_type != clean_type)
+						{
+							provide_methods_for_type(ctx, items, inter_type, seen_methods);
+						}
+					}
+				}
+			default:
+				break;
 		}
 	}
 }
@@ -471,34 +695,36 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 					clean_type = type_name[:brace_idx].trim();
 				}
 
-				Node* target_struct = null;
-				if (clean_type.len > 0)
+				if (clean_type.len == 0) return false;
+
+				HashSet{String} seen_methods;
+				seen_methods.tinit();
+
+				Node* type_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, clean_type);
+				if (!type_node && ctx.ws)
 				{
 					List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(clean_type, ctx.sf);
 					if (syms.len() > 0 && syms.get(0).node)
 					{
-						Node* type_node = syms.get(0).node;
-						if (type_node.kind == ENUM_DECL)
-						{
-							provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
-							return true;
-						}
-						else if (type_node.kind == STRUCT_DECL)
-						{
-							target_struct = type_node;
-						}
+						type_node = syms.get(0).node;
 					}
+				}
+
+				if (type_node && type_node.kind == ENUM_DECL)
+				{
+					provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
+					provide_methods_for_type(ctx, items, clean_type, &seen_methods);
+					return true;
 				}
 
 				if (query::is_vector_type(clean_type))
 				{
-					inject_vector_completions(items, ctx.prefix);
-					return true;
+					inject_vector_swizzles(items, ctx.prefix);
 				}
 
-				if (target_struct && target_struct.kind == STRUCT_DECL)
+				if (type_node && type_node.kind == STRUCT_DECL)
 				{
-					StructDecl* st = target_struct.as(StructDecl);
+					StructDecl* st = type_node.as(StructDecl);
 					foreach (field : st.fields)
 					{
 						if (!field || field.kind != VAR_DECL)
@@ -523,32 +749,9 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 							);
 						}
 					}
-
-					if (ctx.ws.ctx && ctx.ws.ctx.registry)
-					{
-						ctx.ws.ctx.registry.functions.@each(; qname, fn_info)
-						{
-							if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
-							{
-								FnDecl* fndecl = fn_info.node.as(FnDecl);
-								if (fndecl.associated_type)
-								{
-									String assoc = cursor::raw_type_identifier(fndecl.associated_type) ?? "";
-									if (assoc == clean_type || assoc == type_name)
-									{
-										String mname = fndecl.name ? fndecl.name.text : "";
-										if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
-										{
-											add_symbol_completion(ctx, items, mname, fn_info.node, clean_type, ctx.prefix);
-										}
-									}
-								}
-							}
-						};
-					}
-
-					return true;
 				}
+
+				provide_methods_for_type(ctx, items, type_name, &seen_methods);
 				return true;
 			}
 

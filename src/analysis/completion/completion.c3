@@ -50,6 +50,20 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	{
 		if (item.data == "property") return;
 
+		if (item.data.starts_with("local:"))
+		{
+			String vname = item.data.strip_prefix("local:");
+			String vtype = item.detail.len > 0 ? item.detail : "var";
+			DString md_buf;
+			md_buf.tinit();
+			md_buf.appendf("```c3\n%s %s\n```", vtype, vname);
+			item.documentation = {
+				.kind = MARKDOWN,
+				.value = md_buf.str_view()
+			};
+			return;
+		}
+
 		if (item.data.starts_with("module:"))
 		{
 			String mod_name = item.data.strip_prefix("module:");
@@ -147,6 +161,84 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 				target_node = query::find_member_in_type(project.workspace.ctx, type_name, field_name);
 			}
 		}
+		else if (item.data.starts_with("symbol:"))
+		{
+			String payload = item.data.strip_prefix("symbol:");
+			String base = "";
+			String sym = payload;
+			if (try colon_idx = payload.index_of_char(':'))
+			{
+				base = payload[:colon_idx];
+				sym = payload[colon_idx + 1..];
+			}
+			else if (item.detail.contains(" via "))
+			{
+				sz via_idx = item.detail.index_of(" via ") ?? 0;
+				base = item.detail[via_idx + 5..].trim();
+			}
+
+			if (base.len > 0 && project.workspace.ctx)
+			{
+				AnalyzerContext* actx = project.workspace.ctx;
+				Module* mod = analysis::find_module_by_identifier(&project.workspace, "", base);
+				if (mod)
+				{
+					String qname = string::tformat("%s::%s", mod.name, sym);
+					if (actx.registry)
+					{
+						if (try fn_info = actx.registry.functions.get(qname))
+						{
+							target_node = fn_info.node;
+						}
+						else if (try mac_info = actx.registry.macros.get(qname))
+						{
+							target_node = mac_info.node;
+						}
+						else if (try ty_info = actx.registry.types.get(qname))
+						{
+							target_node = ty_info.node;
+						}
+					}
+					if (!target_node)
+					{
+						foreach (n : mod.nodes)
+						{
+							if (!n || n.kind == ERROR) continue;
+							if (n.kind == FAULTDEF_DECL)
+							{
+								FaultdefDecl* fd = n.as(FaultdefDecl);
+								foreach (fault_node : fd.faults)
+								{
+									if (!fault_node || fault_node.kind != FAULT_DECL) continue;
+									FaultDecl* fdecl = fault_node.as(FaultDecl);
+									if (fdecl.name && fdecl.name.text == sym)
+									{
+										target_node = fault_node;
+										break;
+									}
+								}
+								if (target_node) break;
+							}
+							String sname = cursor::spelling(n, tmem);
+							if (sname == sym || sname.strip_prefix("@") == sym.strip_prefix("@"))
+							{
+								target_node = n;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!target_node)
+				{
+					target_node = query::find_method_in_type(actx, base, sym);
+				}
+				if (!target_node)
+				{
+					target_node = query::find_member_in_type(actx, base, sym);
+				}
+			}
+		}
 	}
 
 	if (item.kind == MODULE)
@@ -164,6 +256,44 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	if (item.documentation.value.len > 0) return;
 
 	String sym_name = item.label;
+
+	if (!target_node && item.detail.contains(" via "))
+	{
+		sz via_idx = item.detail.index_of(" via ") ?? 0;
+		String base = item.detail[via_idx + 5..].trim();
+		if (base.len > 0 && project.workspace.ctx)
+		{
+			AnalyzerContext* actx = project.workspace.ctx;
+			Module* mod = analysis::find_module_by_identifier(&project.workspace, "", base);
+			if (mod)
+			{
+				String qname = string::tformat("%s::%s", mod.name, sym_name);
+				if (actx.registry)
+				{
+					if (try fn_info = actx.registry.functions.get(qname))
+					{
+						target_node = fn_info.node;
+					}
+					else if (try mac_info = actx.registry.macros.get(qname))
+					{
+						target_node = mac_info.node;
+					}
+					else if (try ty_info = actx.registry.types.get(qname))
+					{
+						target_node = ty_info.node;
+					}
+				}
+			}
+			if (!target_node)
+			{
+				target_node = query::find_method_in_type(actx, base, sym_name);
+			}
+			if (!target_node)
+			{
+				target_node = query::find_member_in_type(actx, base, sym_name);
+			}
+		}
+	}
 
 	if (!target_node)
 	{

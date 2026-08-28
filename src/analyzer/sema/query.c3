@@ -37,7 +37,7 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 					ctx.found_decl = c;
 					if (vd.type)
 					{
-						ctx.found_type = cursor::raw_type_identifier(vd.type) ?? "";
+						ctx.found_type = cursor::spelling(vd.type, tmem);
 					}
 					return BREAK;
 				}
@@ -53,7 +53,7 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 						ctx.found_decl = c;
 						if (te.type)
 						{
-							ctx.found_type = cursor::raw_type_identifier(te.type) ?? "";
+							ctx.found_type = cursor::spelling(te.type, tmem);
 						}
 						return BREAK;
 					}
@@ -70,7 +70,7 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 						ctx.found_decl = c;
 						if (ce.type)
 						{
-							ctx.found_type = cursor::raw_type_identifier(ce.type) ?? "";
+							ctx.found_type = cursor::spelling(ce.type, tmem);
 						}
 						return BREAK;
 					}

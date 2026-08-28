@@ -227,6 +227,16 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 		sort_prefix = "0001";
 	}
 
+	String data_str = "";
+	if (base_identifier.len > 0)
+	{
+		data_str = string::tformat("symbol:%s:%s", base_identifier, symbol_name);
+	}
+	else
+	{
+		data_str = string::tformat("symbol:%s", symbol_name);
+	}
+
 	items.push(
 	{
 		.label = symbol_name,
@@ -236,7 +246,7 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 		.insertTextFormat = format,
 		.filterText = filter_text,
 		.sortText = string::tformat("%s_%s", sort_prefix, symbol_name),
-		.data = string::tformat("symbol:%s", symbol_name)
+		.data = data_str
 	}
 	);
 }
