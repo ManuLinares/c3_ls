@@ -332,7 +332,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	};
 }
 
-fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expected_type)
+fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expected_type, AnalyzerContext* actx = null, Location loc = { -1, -1 })
 {
 	if (!sf || offset == 0 || offset > sf.content.len) return EXECUTION;
 
@@ -357,21 +357,28 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 			String[] words = lhs.tsplit(" ");
 			if (words.len >= 2)
 			{
-				String candidate_type = words[^ 2].trim();
+				String candidate_type = words[^2].trim().trim_right("*& \t");
 				if (candidate_type.len > 0 && (candidate_type[0].is_upper() || candidate_type.contains("::") || candidate_type == "fault"))
 				{
-					if (out_expected_type) * out_expected_type = candidate_type;
+					if (out_expected_type) *out_expected_type = candidate_type;
 					return TYPE_ASSIGNMENT;
 				}
 			}
-			else if (words.len == 1)
+			if (words.len >= 1)
 			{
-				String var_name = words[0].trim();
+				String var_expr = words[^1].trim();
 				String resolved_type = "";
-				(void)query::find_local_decl_in_file(sf, var_name, &resolved_type);
+				if (actx && sf)
+				{
+					resolved_type = query::resolve_type_of_chain(actx, sf, var_expr, loc);
+				}
+				if (resolved_type.len == 0 && sf)
+				{
+					(void)query::find_local_decl_in_file(sf, var_expr, &resolved_type, actx, loc);
+				}
 				if (resolved_type.len > 0)
 				{
-					if (out_expected_type) * out_expected_type = resolved_type;
+					if (out_expected_type) *out_expected_type = resolved_type;
 					return TYPE_ASSIGNMENT;
 				}
 			}
@@ -385,32 +392,37 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * i
 {
 	if (!ctx.ws || type_name.len == 0) return;
 
-	List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(type_name);
-	if (syms.len() > 0 && syms.get(0).node)
+	Node* node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, type_name);
+	if (!node)
 	{
-		Node* node = syms.get(0).node;
-		if (node.kind == ENUM_DECL)
+		List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(type_name, ctx.sf);
+		if (syms.len() > 0 && syms.get(0).node)
 		{
-			EnumDecl* ed = node.as(EnumDecl);
-			foreach (variant : ed.variants)
+			node = syms.get(0).node;
+		}
+	}
+
+	if (node && node.kind == ENUM_DECL)
+	{
+		EnumDecl* ed = node.as(EnumDecl);
+		foreach (variant : ed.variants)
+		{
+			if (!variant || variant.kind != VAR_DECL) continue;
+			VarDecl* vd = variant.as(VarDecl);
+			String vname = vd.name ? vd.name.text : "";
+			if (vname.len > 0 && (ctx.prefix.len == 0 || vname.starts_with(ctx.prefix)))
 			{
-				if (!variant || variant.kind != VAR_DECL) continue;
-				VarDecl* vd = variant.as(VarDecl);
-				String vname = vd.name ? vd.name.text : "";
-				if (vname.len > 0 && (ctx.prefix.len == 0 || vname.starts_with(ctx.prefix)))
+				items.push(
 				{
-					items.push(
-					{
-						.label = vname,
-						.kind = ENUMMEMBER,
-						.detail = string::tformat("enum %s", type_name),
-						.insertText = vname,
-						.filterText = vname,
-						.sortText = string::tformat("0000_%s", vname),
-						.data = string::tformat("enum_variant:%s:%s", type_name, vname)
-					}
-					);
+					.label = vname,
+					.kind = ENUMMEMBER,
+					.detail = string::tformat("enum %s", type_name),
+					.insertText = vname,
+					.filterText = vname,
+					.sortText = string::tformat("0000_%s", vname),
+					.data = string::tformat("enum_variant:%s:%s", type_name, vname)
 				}
+				);
 			}
 		}
 	}
@@ -433,13 +445,13 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		return items.array_view();
 	}
 
-	String expected_type = "";
-	ScopeKind scope = detect_completion_scope(sf, offset, &expected_type);
-
 	Location loc = {
 		.line = (int)pos.line,
 		.column = (int)pos.character
 	};
+	String expected_type = "";
+	ScopeKind scope = detect_completion_scope(sf, offset, &expected_type, project.workspace.ctx, loc);
+
 	String caller_mod = query::get_module_name_at_location(sf, loc);
 
 	Context ctx = {

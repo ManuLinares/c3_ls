@@ -322,3 +322,215 @@ fn void test() {
 	}
 	assert(found_my_iter);
 }
+
+<*
+ Regression Test 11:
+ Verifies hover and Go-To-Definition on global builtins (mem, tmem) and imported types (Path?).
+*>
+fn void test_builtin_globals_and_imported_types_hover_and_def()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String core_mem = `module std::core::mem;
+struct Allocator {}
+const Allocator mem = {};
+const Allocator tmem = {};
+`;
+	String io_path = `module std::io::path;
+typedef Path = inline String;
+fn Path? temp_directory(Allocator a) => (Path)"/tmp";
+`;
+	String app_code = `module app;
+import std::io::path;
+
+fn void test() {
+  Allocator a = mem;
+  Path? p = path::temp_directory(tmem);
+}
+`;
+
+	proj.workspace.process_file("/virtual/core_mem.c3", core_mem);
+	proj.workspace.process_file("/virtual/io_path.c3", io_path);
+	proj.workspace.process_file("/virtual/builtins_test.c3", app_code);
+
+	Uri app_uri = uri::from_file_path(mem, "/virtual/builtins_test.c3");
+	defer app_uri.free();
+
+	// 1. Hover on `mem` in `Allocator a = mem;` (line 4, character 17)
+	LspPosition mem_pos = { .line = 4, .character = 17 };
+	String mem_hover = hover::hover(&proj, app_uri, mem_pos)!!;
+	assert(mem_hover.contains("mem"));
+
+	// 2. Hover on `Path` in `Path? p = ...` (line 5, character 3)
+	LspPosition path_pos = { .line = 5, .character = 3 };
+	String path_hover = hover::hover(&proj, app_uri, path_pos)!!;
+	assert(path_hover.contains("Path"));
+}
+
+<*
+ Regression Test 13:
+ Verifies Go-To-Definition on method calls chained with post-unary unwrap (tappend(...)!!).
+*>
+fn void test_goto_definition_on_tappend()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String io_path = `module std::io::path;
+typedef Path = inline String;
+fn Path? temp_directory(Allocator a) => (Path)"/tmp";
+fn Path? Path.tappend(Path self, String other) => self;
+`;
+
+	String app_code = `module app;
+import std::io::path;
+
+fn void test() {
+  Path? tmp_dir = path::temp_directory(tmem);
+  if (catch tmp_dir) return;
+  Path mock_dir = tmp_dir.tappend("c3_ls_test_sources")!!;
+}
+`;
+
+	proj.workspace.process_file("/virtual/io_path.c3", io_path);
+	proj.workspace.process_file("/virtual/app_tappend.c3", app_code);
+
+	Uri app_uri = uri::from_file_path(mem, "/virtual/app_tappend.c3");
+	defer app_uri.free();
+
+	// Line 6: `  Path mock_dir = tmp_dir.tappend("c3_ls_test_sources")!!;`
+	// Cursor at character 28 on `tappend`
+	LspPosition pos = { .line = 6, .character = 28 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+
+	assert(locs.len > 0);
+	assert(locs[0].uri.contains("io_path.c3"));
+	assert(locs[0].range.start.line == 3);
+}
+
+<*
+ Regression Test 14:
+ Verifies end-to-end navigation across server lifecycle expressions:
+ - `translator::decode(...)!!;`
+ - `decoded.message.method`
+ - `decoded.message.params.initialize.root_uri.has_value`
+ - `tmp_dir.tappend(...)!!;`
+*>
+fn void test_server_lifecycle_full_expression_navigation() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String maybe_mod = `module std::collections::maybe <Type>;
+struct Maybe {
+  bool has_value;
+  Type value;
+}
+`;
+
+	String trans_mod = `module lsp::translator;
+import std::collections::maybe;
+
+enum MessageKind { INITIALIZE, SHUTDOWN }
+struct InitializeParams {
+  Maybe{String} root_uri;
+}
+union MessageParams {
+  InitializeParams initialize;
+}
+struct LspMessage {
+  MessageKind method;
+  MessageParams params;
+}
+struct IoDecodeResult {
+  LspMessage message;
+}
+fn IoDecodeResult? decode(Allocator a, String s) { return {}; }
+`;
+
+	String path_mod = `module std::io::path;
+alias Path = env::WIN32 ? PathWin : PathPosix;
+typedef PathCommon = inline String;
+typedef PathWin = inline PathCommon;
+typedef PathPosix = inline PathCommon;
+fn Path? temp_directory(Allocator a) => (Path)"/tmp";
+fn PathPosix? PathPosix.tappend(self, String other) => self;
+fn PathWin? PathWin.tappend(self, String other) => self;
+`;
+
+	String app_code = `module lsp::server_lifecycle_test @test;
+
+import lsp::translator;
+import std::io::path;
+
+fn void test_lifecycle() {
+  IoDecodeResult decoded = translator::decode(mem, "{}")!!;
+
+  if (decoded.message.method == INITIALIZE) {}
+  if (decoded.message.params.initialize.root_uri.has_value) {}
+
+  Path? tmp_dir = path::temp_directory(tmem);
+  if (catch tmp_dir) return;
+
+  Path mock_dir = tmp_dir.tappend("c3_ls_test_sources")!!;
+}
+`;
+
+	proj.workspace.process_file("/virtual/maybe.c3", maybe_mod);
+	proj.workspace.process_file("/virtual/translator.c3", trans_mod);
+	proj.workspace.process_file("/virtual/path.c3", path_mod);
+	proj.workspace.process_file("/virtual/server_test.c3", app_code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/server_test.c3");
+	defer doc_uri.free();
+
+	// 1. Click on `translator` in `translator::decode` (line 6, col 30) -> jumps to module
+	LspPosition trans_pos = { .line = 6, .character = 30 };
+	LspLocation[] trans_locs = goto_definition::goto_definition(&proj, doc_uri, trans_pos)!!;
+	assert(trans_locs.len > 0);
+	assert(trans_locs[0].uri.contains("translator.c3"));
+
+	// 2. Click on `decode` in `translator::decode` (line 6, col 42) -> jumps to `fn decode`
+	LspPosition decode_pos = { .line = 6, .character = 42 };
+	LspLocation[] decode_locs = goto_definition::goto_definition(&proj, doc_uri, decode_pos)!!;
+	assert(decode_locs.len > 0);
+	assert(decode_locs[0].range.start.line == 17);
+
+	// 3. Click on `method` in `decoded.message.method` (line 8, col 24) -> jumps to `MessageKind method`
+	LspPosition method_pos = { .line = 8, .character = 24 };
+	LspLocation[] method_locs = goto_definition::goto_definition(&proj, doc_uri, method_pos)!!;
+	assert(method_locs.len > 0);
+	assert(method_locs[0].range.start.line == 11);
+
+	// 4. Click on `has_value` in `decoded.message.params.initialize.root_uri.has_value` (line 9, col 54)
+	LspPosition has_val_pos = { .line = 9, .character = 54 };
+	LspLocation[] has_val_locs = goto_definition::goto_definition(&proj, doc_uri, has_val_pos)!!;
+	assert(has_val_locs.len > 0);
+	assert(has_val_locs[0].uri.contains("maybe.c3"));
+	assert(has_val_locs[0].range.start.line == 2);
+
+	// 5. Click on `tappend` in `tmp_dir.tappend(...)!!;` (line 14, col 28) -> jumps to `tappend`
+	LspPosition tappend_pos = { .line = 14, .character = 28 };
+	LspLocation[] tappend_locs = goto_definition::goto_definition(&proj, doc_uri, tappend_pos)!!;
+	assert(tappend_locs.len > 0);
+	assert(tappend_locs[0].uri.contains("path.c3"));
+
+	// 6. Hover on `tappend` in `tmp_dir.tappend(...)!!;`
+	String tappend_hover = hover::hover(&proj, doc_uri, tappend_pos)!!;
+	assert(tappend_hover.contains("tappend"));
+
+	// 7. Hover on `Path` in `Path mock_dir` (line 14, col 3)
+	LspPosition path_pos = { .line = 14, .character = 3 };
+	String path_hover = hover::hover(&proj, doc_uri, path_pos)!!;
+	assert(path_hover.contains("alias Path"));
+
+	// 8. Go to Definition on `Path`
+	LspLocation[] path_locs = goto_definition::goto_definition(&proj, doc_uri, path_pos)!!;
+	assert(path_locs.len > 0);
+	assert(path_locs[0].uri.contains("path.c3"));
+	assert(path_locs[0].range.start.line == 1);
+}

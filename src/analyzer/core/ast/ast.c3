@@ -2,6 +2,7 @@ module analyzer::core::ast;
 
 import std::collections::list;
 import std::collections::nullable;
+import analyzer::core;
 
 alias NodeArray = Node*[];
 alias NullableNode = Nullable{Node};
@@ -26,6 +27,7 @@ struct Node
 	NodeFlags flags;
 	Range range;
 	NodeID id;
+	Type* resolved_type;
 }
 
 <*
@@ -55,7 +57,7 @@ macro Node* Ast.error(&self, Range range)
 
 <*
  Allocates and initializes a strongly typed AST node inside the AST arena.
- @param range : "Range of the node"
+ Returns a typed pointer to the node.
 *>
 macro Ast.alloc_node(&self, $Type, Range range)
 {
@@ -64,6 +66,7 @@ macro Ast.alloc_node(&self, $Type, Range range)
 	node.kind = NodeKind.$eval(@typename_to_constname($Type::name));
 	node.range = range;
 	node.id = next_node_id++;
+	node.resolved_type = null;
 	self.nodes.push(node);
 
 	return node;

@@ -70,7 +70,7 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 						if (type_data.unresolved.path != null)
 						{
 							PathExpr* prefix_path = type_data.unresolved.path.as(PathExpr);
-							String prefix_str     = prefix_path.path.text;
+							String prefix_str     = (prefix_path && prefix_path.path) ? prefix_path.path.text : "";
 							return string::format(allocator, "%s%s%s", prefix_str, type_name, type_data.optional ? "?" : "");
 						}
 						return type_data.optional ? string::format(allocator, "%s?", type_name) : type_name;
@@ -452,15 +452,23 @@ fn Node* find_member_in_type(Node* node, String name)
 				{
 					foreach (field : current_st.fields)
 					{
-						if (!field || field.kind != VAR_DECL) continue;
-						VarDecl* vd = field.as(VarDecl);
-						while (vd != null)
+						if (!field) continue;
+						if (field.kind == VAR_DECL)
 						{
-							if (vd.name && vd.name.text == name)
+							VarDecl* vd = field.as(VarDecl);
+							while (vd != null)
 							{
-								return (Node*)vd;
+								if (vd.name && vd.name.text == name)
+								{
+									return (Node*)vd;
+								}
+								vd = vd.next ? vd.next.as(VarDecl) : null;
 							}
-							vd = vd.next ? vd.next.as(VarDecl) : null;
+						}
+						else if (field.kind == STRUCT_DECL)
+						{
+							Node* nested = find_member_in_type(field, name);
+							if (nested) return nested;
 						}
 					}
 					current_st = current_st.next ? current_st.next.as(StructDecl) : null;

@@ -270,10 +270,7 @@ fn void inject_type_properties(List{CompletionItem} * items, NodeKind type_kind,
 fn void inject_reflect_properties(List{CompletionItem} * items, String prefix = "")
 {
 	const ReflProp[*] PROPS = {
-		{
-			"alignment", "sz", "The alignment in bytes."
-		}
-		,
+		{ "alignment", "sz", "The alignment in bytes." },
 		{ "bitoffset", "sz", "The bit offset of a bitstruct member within its backing type." },
 		{ "bitsize", "sz", "The size in bits of a bitstruct member." },
 		{ "cname", "String", "The external linker name of a symbol." },
@@ -402,4 +399,212 @@ fn bool is_inside_comment(String content, sz offset)
 	}
 
 	return false;
+}
+
+struct CallTargetInfo
+{
+	String callee_name;
+	uint active_param;
+	bool is_valid;
+	sz open_paren_idx;
+}
+
+fn CallTargetInfo parse_call_context(String text, sz offset)
+{
+	CallTargetInfo info = {
+		.callee_name = "",
+		.active_param = 0,
+		.is_valid = false,
+		.open_paren_idx = 0
+	};
+	if (offset == 0 || offset > text.len) return info;
+
+	int depth = 0;
+	sz open_paren_idx = 0;
+	bool found = false;
+
+	for (sz i = offset; i > 0; i--)
+	{
+		char c = text[i - 1];
+
+		switch (c)
+		{
+			case ';':
+				if (depth == 0) return info;
+			case '}':
+				depth++;
+			case '{':
+				if (depth == 0) return info;
+				depth--;
+			case ')':
+				depth++;
+			case '(':
+				if (depth > 0)
+				{
+					depth--;
+				}
+				else
+				{
+					open_paren_idx = i - 1;
+					found = true;
+				}
+			default:
+				break;
+		}
+		if (found) break;
+	}
+
+	if (!found) return info;
+
+	info.open_paren_idx = open_paren_idx;
+
+	uint commas = 0;
+	int nested_depth = 0;
+	bool in_str = false;
+	bool in_char = false;
+	bool in_raw = false;
+
+	for (sz i = open_paren_idx + 1; i < offset; i++)
+	{
+		char c = text[i];
+		switch (true)
+		{
+			case in_raw:
+				if (c == '`') in_raw = false;
+				continue;
+			case in_str:
+				if (c == '\\')
+				{
+					i++;
+					continue;
+				}
+				if (c == '"') in_str = false;
+				continue;
+			case in_char:
+				if (c == '\\')
+				{
+					i++;
+					continue;
+				}
+				if (c == '\'') in_char = false;
+				continue;
+			default:
+				break;
+		}
+
+		switch (c)
+		{
+			case '`':
+				in_raw = true;
+			case '"':
+				in_str = true;
+			case '\'':
+				in_char = true;
+			case '(':
+			case '[':
+			case '{':
+				nested_depth++;
+			case ')':
+			case ']':
+			case '}':
+				if (nested_depth > 0)
+				{
+					nested_depth--;
+				}
+			case ',':
+				if (nested_depth == 0)
+				{
+					commas++;
+				}
+			default:
+				break;
+		}
+	}
+
+	info.active_param = commas;
+
+	sz callee_end = open_paren_idx;
+	while (callee_end > 0 && text[callee_end - 1].is_space())
+	{
+		callee_end--;
+	}
+
+	sz callee_start = callee_end;
+	while (callee_start > 0)
+	{
+		if (text[callee_start - 1] == ')')
+		{
+			callee_start--;
+			int scan_depth = 1;
+			while (callee_start > 0 && scan_depth > 0)
+			{
+				if (text[callee_start - 1] == ')')
+				{
+					scan_depth++;
+				}
+				else if (text[callee_start - 1] == '(')
+				{
+					scan_depth--;
+				}
+				callee_start--;
+			}
+			continue;
+		}
+		else if (text[callee_start - 1] == ']')
+		{
+			callee_start--;
+			int scan_depth = 1;
+			while (callee_start > 0 && scan_depth > 0)
+			{
+				if (text[callee_start - 1] == ']')
+				{
+					scan_depth++;
+				}
+				else if (text[callee_start - 1] == '[')
+				{
+					scan_depth--;
+				}
+				callee_start--;
+			}
+			continue;
+		}
+		else if (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$')
+		{
+			while (callee_start > 0 && (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$'))
+			{
+				callee_start--;
+			}
+		}
+		else
+		{
+			break;
+		}
+
+		if (callee_start >= 2 && text[callee_start - 2] == ':' && text[callee_start - 1] == ':')
+		{
+			callee_start -= 2;
+		}
+		else if (callee_start >= 1 && text[callee_start - 1] == '.')
+		{
+			callee_start -= 1;
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	if (callee_end > callee_start)
+	{
+		info.callee_name = text[callee_start : callee_end - callee_start];
+		if (info.callee_name != "if" && info.callee_name != "while" && info.callee_name != "for" &&
+		info.callee_name != "foreach" && info.callee_name != "foreach_r" && info.callee_name != "switch" &&
+		info.callee_name != "catch" && info.callee_name != "try" && info.callee_name != "return" &&
+		info.callee_name != "do")
+		{
+			info.is_valid = true;
+		}
+	}
+
+	return info;
 }

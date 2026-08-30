@@ -2,12 +2,14 @@ module analyzer::sema::lookup;
 
 import analyzer::core;
 import analyzer::core::arch;
+import analyzer::cursor;
 
 fn Lookup* create(AnalyzerContext* context, Allocator alloc)
 {
 	Lookup* lookup = alloc::new(alloc, Lookup);
 
-	lookup.types.init(alloc);
+	lookup.arena.init(alloc, 4096);
+	lookup.types.init(&lookup.arena);
 	lookup.alloc = alloc;
 	lookup.target = context.target;
 
@@ -18,11 +20,10 @@ fn Lookup* create(AnalyzerContext* context, Allocator alloc)
 
 fn void free(AnalyzerContext* context, Lookup* lookup)
 {
-	foreach (t : lookup.types.value_iter())
-	{
-		alloc::free(lookup.alloc, t);
-	}
+	if (!lookup) return;
+
 	lookup.types.free();
+	lookup.arena.free();
 	alloc::free(context.allocator, lookup);
 }
 
@@ -35,20 +36,20 @@ fn void register_type(Lookup* lookup, Allocator alloc, String name, Node* node)
 		return;
 	}
 
-	Type* type = alloc::new(alloc, Type);
+	Type* type = alloc::new(&lookup.arena, Type);
 
-	type.name = name;
+	type.name = name.copy(&lookup.arena);
 	type.data.node = node;
 	type.status = UNRESOLVED;
 
-	lookup.types.set(name, type);
+	lookup.types.set(type.name, type);
 }
 
 fn void create_builtin(Lookup* lookup, String name,
 TypeKind kind, BitSizes bits, char bytes)
 {
-	Type* type = alloc::new(lookup.alloc, Type);
-	type.name = name;
+	Type* type = alloc::new(&lookup.arena, Type);
+	type.name = name.copy(&lookup.arena);
 	type.kind = kind;
 	type.status = RESOLVED;
 
@@ -67,10 +68,10 @@ TypeKind kind, BitSizes bits, char bytes)
 			align = lookup.target.layout.integers[bits.ordinal];
 	}
 
-	type.data.builtin.abi_alignment = (char)align.align;
-	type.data.builtin.pref_alignment = (char)align.pref_align;
+	type.data.builtin.abi_alignment = align.align > 0 ? (char)align.align : bytes;
+	type.data.builtin.pref_alignment = align.pref_align > 0 ? (char)align.pref_align : bytes;
 
-	lookup.types.set(name, type);
+	lookup.types.set(type.name, type);
 }
 
 fn void init_builtin_types(Lookup* lookup)
@@ -97,11 +98,22 @@ fn void init_builtin_types(Lookup* lookup)
 	create_builtin(lookup, "uint128", TYPE_U128, BITS128, 16);
 
 	create_builtin(lookup, "float", TYPE_F32, BITS32, 4);
-	create_builtin(lookup, "double", TYPE_F64, BITS64, 4);
+	create_builtin(lookup, "double", TYPE_F64, BITS64, 8);
 
 	create_builtin(lookup, "sz", TYPE_SZ, pbits, psize);
 	create_builtin(lookup, "usz", TYPE_USZ, pbits, psize);
 
 	create_builtin(lookup, "iptr", TYPE_IPTR, pbits, psize);
 	create_builtin(lookup, "uptr", TYPE_UPTR, pbits, psize);
+
+	create_builtin(lookup, "String", TYPE_STRUCT, BITS128, 16);
+	create_builtin(lookup, "any", TYPE_STRUCT, BITS128, 16);
+	create_builtin(lookup, "typeid", TYPE_IPTR, pbits, psize);
+	create_builtin(lookup, "fault", TYPE_IPTR, pbits, psize);
+}
+
+fn Type* get_type_by_name(Lookup* lookup, String name)
+{
+	if (!lookup || name.len == 0) return null;
+	return lookup.types.get(name) ?? null;
 }

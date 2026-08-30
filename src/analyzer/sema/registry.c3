@@ -78,6 +78,7 @@ fn void register_and_dispatch(AnalyzerContext* context, Module* mod, Node* node)
 		case STRUCT_DECL:
 		case ENUM_DECL:
 		case TYPEDEF_DECL:
+		case ALIAS_DECL:
 			register_type(context, mod, node);
 		case FN_DECL:
 			register_function(context, mod, node);
@@ -128,7 +129,7 @@ fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 		return;
 	}
 
-	String qname = string::tformat("%s::%s", mod.name, name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
 
 	TypeInfo* type_info = alloc::new(&context.registry.arena, TypeInfo);
 	type_info.mod = mod.name;
@@ -152,7 +153,7 @@ fn void register_function(AnalyzerContext* context, Module* mod, Node* node)
 		return;
 	}
 
-	String qname = string::tformat("%s::%s", mod.name, decl.name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
 
 	FunctionInfo* function_info = alloc::new(&context.registry.arena, FunctionInfo);
 	function_info.mod = mod.name;
@@ -175,7 +176,7 @@ fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 		return;
 	}
 
-	String qname = string::tformat("%s::%s", mod.name, decl.name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
 
 	MacroInfo* macros_info = alloc::new(&context.registry.arena, MacroInfo);
 	macros_info.mod = mod.name;

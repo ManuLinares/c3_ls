@@ -167,8 +167,14 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 	List{Node*} temp_paths;
 	temp_paths.init(tmem, 4);
 
-	while (!ctx.eof())
+	while (!ctx.eof() && !ctx.is(EOS) && !is_token_start_of_decl(ctx.current.kind))
 	{
+		if (!ctx.is(IDENT))
+		{
+			node.flags.has_error = true;
+			break;
+		}
+
 		Node* path_node = parse_path_expr(scope);
 		temp_paths.push(path_node);
 
@@ -193,7 +199,7 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 		node.attributes = parse_attributes(scope, node);
 	}
 
-	expect(ctx, node, EOS);
+	(void)consume(ctx, EOS);
 
 	return (Node*)node;
 }

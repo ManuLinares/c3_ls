@@ -247,7 +247,8 @@ fn Node* parse_ident_expr(ContextScope scope)
 		case CT_IDENT:
 		case HASH_IDENT:
 			{
-				IdentExpr* ident = ctx.ast.alloc_node(IdentExpr, { start.start, t.range.end });
+				Range full_range = path_prefix ? (Range){ path_prefix.range.start, t.range.end } : (Range){ start.start, t.range.end };
+				IdentExpr* ident = ctx.ast.alloc_node(IdentExpr, full_range);
 				ident.ident = ctx.ident(t);
 				ident.path_expr = path_prefix;
 
@@ -653,7 +654,7 @@ fn Node* parse_unary_expr(ContextScope scope)
 fn Node* parse_post_unary_expr(ContextScope scope, Node* left, Precedence bp)
 {
 	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
+	Range start = { left.range.start, ctx.current.range.end };
 	PostUnaryExpr* node = ctx.ast.alloc_node(PostUnaryExpr, start);
 	defer node.range.end = ctx.peek(-1).range.end;
 	UnaryOpKind? op = core::unaryop_from_token(ctx.current.kind);
@@ -1204,10 +1205,18 @@ fn Node* parse_designator_expr(ContextScope scope)
 					Range start = ctx.current.range;
 					advance(ctx);
 
-					Node* field = parse_expr(scope, HIGHEST);
+					Node* field = null;
+					if (can_start_expression(ctx.current.kind) &&
+					    ctx.current.kind != RBRACE &&
+					    ctx.current.kind != COMMA &&
+					    ctx.current.kind != EQ &&
+					    ctx.current.kind != EOS)
+					{
+						field = parse_expr(scope, HIGHEST);
+					}
 
 					DesignatorExpr* node = ctx.ast.alloc_node(DesignatorExpr, start);
-					node.range.end = ctx.current.range.end;
+					node.range.end = ctx.peek(-1).range.end;
 
 					node.designator_kind = DesignatorKind.PERIOD;
 					node.path = path;
@@ -1308,7 +1317,7 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 fn Node* parse_access_expr(ContextScope scope, Node* left)
 {
 	ParseContext* ctx = scope.ctx;
-	Range start = left.range;
+	Range start = { left.range.start, ctx.current.range.end };
 	TokenKind op_kind      = ctx.current.kind;
 	AccessKind access_kind = (op_kind == TokenKind.SCOPE) ? AccessKind.STATIC : AccessKind.INSTANCE;
 	advance(ctx);
@@ -1372,6 +1381,12 @@ fn Node* parse_access_expr(ContextScope scope, Node* left)
 				break;
 			}
 		default:
+			if (!can_start_expression(member_token.kind))
+			{
+				node.flags.has_error = true;
+				node.member = null;
+				return (Node*)node;
+			}
 			diagnostics::error(ctx.context, member_token.range, "Expected member identifier after '.'");
 			node.member = ctx.ast.error(member_token.range);
 			break;
@@ -1471,7 +1486,7 @@ fn Node* parse_raise_suffix_expr(ContextScope scope, Node* left, Token left_toke
 		default:
 			break;
 	}
-	Range start = ctx.current.range;
+	Range start = { left.range.start, ctx.current.range.end };
 	OptionalExpr* node = ctx.ast.alloc_node(OptionalExpr, start);
 	defer node.range.end = ctx.peek(-1).range.end;
 	expect(ctx, node, BIT_NOT);

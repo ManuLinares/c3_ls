@@ -1,6 +1,7 @@
 module analyzer::core::arch;
 
 import analyzer::core;
+import analyzer::core::os;
 
 fn ArchType current()
 {
@@ -56,9 +57,12 @@ fn TargetLayout get_platform_layout(OsType os, ArchType arch)
 	TargetLayout layout;
 	for (char i = BitSizes.BITS8.ordinal; i < BitSizes::len; i++)
 	{
-		layout.integers[i] = os::get_alignment(os, arch, BitSizes::from_ordinal(i).bits);
+		AlignData align = os::get_alignment(os, arch, BitSizes::from_ordinal(i).bits);
+		layout.integers[i] = align;
+		layout.floats[i] = align;
 	}
 	layout.integers[BitSizes.BIT1] = layout.integers[BitSizes.BITS8];
+	layout.floats[BitSizes.BIT1] = layout.floats[BitSizes.BITS8];
 	return layout;
 }
 
@@ -66,12 +70,6 @@ fn void test_bitsizes() @test
 {
 	// Test X86_64 Linux (Standard 64-bit ABI)
 	TargetLayout layout = get_platform_layout(LINUX, X86_64);
-
-	log::error("Align: %s", char::alignment);
-	log::error("Align: %s", int::alignment);
-	log::error("Align: %s", short::alignment);
-	log::error("Align: %s", long::alignment);
-	log::error("Align: %s", int128::alignment);
 
 	test::eq(layout.integers[BitSizes.BITS64].align, 8u);
 	test::eq(layout.integers[BitSizes.BITS64].pref_align, 8u);

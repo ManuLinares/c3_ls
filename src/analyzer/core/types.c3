@@ -38,6 +38,7 @@ struct Module
 
 struct Lookup
 {
+	DynamicArenaAllocator arena;
 	HashMap{String, Type*} types;
 	Allocator alloc;
 	Target target;
@@ -163,6 +164,12 @@ struct Type
 		}
 	}
 }
+
+fn bool Type.is_struct(&self) @inline => self.kind == TYPE_STRUCT || self.kind == TYPE_UNION || self.kind == TYPE_BITSTRUCT;
+fn bool Type.is_enum(&self) @inline => self.kind == TYPE_ENUM;
+fn bool Type.is_pointer(&self) @inline => self.kind == TYPE_IPTR || self.kind == TYPE_UPTR;
+fn bool Type.is_integer(&self) @inline => self.kind >= TYPE_I8 && self.kind <= TYPE_U128;
+fn bool Type.is_float(&self) @inline => self.kind >= TYPE_F16 && self.kind <= TYPE_F128;
 
 struct Target
 {

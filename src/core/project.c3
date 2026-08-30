@@ -221,9 +221,12 @@ fn void LspProject.update(&self)
 			self.workspace.parse_and_register_file(target_path, text);
 		}
 	}
-	// Pass 2: Execute semantic analysis across the files with fully populated module registry
+	// Pass 2: Execute semantic analysis only on user files (not stdlib/library files).
+	// Library files are already registered in Pass 1; running the variable pass over
+	// their bodies is redundant since diagnostics for library files are discarded anyway.
 	foreach (f : files)
 	{
+		if (f.is_library) continue;
 		String target_path = f.path.len > 0 ? f.path : f.uri;
 		self.workspace.analyze_file(target_path);
 	}

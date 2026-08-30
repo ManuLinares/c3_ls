@@ -5,6 +5,7 @@ import analyzer::lexer;
 import analyzer::parser;
 import analyzer::sema;
 
+import std::collections::list;
 import std::io;
 
 fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Allocator alloc = null)
@@ -35,6 +36,8 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 	{
 		Registry* reg = context.registry;
 
+		List{String} empty_functions;
+		empty_functions.tinit();
 		reg.functions.@each(; qname, head)
 		{
 			FunctionInfo* prev = null;
@@ -47,21 +50,32 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 						curr = curr.next;
 						switch (prev != null)
 						{
-						case true:
-							prev.next = curr;
-						case false:
-							if (try head_ptr = reg.functions.get_ref(qname))
-							{
-								*head_ptr = curr;
-							}
-					}
+							case true:
+								prev.next = curr;
+							case false:
+								if (try head_ptr = reg.functions.get_ref(qname))
+								{
+									*head_ptr = curr;
+								}
+						}
 					case false:
 						prev = curr;
 						curr = curr.next;
 				}
 			}
+			FunctionInfo* final_head = reg.functions.get(qname) ?? null;
+			if (!final_head)
+			{
+				empty_functions.push(qname);
+			}
 		};
+		foreach (k : empty_functions)
+		{
+			(void)reg.functions.remove(k);
+		}
 
+		List{String} empty_types;
+		empty_types.tinit();
 		reg.types.@each(; qname, head)
 		{
 			TypeInfo* prev = null;
@@ -74,21 +88,32 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 						curr = curr.next;
 						switch (prev != null)
 						{
-						case true:
-							prev.next = curr;
-						case false:
-							if (try head_ptr = reg.types.get_ref(qname))
-							{
-								*head_ptr = curr;
-							}
-					}
+							case true:
+								prev.next = curr;
+							case false:
+								if (try head_ptr = reg.types.get_ref(qname))
+								{
+									*head_ptr = curr;
+								}
+						}
 					case false:
 						prev = curr;
 						curr = curr.next;
 				}
 			}
+			TypeInfo* final_head = reg.types.get(qname) ?? null;
+			if (!final_head)
+			{
+				empty_types.push(qname);
+			}
 		};
+		foreach (k : empty_types)
+		{
+			(void)reg.types.remove(k);
+		}
 
+		List{String} empty_macros;
+		empty_macros.tinit();
 		reg.macros.@each(; qname, head)
 		{
 			MacroInfo* prev = null;
@@ -101,20 +126,29 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 						curr = curr.next;
 						switch (prev != null)
 						{
-						case true:
-							prev.next = curr;
-						case false:
-							if (try head_ptr = reg.macros.get_ref(qname))
-							{
-								*head_ptr = curr;
-							}
-					}
+							case true:
+								prev.next = curr;
+							case false:
+								if (try head_ptr = reg.macros.get_ref(qname))
+								{
+									*head_ptr = curr;
+								}
+						}
 					case false:
 						prev = curr;
 						curr = curr.next;
 				}
 			}
+			MacroInfo* final_head = reg.macros.get(qname) ?? null;
+			if (!final_head)
+			{
+				empty_macros.push(qname);
+			}
 		};
+		foreach (k : empty_macros)
+		{
+			(void)reg.macros.remove(k);
+		}
 	}
 
 	context.modules.@each(; mod_name, mod)

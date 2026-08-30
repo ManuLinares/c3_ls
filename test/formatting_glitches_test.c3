@@ -5,10 +5,7 @@ import lsp::analysis::formatting;
 import lsp;
 import uri;
 import std::io;
-<*
- Helper function to format a string and return the formatted output.
- Defined in a non-@test module section because it takes parameters.
-*>
+
 fn String format_code(String code, uint tab_size = 4, bool insert_spaces = false)
 {
 	LspProject proj;
@@ -486,4 +483,27 @@ fn void test_named(int x) {
 	assert(!formatted.contains("index :"));
 	assert(formatted.contains("capacity: 16, load_factor: 0.75f"));
 	assert(!formatted.contains("capacity :"));
+}
+
+fn void test_enum_and_constdef_with_backing_types_indentation() @test
+{
+	String code = `module app;
+constdef SdlFileDialogProperties : ZString
+{
+    FILTERS_POINTER = "SDL.filedialog.filters",
+    NFILTERS_NUMBER = "SDL.filedialog.nfilters",
+}
+
+enum SdlFileDialogType : CInt
+{
+    OPENFILE,
+    SAVEFILE,
+    OPENFOLDER,
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("constdef SdlFileDialogProperties : ZString\n{"));
+	assert(formatted.contains("\tFILTERS_POINTER = \"SDL.filedialog.filters\",\n\tNFILTERS_NUMBER = \"SDL.filedialog.nfilters\",\n}"));
+	assert(formatted.contains("enum SdlFileDialogType : CInt\n{"));
+	assert(formatted.contains("\tOPENFILE,\n\tSAVEFILE,\n\tOPENFOLDER,\n}"));
 }

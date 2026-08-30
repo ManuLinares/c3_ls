@@ -41,6 +41,7 @@ struct FormatterContext
 	int brace_stack_len;
 	bool at_line_start;
 	bool is_decl_header;
+	bool is_type_decl;
 	bool is_switch_header;
 	bool in_ct_header;
 	int consecutive_newlines;
@@ -371,7 +372,8 @@ fn bool is_initializer_context(TokenKind prev)
 fn bool is_decl_block_start(TokenKind prev, TokenKind prev_prev)
 {
 	if (prev_prev == STRUCT || prev_prev == UNION || prev_prev == BITSTRUCT ||
-	prev_prev == INTERFACE || prev_prev == ENUM || prev_prev == CONSTDEF)
+	prev_prev == INTERFACE || prev_prev == ENUM || prev_prev == CONSTDEF ||
+	prev_prev == COLON)
 	{
 		return true;
 	}
@@ -626,7 +628,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		{
 			return false;  // ($Type[]){...}
 		}
-		bool is_decl_block = is_decl_block_start(prev, ctx.prev_prev_token.kind);
+		bool is_decl_block = (ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) || is_decl_block_start(prev, ctx.prev_prev_token.kind);
 		if ((prev == TYPE_IDENT || prev == IDENT) && !is_decl_block && !is_initializer_context(prev)) return false;
 		if (prev == RBRACE && ctx.generic_depth > 0) return false;
 		return true;
@@ -742,6 +744,7 @@ FormattingOptions options
 			.brace_stack_len = 0,
 			.at_line_start = true,
 			.is_decl_header = false,
+			.is_type_decl = false,
 			.is_switch_header = false,
 			.in_ct_header = false,
 			.consecutive_newlines = 0,
@@ -818,8 +821,12 @@ FormattingOptions options
 			}
 
 			if (tok.kind == STRUCT || tok.kind == ENUM || tok.kind == UNION ||
-			tok.kind == BITSTRUCT || tok.kind == INTERFACE || tok.kind == CONSTDEF ||
-			tok.kind == TYPEDEF || tok.kind == ALIAS ||
+			tok.kind == BITSTRUCT || tok.kind == INTERFACE || tok.kind == CONSTDEF)
+			{
+				ctx.is_decl_header = true;
+				ctx.is_type_decl = true;
+			}
+			else if (tok.kind == TYPEDEF || tok.kind == ALIAS ||
 			tok.kind == FN || tok.kind == MACRO || tok.kind == MODULE)
 			{
 				ctx.is_decl_header = true;
@@ -833,6 +840,7 @@ FormattingOptions options
 			if (tok.kind == IMPLIES || tok.kind == EQ)
 			{
 				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
 			}
 
 			if (tok.kind == CT_IF || tok.kind == CT_FOR || tok.kind == CT_SWITCH)
@@ -982,6 +990,7 @@ FormattingOptions options
 			{
 				ctx.ternary_depth = 0;
 				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
 				if (ctx.generic_depth == 0)
 				{
 					closed_bk = pop_brace(&ctx);
@@ -1073,13 +1082,12 @@ FormattingOptions options
 			if (tok.kind == LBRACE)
 			{
 				ctx.ternary_depth = 0;
-				ctx.is_decl_header = false;
-				bool is_decl_block = is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+				bool is_decl_block = (ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) || is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
 
 				bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
-				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header;
+				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
 
 				if (!is_generic && !is_init && next_tok.kind != RBRACE && !ctx.at_line_start)
 				{
@@ -1131,6 +1139,7 @@ FormattingOptions options
 					if (ctx.brace_stack_len == 0)
 					{
 						ctx.is_decl_header = false;
+						ctx.is_type_decl = false;
 						newline(&ctx, 2);
 					}
 					else
@@ -1203,13 +1212,12 @@ FormattingOptions options
 			if (tok.kind == LBRACE)
 			{
 				ctx.ternary_depth = 0;
-				ctx.is_decl_header = false;
-				bool is_decl_block = is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+				bool is_decl_block = (ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) || is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
 
 				bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
-				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header;
+				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
 
 				if (is_generic)
 				{
@@ -1218,6 +1226,8 @@ FormattingOptions options
 				else if (next_tok.kind == RBRACE)
 				{
 					push_brace(&ctx, INLINE_INIT);
+					ctx.is_decl_header = false;
+					ctx.is_type_decl = false;
 				}
 				else if (is_init)
 				{
@@ -1231,6 +1241,8 @@ FormattingOptions options
 					{
 						push_brace(&ctx, INLINE_INIT);
 					}
+					ctx.is_decl_header = false;
+					ctx.is_type_decl = false;
 				}
 				else if (ctx.is_switch_header)
 				{
@@ -1238,6 +1250,8 @@ FormattingOptions options
 					ctx.indent_level++;
 					newline(&ctx);
 					ctx.is_switch_header = false;
+					ctx.is_decl_header = false;
+					ctx.is_type_decl = false;
 				}
 				else
 				{
@@ -1245,6 +1259,7 @@ FormattingOptions options
 					ctx.indent_level++;
 					newline(&ctx);
 					ctx.is_decl_header = false;
+					ctx.is_type_decl = false;
 				}
 			}
 
@@ -1265,6 +1280,7 @@ FormattingOptions options
 			{
 				ctx.ternary_depth = 0;
 				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
 				if (ctx.for_paren_depth == 0 && ctx.paren_depth == 0)
 				{
 					if (next_tok.kind == LINE_COMMENT && next_tok.range.start.line == tok.range.end.line)

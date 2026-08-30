@@ -3,6 +3,8 @@ module sema_tests @test;
 import analyzer::parser;
 import analyzer::core;
 import analyzer::sema;
+import lsp::core;
+import lsp;
 import std::io;
 
 alias BinaryOp = fn int (int, int);
@@ -212,4 +214,79 @@ fn void test_typeid_member_access_in_ct_if()
 	AnalyzerContext* context = context::create(tmem);
 	bool success = context::process(context, source_code, "test_typeid.c3");
 	test::eq(success, true);
+}
+
+fn void test_multiple_methods_same_parameter_names_no_redefinition()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	String source_code = `
+		module demo_app;
+		struct Vector2 { float x; float y; }
+		fn void Vector2.scale(&self, float factor) { self.x *= factor; }
+		fn float float.do_something(&self) => 25.7;
+		fn void test() { int oopopo = 123; oopopo = oopopo + 1; }
+		fn void test2() { int oopopo = 456; }
+	`;
+
+	ws.process_file("/virtual/test_self_params.c3", source_code);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/test_self_params.c3");
+	test::eq(diags.len, 0);
+}
+
+fn void test_ct_defined_variable_scope_isolation()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	String source_code = `
+		module test_ct_def;
+
+		struct Node {}
+		struct Nullable <Type> { Type val; }
+		struct Maybe <Type> { Type val; }
+
+		macro void serialize(item)
+		{
+			$switch :
+				$case $defined(Nullable{Node} x = item):
+					int a = 1;
+				$case $defined(Maybe{Node} x = item):
+					int a = 2;
+				$default:
+					break;
+			$endswitch
+		}
+	`;
+
+	ws.process_file("/virtual/test_ct_def.c3", source_code);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/test_ct_def.c3");
+	test::eq(diags.len, 0);
+}
+
+fn void test_ct_if_elif_else_same_var_name()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	String source_code = `
+		module test_ct_if_var;
+
+		fn void run()
+		{
+			$if true:
+				int n = 1;
+			$else
+				int n = 2;
+			$endif
+		}
+	`;
+
+	ws.process_file("/virtual/test_ct_if_var.c3", source_code);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/test_ct_if_var.c3");
+	test::eq(diags.len, 0);
 }

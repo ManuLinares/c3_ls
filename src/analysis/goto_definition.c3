@@ -63,6 +63,22 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 	{
 		target_range = decl_node.as(EnumDecl).name.range;
 	}
+	else if (decl_node.kind == TYPEDEF_DECL && decl_node.as(TypedefDecl).name)
+	{
+		target_range = decl_node.as(TypedefDecl).name.range;
+	}
+	else if (decl_node.kind == ALIAS_DECL && decl_node.as(AliasDecl).name)
+	{
+		target_range = decl_node.as(AliasDecl).name.range;
+	}
+	else if (decl_node.kind == INTERFACE_DECL && decl_node.as(InterfaceDecl).name)
+	{
+		target_range = decl_node.as(InterfaceDecl).name.range;
+	}
+	else if (decl_node.kind == FAULT_DECL && decl_node.as(FaultDecl).name)
+	{
+		target_range = decl_node.as(FaultDecl).name.range;
+	}
 
 	LspLocation[] locations = alloc::alloc_array(tmem, LspLocation, 1);
 	locations[0] = {

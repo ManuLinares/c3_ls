@@ -660,3 +660,270 @@ fn void demo() {
 	assert(found_len);
 	assert(found_starts_with);
 }
+
+fn void test_designated_initializer_field_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct CgltfFileOptions {
+    int json_token_count;
+    int memory;
+}
+
+struct CgltfOptions {
+    CgltfFileOptions file;
+    int type;
+}
+
+fn void test() {
+    CgltfOptions options = { . };
+    CgltfOptions options2 = {
+        .file = {
+            .
+        }
+    };
+    (CgltfFileOptions){ . };
+    (CgltfFileOptions[1])({ { . } });
+}
+`;
+
+	proj.workspace.process_file("/virtual/des_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/des_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Direct designated initializer `CgltfOptions options = { . }` (line 13, char 30)
+	LspPosition pos1 = { .line = 13, .character = 30 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_file1 = false;
+	bool found_type1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "file") found_file1 = true;
+		if (item.label == "type") found_type1 = true;
+	}
+	assert(found_file1);
+	assert(found_type1);
+
+	// 2. Nested designated initializer `.file = { . }` (line 16, char 13)
+	LspPosition pos2 = { .line = 16, .character = 13 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_json = false;
+	bool found_mem = false;
+	foreach (item : items2)
+	{
+		if (item.label == "json_token_count") found_json = true;
+		if (item.label == "memory") found_mem = true;
+	}
+	assert(found_json);
+	assert(found_mem);
+
+	// 3. Compound literal `(CgltfFileOptions){ . }` (line 19, char 25)
+	LspPosition pos3 = { .line = 19, .character = 25 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_json3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "json_token_count") found_json3 = true;
+	}
+	assert(found_json3);
+
+	// 4. Array compound literal `(CgltfFileOptions[1])({ { . } })` (line 20, char 31)
+	LspPosition pos4 = { .line = 20, .character = 31 };
+	CompletionItem[] items4 = completion::resolve(&proj, doc_uri, pos4)!!;
+	bool found_json4 = false;
+	foreach (item : items4)
+	{
+		if (item.label == "json_token_count") found_json4 = true;
+	}
+	assert(found_json4);
+}
+
+fn void test_enum_completion_on_member_assignment_rhs() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+enum SdlGPUStoreOp {
+    DONT_CARE,
+    RESOLVE,
+    STORE,
+}
+
+struct SdlGPUColorTargetInfo {
+    SdlGPUStoreOp store_op;
+}
+
+fn void test() {
+    SdlGPUColorTargetInfo info;
+    info.store_op = 
+}
+`;
+
+	proj.workspace.process_file("/virtual/enum_assign.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_assign.c3");
+	defer doc_uri.free();
+
+	// Cursor at `info.store_op = ` (line 14, char 20)
+	LspPosition pos = { .line = 14, .character = 20 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_dont_care = false;
+	bool found_resolve = false;
+	bool found_store = false;
+	foreach (item : items)
+	{
+		if (item.label == "DONT_CARE")
+		{
+			found_dont_care = true;
+			assert(item.sortText == "0000_DONT_CARE");
+		}
+		if (item.label == "RESOLVE") found_resolve = true;
+		if (item.label == "STORE") found_store = true;
+	}
+	assert(found_dont_care);
+	assert(found_resolve);
+	assert(found_store);
+}
+
+fn void test_designated_initializer_return_and_alloc_edge_cases() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct FileOpts {
+    int max_tokens;
+    bool debug_mode;
+}
+
+struct Base {
+    int base_id;
+}
+
+struct Derived {
+    inline Base base;
+    String name;
+}
+
+fn FileOpts get_options() {
+    return { . };
+}
+
+fn void test() {
+    FileOpts* opts = mem::new(FileOpts, { . });
+    Derived d = { . };
+}
+`;
+
+	proj.workspace.process_file("/virtual/edge_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/edge_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Return statement designated initializer `return { . }` (line 17, char 14)
+	LspPosition pos1 = { .line = 17, .character = 14 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_max_tokens1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "max_tokens") found_max_tokens1 = true;
+	}
+	assert(found_max_tokens1);
+
+	// 2. mem::new designated initializer `mem::new(FileOpts, { . })` (line 21, char 43)
+	LspPosition pos2 = { .line = 21, .character = 43 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_debug_mode2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "debug_mode") found_debug_mode2 = true;
+	}
+	assert(found_debug_mode2);
+
+	// 3. Inline substruct field in designated initializer `Derived d = { . }` (line 22, char 19)
+	LspPosition pos3 = { .line = 22, .character = 19 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_base_id3 = false;
+	bool found_name3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "base_id") found_base_id3 = true;
+		if (item.label == "name") found_name3 = true;
+	}
+	assert(found_base_id3);
+	assert(found_name3);
+}
+
+fn void test_designated_initializer_call_argument_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct ServerConfig {
+    int port;
+    String host;
+    bool enable_tls;
+}
+
+struct Client {
+    int id;
+}
+
+fn void configure_server(ServerConfig cfg, int timeout) {}
+fn void Client.connect(&self, ServerConfig cfg) {}
+
+fn void test() {
+    configure_server({ . }, 30);
+
+    Client client;
+    client.connect({ . });
+}
+`;
+
+	proj.workspace.process_file("/virtual/call_des_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/call_des_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Function call argument `configure_server({ . }, 30)` -> cursor after `.` at character 24
+	LspPosition pos1 = { .line = 16, .character = 24 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_port1 = false;
+	bool found_host1 = false;
+	bool found_tls1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "port") found_port1 = true;
+		if (item.label == "host") found_host1 = true;
+		if (item.label == "enable_tls") found_tls1 = true;
+	}
+	assert(found_port1);
+	assert(found_host1);
+	assert(found_tls1);
+
+	// 2. Method call argument `client.connect({ . })` -> cursor after `.` at character 22
+	LspPosition pos2 = { .line = 19, .character = 22 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_port2 = false;
+	bool found_host2 = false;
+	bool found_tls2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "port") found_port2 = true;
+		if (item.label == "host") found_host2 = true;
+		if (item.label == "enable_tls") found_tls2 = true;
+	}
+	assert(found_port2);
+	assert(found_host2);
+	assert(found_tls2);
+}
