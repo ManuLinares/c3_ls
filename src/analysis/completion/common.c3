@@ -329,3 +329,98 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 	}
 	);
 }
+
+fn bool is_type_position(Context* ctx) @local
+{
+	if (ctx.scope == CONTAINER) return true;
+	if (!ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return false;
+
+	sz p = ctx.offset - ctx.prefix.len;
+	while (p > 0 && (ctx.sf.content[p - 1] == ' ' || ctx.sf.content[p - 1] == '\t'))
+	{
+		p--;
+	}
+	if (p == 0) return ctx.scope == GLOBAL;
+
+	char prev_char = ctx.sf.content[p - 1];
+
+	// Generics e.g. List{...}, param separation e.g. (int a, ...)
+	if (prev_char == '{' || prev_char == ',' || prev_char == '<') return true;
+
+	// Typedef alias e.g. typedef Foo = ...
+	if (prev_char == '=') return true;
+
+	// Check words preceding the type
+	sz word_end = p;
+	while (p > 0 && (ctx.sf.content[p - 1].is_alnum() || ctx.sf.content[p - 1] == '_' || ctx.sf.content[p - 1] == '=' || ctx.sf.content[p - 1] == '>'))
+	{
+		p--;
+	}
+	String prev_word = ctx.sf.content[p : word_end - p].trim();
+
+	// Function return type or short body
+	if (prev_word == "fn" || prev_word == "macro" || prev_word == "=>") return true;
+
+	// Variable / const qualifiers
+	if (prev_word == "const" || prev_word == "static" || prev_word == "tlocal" || prev_word == "extern") return true;
+
+	// Cast or parameter: (int) or fn foo(int x)
+	if (prev_char == '(')
+	{
+		sz before_paren = word_end - 1;
+		while (before_paren > 0 && (ctx.sf.content[before_paren - 1] == ' ' || ctx.sf.content[before_paren - 1] == '\t')) before_paren--;
+		sz kw_end = before_paren;
+		while (before_paren > 0 && ctx.sf.content[before_paren - 1].is_alnum()) before_paren--;
+		String kw = ctx.sf.content[before_paren : kw_end - before_paren].trim();
+		if (kw == "if" || kw == "while" || kw == "for" || kw == "foreach" || kw == "switch" || kw == "catch")
+		{
+			return false;
+		}
+		return true;
+	}
+
+	return false;
+}
+
+fn void provide_builtin_types(Context* ctx, List{CompletionItem} * items)
+{
+	if (ctx.access != NONE) return;
+
+	bool in_type_pos = is_type_position(ctx);
+	String sort_prefix = in_type_pos ? "0001" : "0020";
+
+	// Primitives from the single source of truth in constants.c3
+	foreach (tname : constants::Primitives::values)
+	{
+		if (fuzzy_match(tname, ctx.prefix))
+		{
+			items.push(
+			{
+				.label = tname,
+				.kind = CLASS,
+				.detail = "built-in type",
+				.insertText = tname,
+				.filterText = tname,
+				.sortText = string::tformat("%s_%s", sort_prefix, tname),
+				.data = "property"
+			}
+			);
+		}
+	}
+
+	// String is defined in std::core, but ubiquitously used as a base type
+	if (fuzzy_match("String", ctx.prefix))
+	{
+		items.push(
+		{
+			.label = "String",
+			.kind = CLASS,
+			.detail = "built-in type",
+			.insertText = "String",
+			.filterText = "String",
+			.sortText = string::tformat("%s_String", sort_prefix),
+			.data = "property"
+		}
+		);
+	}
+}

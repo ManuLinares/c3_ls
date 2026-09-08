@@ -520,6 +520,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		}
 		provide_locals(&ctx, &items);
 		provide_global(&ctx, &items);
+		provide_builtin_types(&ctx, &items);
 		provide_keywords(&ctx, &items);
 	}
 

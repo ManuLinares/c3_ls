@@ -1291,3 +1291,155 @@ fn void main() {
 	}
 	assert(found_clamp);
 }
+
+<*
+ Smart Built-in Types Test 1:
+ Verifies that inside a struct definition (CONTAINER scope), built-in types
+ like `sz`, `int`, and `String` are suggested with top priority (`0001_`).
+*>
+fn void test_builtin_types_completion_in_struct() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct Buffer {
+    s
+}
+`;
+
+	proj.workspace.process_file("/virtual/type_struct_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_struct_comp.c3");
+	defer doc_uri.free();
+
+	// Line 3, col 5 inside struct Buffer { s| }
+	LspPosition pos = { .line = 3, .character = 5 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_sz = false;
+	bool found_short = false;
+	bool found_string = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "sz")
+		{
+			found_sz = true;
+			test::eq(item.sortText, "0001_sz");
+			test::eq(item.kind, CompletionItemKind.CLASS);
+		}
+		if (item.label == "short") found_short = true;
+		if (item.label == "String") found_string = true;
+	}
+
+	assert(found_sz);
+	assert(found_short);
+	assert(found_string);
+}
+
+<*
+ Smart Built-in Types Test 2:
+ Verifies that inside a function body, a local variable (e.g. `i`)
+ is ranked higher than built-in types (`int`, `ichar`, `iptr`)
+ so loop variables are never hijacked by autocomplete.
+*>
+fn void test_builtin_types_ranked_below_locals_in_execution() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void run() {
+    int i = 0;
+    int index = 10;
+    i
+}
+`;
+
+	proj.workspace.process_file("/virtual/type_local_rank.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_local_rank.c3");
+	defer doc_uri.free();
+
+	// Line 5, col 5 at `    i|`
+	LspPosition pos = { .line = 5, .character = 5 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	String local_i_sort = "";
+	String type_int_sort = "";
+
+	foreach (item : items)
+	{
+		if (item.label == "i" && item.kind == VARIABLE)
+		{
+			local_i_sort = item.sortText;
+		}
+		if (item.label == "int" && item.kind == CLASS)
+		{
+			type_int_sort = item.sortText;
+		}
+	}
+
+	assert(local_i_sort.len > 0);
+	assert(type_int_sort.len > 0);
+
+	// "0001_i" must sort strictly before "0020_int"
+	assert(local_i_sort.compare_to(type_int_sort) < 0);
+}
+
+<*
+ Smart Built-in Types Test 3:
+ Verifies that inside generic brackets `List{|}` and casts `(|)`,
+ built-in types receive top ranking (`0001_`).
+*>
+fn void test_builtin_types_in_generics_and_casts() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void run() {
+    List{u
+    (u
+}
+`;
+
+	proj.workspace.process_file("/virtual/type_pos_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_pos_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Inside `List{u` (line 3, col 10)
+	LspPosition pos1 = { .line = 3, .character = 10 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_uint1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "uint")
+		{
+			found_uint1 = true;
+			test::eq(item.sortText, "0001_uint");
+		}
+	}
+	assert(found_uint1);
+
+	// 2. Inside `(u` cast (line 4, col 6)
+	LspPosition pos2 = { .line = 4, .character = 6 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_uint2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "uint")
+		{
+			found_uint2 = true;
+			test::eq(item.sortText, "0001_uint");
+		}
+	}
+	assert(found_uint2);
+}
