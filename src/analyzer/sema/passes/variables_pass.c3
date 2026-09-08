@@ -187,13 +187,8 @@ fn Type* resolve_ast_type(SemaContext* ctx, Node* type_node)
 	if (ty) return ty;
 
 	Node* decl_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, tname);
-	if (decl_node)
-	{
-		lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname, decl_node);
-		return lookup::get_type_by_name(ctx.context.lookup, tname);
-	}
-
-	return null;
+	lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname, decl_node);
+	return lookup::get_type_by_name(ctx.context.lookup, tname);
 }
 
 fn void push_scope(SemaContext* ctx, Node* node)

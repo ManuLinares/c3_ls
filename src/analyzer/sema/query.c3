@@ -331,19 +331,14 @@ fn bool is_symbol_accessible_from_file(AnalyzerContext* context, SourceFile* sf,
 	if (!target_node || !sf) return false;
 	if (sf.contains_node(target_node)) return true;
 
-	String caller_mod = get_source_file_module_name(sf);
 	Visibility vis = target_node.visibility;
-
 	if (vis == Visibility.LOCAL) return false;
+	if (vis != Visibility.PRIVATE) return true;
 
-	if (vis == Visibility.PRIVATE)
-	{
-		if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
-		if (is_imported_as_public_in_file(sf, target_mod)) return true;
-		return false;
-	}
-
-	return true;
+	String caller_mod = get_source_file_module_name(sf);
+	if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
+	if (is_imported_as_public_in_file(sf, target_mod)) return true;
+	return false;
 }
 
 fn List{String} get_source_file_imported_modules(SourceFile* sf)
@@ -386,6 +381,8 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		clean_type = clean_type[:idx].trim();
 	}
 	clean_type = clean_type.trim_right("*&? \t");
+
+	if (constants::is_primitive(clean_type)) return null;
 
 	if (context.registry)
 	{
@@ -453,18 +450,29 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 				foreach (n : mod.nodes)
 				{
 					if (!n || n.kind == ERROR) continue;
-					if (sf && !is_symbol_accessible_from_file(context, sf, n, mod_name)) continue;
 
 					switch (n.kind)
 					{
 						case STRUCT_DECL:
-							if (n.as(StructDecl).name && n.as(StructDecl).name.text == clean_type) return n;
+							if (n.as(StructDecl).name && n.as(StructDecl).name.text == clean_type)
+							{
+								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+							}
 						case ENUM_DECL:
-							if (n.as(EnumDecl).name && n.as(EnumDecl).name.text == clean_type) return n;
+							if (n.as(EnumDecl).name && n.as(EnumDecl).name.text == clean_type)
+							{
+								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+							}
 						case TYPEDEF_DECL:
-							if (n.as(TypedefDecl).name && n.as(TypedefDecl).name.text == clean_type) return n;
+							if (n.as(TypedefDecl).name && n.as(TypedefDecl).name.text == clean_type)
+							{
+								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+							}
 						case ALIAS_DECL:
-							if (n.as(AliasDecl).name && n.as(AliasDecl).name.text == clean_type) return n;
+							if (n.as(AliasDecl).name && n.as(AliasDecl).name.text == clean_type)
+							{
+								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+							}
 						default:
 							break;
 					}
