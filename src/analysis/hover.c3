@@ -126,7 +126,9 @@ fn String format_node_signature(Node* node, String name)
 		case MODULE_DECL:
 			{
 				ModuleDecl* mod_decl = node.as(ModuleDecl);
-				String mod_name = mod_decl.path ? mod_decl.path.as(PathExpr).path.text : name;
+				String mod_name = (mod_decl.path && mod_decl.path.kind == PATH_EXPR && mod_decl.path.as(PathExpr).path)
+					? mod_decl.path.as(PathExpr).path.text
+					: name;
 				buf.appendf("module %s;", mod_name);
 			}
 		case FN_DECL:

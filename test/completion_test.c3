@@ -1034,3 +1034,89 @@ fn void main() {
 	assert(!found_scale_method);
 	assert(!found_reset_macro);
 }
+
+<*
+ Verifies that typing at the file top-level suggests declaration keywords
+ (`fn`, `struct`, `interface`, etc.) and excludes statement-only keywords (`while`, `for`).
+*>
+fn void test_top_level_declaration_keyword_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module app;\n\n";
+	proj.workspace.process_file("/virtual/top_level_kw.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/top_level_kw.c3");
+	defer doc_uri.free();
+
+	// Cursor at line 1, character 0 (top-level outside any function)
+	LspPosition pos = { .line = 1, .character = 0 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_fn = false;
+	bool found_struct = false;
+	bool found_interface = false;
+	bool found_while = false;
+	bool found_for = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "fn") found_fn = true;
+		if (item.label == "struct") found_struct = true;
+		if (item.label == "interface") found_interface = true;
+		if (item.label == "while") found_while = true;
+		if (item.label == "for") found_for = true;
+	}
+
+	// Must suggest top-level declarations
+	assert(found_fn);
+	assert(found_struct);
+	assert(found_interface);
+
+	// Must NOT suggest statements at top level
+	assert(!found_while);
+	assert(!found_for);
+}
+
+<*
+ Verifies that bare code completion inside a function does not leak
+ raw module paths (like `std::io`) into the completion list.
+*>
+fn void test_module_paths_excluded_from_expression_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String io_mod = "module std::io;\nfn void print(String s) {}\n";
+	String source = `module app;
+import std::io;
+
+fn void main() {
+    
+}
+`;
+
+	proj.workspace.process_file("/virtual/io.c3", io_mod);
+	proj.workspace.process_file("/virtual/app_expr.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/app_expr.c3");
+	defer doc_uri.free();
+
+	// Line 4, character 4 inside main() body
+	LspPosition pos = { .line = 4, .character = 4 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_module_in_expr = false;
+	foreach (item : items)
+	{
+		if (item.kind == MODULE || item.label == "std::io")
+		{
+			found_module_in_expr = true;
+			break;
+		}
+	}
+
+	// Module paths belong in import statements, not inside expression bodies
+	assert(!found_module_in_expr);
+}

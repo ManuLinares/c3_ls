@@ -385,6 +385,38 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 		}
 	}
 
+	if (loc.line >= 0)
+	{
+		foreach (stmt : sf.ast.statements)
+		{
+			if (stmt && stmt.range.contains(loc))
+			{
+				switch (stmt.kind)
+				{
+					case FN_DECL:
+						{
+							FnDecl* fd = stmt.as(FnDecl);
+							if (fd.body && fd.body.range.contains(loc)) return EXECUTION;
+							return GLOBAL;
+						}
+					case MACRO_DECL:
+						{
+							MacroDecl* md = stmt.as(MacroDecl);
+							if (md.body && md.body.range.contains(loc)) return EXECUTION;
+							return GLOBAL;
+						}
+					case STRUCT_DECL:
+						return CONTAINER;
+					case ENUM_DECL:
+						return ENUM;
+					default:
+						return GLOBAL;
+				}
+			}
+		}
+		return GLOBAL;
+	}
+
 	return EXECUTION;
 }
 
@@ -487,7 +519,6 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		}
 		provide_locals(&ctx, &items);
 		provide_global(&ctx, &items);
-		provide_module_paths(&ctx, &items, sf, offset);
 		provide_keywords(&ctx, &items);
 	}
 

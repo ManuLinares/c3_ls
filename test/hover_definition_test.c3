@@ -537,3 +537,20 @@ fn void test() {
 	assert(sig_res.signatures[0].parameters.len == 2);
 	assert(sig_res.signatures[0].parameters[0].label.contains("min"));
 }
+
+fn void test_hover_on_incomplete_module_decl_crash() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module;\n";
+	proj.workspace.process_file("/virtual/broken_mod.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/broken_mod.c3");
+	defer doc_uri.free();
+
+	// Hover over `module` (line 0, col 3) -> Crashes with SIGSEGV on current code
+	LspPosition pos = { .line = 0, .character = 3 };
+	String h = hover::hover(&proj, doc_uri, pos) ?? "";
+	assert(h.contains("module"));
+}
