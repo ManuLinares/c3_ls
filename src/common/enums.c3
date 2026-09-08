@@ -155,6 +155,7 @@ enum Keywords : int (String name, String docs)
 	DO        { "do", "" },
 	ELSE      { "else", "" },
 	ENUM      { "enum", "" },
+	EXCUSE    { "excuse", "" },
 	EXTERN    { "extern", "" },
 	FALSE     { "false", "" },
 	FAULTDEF  { "faultdef", "" },
@@ -201,6 +202,7 @@ fn bool Keywords.is_top_level(self)
 		case EXTERN:
 		case FAULTDEF:
 		case FAULTSET:
+		case EXCUSE:
 		case FN:
 		case TLOCAL:
 		case MACRO:

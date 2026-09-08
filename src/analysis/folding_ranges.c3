@@ -49,6 +49,7 @@ fn ChildVisitResult collect_folding_callback(Node* c, Node* p, void* user_data)
 			case ENUM_DECL:
 			case SWITCH_STMT:
 			case INTERFACE_DECL:
+			case FAULTDEF_DECL:
 			case FN_DECL:
 			case MACRO_DECL:
 			case FOR_STMT:

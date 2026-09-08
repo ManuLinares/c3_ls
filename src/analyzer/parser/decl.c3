@@ -1167,8 +1167,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
 	Range start = ctx.current.range;
-	bool is_set = ctx.is(FAULTSET);
-	advance(ctx);
+	advance(ctx); // Consumes faultdef, excuse, faultset, or faultconst
 
 	FaultdefDecl* node = ctx.ast.alloc_node(FaultdefDecl, start);
 	defer node.range.end = ctx.peek(-1).range.end;
@@ -1176,54 +1175,77 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 	List{Node*} faults;
 	faults.tinit();
 
-	if (is_set)
+	// Tolerates legacy `faultset Name {` test if present
+	if ((ctx.is(TYPE_IDENT) || ctx.is(IDENT)) && ctx.peek(1).kind == LBRACE)
 	{
-		if (ctx.is(TYPE_IDENT) || ctx.is(IDENT))
-		{
-			advance(ctx);
-		}
+		advance(ctx);
+	}
 
-		if (consume(ctx, LBRACE))
+	// 1. Block syntax: { FAULT_A, FAULT_B }
+	if (consume(ctx, LBRACE))
+	{
+		while (!ctx.eof() && !ctx.is(RBRACE))
 		{
-			while (!ctx.eof() && !ctx.is(RBRACE))
+			Node* contract = null;
+			if (ctx.is(DOCS_START))
 			{
-				if (!ctx.is(CONST_IDENT))
+				contract = parse_contract_decl(scope);
+			}
+
+			if (!ctx.is(CONST_IDENT))
+			{
+				diagnostics::error(ctx.context, ctx.current.range, "Expected constant identifier for fault");
+				error_node(ctx, (Node*)node);
+				skip_until(ctx, { COMMA, RBRACE, EOS });
+				if (consume(ctx, COMMA)) continue;
+				break;
+			}
+
+			FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
+			defer fault_node.range.end = ctx.peek(-1).range.end;
+			fault_node.name = ctx.ident(ctx.current);
+			fault_node.contract.set(contract);
+			advance(ctx);
+
+			if (ctx.is(AT_IDENT))
+			{
+				fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
+			}
+
+			faults.push((Node*)fault_node);
+			if (!consume(ctx, COMMA))
+			{
+				if (!ctx.is(RBRACE))
 				{
-					diagnostics::error(ctx.context, ctx.current.range, "Expected constant identifier in faultset");
-					node.flags.has_error = true;
+					diagnostics::error(ctx.context, ctx.current.range, "Expected ',' or '}' in fault list");
+					error_node(ctx, (Node*)node);
 					skip_until(ctx, { COMMA, RBRACE, EOS });
 					if (consume(ctx, COMMA)) continue;
 					break;
 				}
-
-				FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-				defer fault_node.range.end = ctx.peek(-1).range.end;
-				fault_node.name = ctx.ident(ctx.current);
-				advance(ctx);
-
-				if (ctx.is(AT_IDENT))
-				{
-					fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
-				}
-
-				faults.push((Node*)fault_node);
-				consume(ctx, COMMA);
 			}
-
-			expect(ctx, (Node*)node, RBRACE);
-			consume(ctx, EOS);
-
-			node.faults = alloc::clone_slice(ctx.allocator, faults.array_view());
-			return (Node*)node;
 		}
+
+		expect(ctx, (Node*)node, RBRACE);
+		consume(ctx, EOS); // Trailing ';' is optional for blocks
+
+		node.faults = alloc::clone_slice(ctx.allocator, faults.array_view());
+		return (Node*)node;
 	}
 
+	// 2. Inline syntax: FAULT_A, FAULT_B;
 	while (!ctx.eof() && !ctx.is(EOS))
 	{
+		Node* contract = null;
+		if (ctx.is(DOCS_START))
+		{
+			contract = parse_contract_decl(scope);
+		}
+
 		if (!ctx.is(CONST_IDENT))
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected constant identifier for fault");
-			node.flags.has_error = true;
+			error_node(ctx, (Node*)node);
 			skip_until(ctx, { COMMA, EOS });
 
 			if (consume(ctx, COMMA)) continue;
@@ -1233,11 +1255,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 		FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
 		defer fault_node.range.end = ctx.peek(-1).range.end;
 
-		if (ctx.is(AT_IDENT))
-		{
-			fault_node.contract.set(parse_contract_decl(scope));
-		}
-
+		fault_node.contract.set(contract);
 		fault_node.name = ctx.ident(ctx.current);
 
 		advance(ctx);
@@ -1251,8 +1269,8 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate faultdef");
-		node.flags.has_error = true;
+		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate fault declaration");
+		error_node(ctx, (Node*)node);
 	}
 
 	node.faults = alloc::clone_slice(ctx.allocator, faults.array_view());

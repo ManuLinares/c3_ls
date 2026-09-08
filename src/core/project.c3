@@ -116,6 +116,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 		if (tracked.text.len > 0) tracked.text.free(self.allocator);
 		tracked.text = document.text.copy(self.allocator);
 		tracked.version = 1;
+		tracked.is_library = false; // User opened this file in editor; publish diagnostics on edit!
 
 		// lookup_key points into the Uri freed above; the tracked file owns
 		// an identical path that outlives the queue.

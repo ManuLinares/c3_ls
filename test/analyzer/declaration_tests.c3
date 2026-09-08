@@ -743,3 +743,73 @@ fn void param_inline_fn_type_and_sigils()
 	test::eq(param1.var_kind, VarDeclKind.VAR_PARAM_CT);
 	test::eq(param1.name.text, "$COUNT");
 }
+
+
+fn void test_faultdef_and_excuse_block_syntax() @test
+{
+	String source_code = `
+		module hello;
+
+		excuse {
+			POOL_SHUTDOWN,
+			POOL_SPAWN_FAILED
+		}
+
+		faultdef {
+			ERR_TIMEOUT,
+			ERR_IO
+		}
+
+		excuse {
+			CLOSED,
+			EOF
+		};
+
+		fn void? run() {
+			return POOL_SHUTDOWN~;
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_excuse_block.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("hello")!!;
+	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
+	test::eq(parser_tests::count_kind(mod, FAULTDEF_DECL), 3);
+	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
+
+	// 1. excuse { ... } block without semicolon
+	FaultdefDecl* fd1 = mod.nodes[1].as(FaultdefDecl);
+	test::eq(fd1.faults.len, 2);
+	test::eq(fd1.faults[0].as(FaultDecl).name.text, "POOL_SHUTDOWN");
+	test::eq(fd1.faults[1].as(FaultDecl).name.text, "POOL_SPAWN_FAILED");
+
+	// 2. faultdef { ... } block without semicolon
+	FaultdefDecl* fd2 = mod.nodes[2].as(FaultdefDecl);
+	test::eq(fd2.faults.len, 2);
+	test::eq(fd2.faults[0].as(FaultDecl).name.text, "ERR_TIMEOUT");
+	test::eq(fd2.faults[1].as(FaultDecl).name.text, "ERR_IO");
+
+	// 3. excuse { ... }; block with semicolon
+	FaultdefDecl* fd3 = mod.nodes[3].as(FaultdefDecl);
+	test::eq(fd3.faults.len, 2);
+	test::eq(fd3.faults[0].as(FaultDecl).name.text, "CLOSED");
+	test::eq(fd3.faults[1].as(FaultDecl).name.text, "EOF");
+}
+
+<*
+ Verifies that lowercase identifier inside `excuse { ... }` or `faultdef { ... }`
+ correctly registers a syntax error and produces an LSP diagnostic.
+*>
+fn void test_invalid_fault_name_in_block_emits_error() @test
+{
+	String source_code = `
+		module hello;
+		excuse { asdasd };
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_err.c3");
+	test::eq(success, false);
+}
