@@ -262,6 +262,7 @@ fn bool can_start_expression(TokenKind kind)
 		case STRING_LITERAL:
 		case CHAR_LITERAL:
 		case LPAREN:
+		case PLUS:
 		case MINUS:
 		case BANG:
 		case BIT_NOT:

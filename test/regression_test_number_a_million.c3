@@ -534,3 +534,41 @@ fn void test_lifecycle() {
 	assert(path_locs[0].uri.contains("path.c3"));
 	assert(path_locs[0].range.start.line == 1);
 }
+
+fn void test_unary_plus_and_chained_unary_repro()
+{
+	String source_code = `
+		module test_repro;
+
+		fn void run()
+		{
+			int foo = 10;
+			int x = +~-foo;
+			int y = +foo;
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_repro.c3");
+	assert(success);
+}
+
+fn void test_unary_plus_diagnostics_repro()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	String source = `module test_repro;
+fn void run() {
+    int foo = 10;
+    int x = +~-foo;
+}
+`;
+
+	ws.process_file("/virtual/repro.c3", source);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/repro.c3");
+
+	// Currently fails: diags.len == 1 with message: "Expected expression, got: +"
+	assert(diags.len == 0);
+}

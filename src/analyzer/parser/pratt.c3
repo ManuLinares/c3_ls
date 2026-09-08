@@ -227,6 +227,7 @@ fn Node* parse_prefix_expr(ContextScope scope)
 		case INT_BIN_LITERAL:
 		case BYTES_LITERAL:
 			return parse_literal_expr(scope);
+		case PLUS:
 		case BANG:
 		case BANGBANG:
 		case MINUS:
