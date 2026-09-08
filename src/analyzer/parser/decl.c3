@@ -1318,7 +1318,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Unexpected token in interface body");
 			skip_until(ctx, { FN, RBRACE });
-			if (ctx.is(RBRACE)) break;
+			if (!ctx.is(FN) && !ctx.is(DOCS_START)) break;
 		}
 
 		Node* contract;
@@ -1326,6 +1326,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 		{
 			contract = parse_contract_decl(scope);
 		}
+		if (!ctx.is(FN)) continue;
 		Node* func_node = parse_fn_decl(scope.with_only_flags(
 		{
 			.is_interface = true
@@ -1339,7 +1340,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 		}
 	}
 
-	node.methods = alloc::clone_slice(ctx.allocator, list.array_view());
+	node.methods = alloc::clone_slice(ctx.allocator, methods.array_view());
 
 	if (!consume(ctx, RBRACE))
 	{

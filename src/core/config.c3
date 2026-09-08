@@ -83,12 +83,14 @@ fn void ProjectConfig.free(&self, Allocator allocator)
 
 struct ManifestConfig
 {
+	String provides;
 	String[] sources;
 	HashMap{String, TargetConfig} targets;
 }
 
 fn void ManifestConfig.free(&self, Allocator alloc)
 {
+	if (self.provides.len > 0) self.provides.free(alloc);
 	if (self.sources.len > 0)
 	{
 		foreach (s : self.sources) s.free(alloc);

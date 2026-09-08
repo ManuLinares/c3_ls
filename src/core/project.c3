@@ -3,7 +3,9 @@ module lsp::core;
 import std::io;
 import std::collections::map;
 import std::collections::list;
+import std::collections::object;
 import std::compression::zip;
+import std::encoding::json;
 
 import lsp::analysis;
 import lsp::server;
@@ -73,14 +75,19 @@ fn void LspProject.free(&self)
 	self.manifests.free();
 }
 
-fn void LspProject.open_file(&self, TextDocumentItem document, bool is_std_lib = false)
+<*
+ Start tracking a document.
+
+ @param from_disk : "true for a workspace scan, which carries no text and is read off disk; false for a didOpen, which carries the editor's buffer"
+*>
+fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = false)
 {
 	String raw_uri = document.uri;
 
 	log::debug("Registering document stream via raw tracking token: %s", raw_uri);
 
 	Uri? file_uri = uri::parse(self.allocator, raw_uri);
-	if (catch file_uri)
+	if (catch err = file_uri)
 	{
 		log::error("Malformed URI received (%s)", raw_uri);
 		return;
@@ -89,10 +96,36 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool is_std_lib =
 	String lookup_key = file_uri.path;
 	log::warn("Opening file: %s", lookup_key);
 
-	if (self.files.has_key(lookup_key))
+	if (try LspFile* tracked = self.files.get(lookup_key))
 	{
-		log::warn("File %s is already tracking in workspace", lookup_key);
-		file_uri.free();
+		defer file_uri.free();
+
+		// The workspace scan reaches a project's own sources before the
+		// editor announces them, so by the time didOpen arrives the file is
+		// already tracked - against what is on disk. Dropping the
+		// notification left that stale copy in place until the first edit,
+		// which is why completion came back empty on a freshly opened file.
+		// A second scan must not clobber the buffer, but a didOpen has to
+		// win: its text is what the user is looking at.
+		if (from_disk)
+		{
+			log::warn("File %s is already tracking in workspace", lookup_key);
+			return;
+		}
+
+		if (tracked.text.len > 0) tracked.text.free(self.allocator);
+		tracked.text = document.text.copy(self.allocator);
+		tracked.version = 1;
+
+		// lookup_key points into the Uri freed above; the tracked file owns
+		// an identical path that outlives the queue.
+		self.process_queue.push(
+			{
+				.path = tracked.uri.path,
+				.source_text = tracked.text,
+				.is_library = false,
+			}
+		);
 		return;
 	}
 
@@ -101,14 +134,14 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool is_std_lib =
 		.uri = file_uri,
 		.text = document.text.len > 0 ? document.text.copy(self.allocator) : "",
 		.version = 1,
-		.is_library = is_std_lib
+		.is_library = from_disk,
 	};
 
 	self.files[lookup_key] = lsp_file;
 
 	FileInput file;
 
-	if (!is_std_lib)
+	if (!from_disk)
 	{
 		file = {
 			.source_text = lsp_file.text,
@@ -256,11 +289,7 @@ fn void LspProject.process_stdlib(&self)
 	{
 		Uri file_uri = uri::from_file_path(tmem, matched);
 		DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-		self.open_file(
-		{
-			.uri = uri
-		}
-		, true);
+		self.open_file({ .uri = uri }, from_disk: true);
 	}
 }
 
@@ -308,11 +337,7 @@ fn void LspProject.process_config(&self)
 			log::info("Found source path: %s", matched);
 			Uri file_uri = uri::from_file_path(tmem, matched);
 			DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-			self.open_file(
-			{
-				.uri = uri
-			}
-			, false);
+			self.open_file({ .uri = uri }, from_disk: false);
 		}
 	}
 }
@@ -328,30 +353,35 @@ fn void LspProject.process_libs(&self)
 		return;
 	}
 
-	String[] deps = self.config.dependencies.get() ?? {};
+	String[] deps         = self.config.dependencies.get() ?? {};
 	String[] search_paths = self.config.dependency_search_paths.get() ?? (String[]){ "lib" };
 
-	foreach (dep_name : deps)
+	foreach (search_entry : search_paths)
 	{
-		bool lib_found = false;
+		if (search_entry.ends_with("\\")) search_entry = search_entry.strip_suffix("\\");
+		if (!search_entry.ends_with("/")) search_entry = string::tformat("%s/", search_entry);
 
-		foreach (search_entry : search_paths)
+		Path? search_base = base_path.tappend(search_entry);
+		if (catch search_base) continue;
+
+		String[]? libs = libs_installed(search_base);
+		if (catch libs) continue;
+
+		foreach (lib : libs)
 		{
-			Path? search_base = base_path.tappend(search_entry);
-			if (catch search_base) continue;
-
-			Path[3] candidates = {
-				search_base.tappend(string::tformat("%s.c3l", dep_name)) ?? (Path)"",
-				search_base.tappend(string::tformat("%s.c3i", dep_name)) ?? (Path)"",
-				search_base.tappend(dep_name) ?? (Path)"",
-			};
-
-			foreach (lib_path : candidates)
+			ManifestConfig? config = load_manifest(lib);
+			if (catch config)
 			{
-				if (((String)lib_path).len == 0 || !path::exists(lib_path)) continue;
+				log::warn("Lib without manifest.json (%s)", lib);
+				continue;
+			}
+			String lib_provides = config.provides;
+			foreach (dep_name : deps)
+			{
+				if (dep_name != lib_provides) continue;
 
-				lib_found = true;
-				Path scan_target = lib_path;
+				Path lib_path = (Path)lib;
+				Path scan_target   = lib_path;
 				bool is_compressed = path::is_file(lib_path);
 
 				if (is_compressed)
@@ -360,65 +390,68 @@ fn void LspProject.process_libs(&self)
 					{
 						log::debug("Found a declaration file (.c3i) at: %s", lib_path);
 						Uri file_uri = uri::from_file_path(tmem, lib_path);
-						self.open_file(
-						{
-							.uri = (DocumentUri)file_uri.to_raw_string(tmem)
-						}
-						, true);
+						self.open_file({ .uri = (DocumentUri)file_uri.to_raw_string(tmem) }, from_disk: true);
 					}
-					else if (lib_path.has_extension("c3l"))
+					else
 					{
 						log::debug("Found a compressed library archive (.c3l file) at: %s", lib_path);
+
 						Path? cache_root = cache::get_or_create_cache_dir(self.config.root_path);
 						if (catch cache_root) continue;
 						Path? cache_target_dir = cache_root.tappend(dep_name);
 						if (catch cache_target_dir) continue;
-						if (cache::is_library_outdated(dep_name, cache_target_dir, lib_path) ?? true)
+						bool outdated = cache::is_library_outdated(dep_name, cache_target_dir, lib_path) ?? true;
+						if (outdated)
 						{
 							log::info("Cache is stale or missing for %s. Extracting...", dep_name);
-							if (path::exists(cache_target_dir))(void)path::rmtree(cache_target_dir);
-							if (try path::mkdir(cache_target_dir, recursive: true))
+
+							if (path::exists(cache_target_dir)) (void)path::rmtree(cache_target_dir);
+							if (catch err = path::mkdir(cache_target_dir, recursive: true))
 							{
-								if (decompress_library(lib_path, cache_target_dir))
+								log::error("Failed to create cache_target dir: %s", err);
+								continue;
+							}
+
+							if (decompress_library(lib_path, cache_target_dir))
+							{
+								if (catch err = cache::update_library_meta(dep_name, cache_root, lib_path))
 								{
-									(void)cache::update_library_meta(dep_name, cache_root, lib_path);
+									log::error("Failed to update meta file: %s", err);
 								}
 							}
 						}
-						scan_target = cache_target_dir;
-						String[] paths = utils::find_source_files(tmem, scan_target);
-						foreach (matched : paths)
+						else
 						{
-							Uri file_uri = uri::from_file_path(tmem, matched);
-							self.open_file(
-							{
-								.uri = (DocumentUri)file_uri.to_raw_string(tmem)
-							}
-							, true);
+							log::info("Cache hit for library %s. No offline modifications detected.", dep_name);
 						}
+
+						scan_target = cache_target_dir;
 					}
 				}
 				else
 				{
-					log::info("Found an uncompressed library folder at: %s", lib_path);
-					String[] paths = utils::find_source_files(tmem, lib_path);
-					foreach (matched : paths)
-					{
-						Uri file_uri = uri::from_file_path(tmem, matched);
-						self.open_file(
-						{
-							.uri = (DocumentUri)file_uri.to_raw_string(tmem)
-						}
-						, true);
-					}
+					log::info("Found an uncompressed library folder (.c3l folder) at: %s", lib_path);
 				}
+
+				String[] paths = utils::find_source_files(tmem, scan_target);
+				foreach (matched : paths)
+				{
+					log::info("Found internal library source: %s", matched);
+					Uri file_uri = uri::from_file_path(tmem, matched);
+					self.open_file({ .uri = (DocumentUri)file_uri.to_raw_string(tmem) }, from_disk: true);
+				}
+
 				break;
 			}
-			if (lib_found) break;
 		}
 	}
 }
 
+<*
+ Extracts a zipped library archive to a target cache directory.
+ @param source_archive : `Path to the .c3l / .zip file (e.g., "libs/glfw.c3l")`
+ @param cache_target_dir : `Path to the destination directory (e.g., ".lsp-cache/glfw")`
+*>
 fn bool decompress_library(String source_archive, Path cache_target_dir)
 {
 	log::info("Extracting archive %s to %s", source_archive, cache_target_dir);
@@ -438,4 +471,48 @@ fn bool decompress_library(String source_archive, Path cache_target_dir)
 	}
 
 	return true;
+}
+
+// Returns paths to all .c3l entries (files or folders) inside a search dir.
+fn String[]? libs_installed(String dir) @local
+{
+	if (!file::is_dir(dir)) return {};
+
+	PathList entries = path::ls(tmem, path::tnew(dir)!)!;
+
+	List{String} paths;
+	paths.tinit();
+
+	foreach (entry : entries)
+	{
+		if (!entry.has_extension("c3l")) continue;
+		paths.push(string::tformat("%s/%s", dir, entry));
+	}
+
+	return paths.to_tarray();
+}
+
+<*
+ Reads the manifest of an installed lib. Handles both the directory layout and
+ the zipped `.c3l` archive layout that c3c accepts.
+*>
+fn ManifestConfig? load_manifest(String lib_path) @private
+{
+	String data;
+
+	if (file::is_dir(lib_path))
+	{
+		data = (String)file::load_temp(string::tformat("%s/%s", lib_path, config::MANIFEST_CONFIG_NAME))!;
+	}
+	else
+	{
+		ZipArchive archive = zip::open(tmem, lib_path)!;
+		defer (void)archive.close();
+		data = (String)archive.read_file_all(tmem, config::MANIFEST_CONFIG_NAME)!;
+	}
+
+	Object* dom = json::tparse(data)!;
+	ManifestConfig conf;
+	conf.provides = (dom.get_string("provides") ?? "").copy(tmem);
+	return conf;
 }
