@@ -33,12 +33,15 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
 			{
 				FnDecl* fndecl = fn_info.node.as(FnDecl);
-				String fname = fndecl.name ? fndecl.name.text : "";
-				if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+				if (!fndecl.associated_type)
 				{
-					if (seen_symbols.add(fname))
+					String fname = fndecl.name ? fndecl.name.text : "";
+					if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
 					{
-						add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
+						if (seen_symbols.add(fname))
+						{
+							add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
+						}
 					}
 				}
 			}
@@ -64,12 +67,15 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			if (mac_info && mac_info.node && mac_info.node.kind == MACRO_DECL)
 			{
 				MacroDecl* mac = mac_info.node.as(MacroDecl);
-				String mname = mac.name ? mac.name.text : "";
-				if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+				if (!@ok(mac.associated_type.get()))
 				{
-					if (seen_symbols.add(mname))
+					String mname = mac.name ? mac.name.text : "";
+					if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
 					{
-						add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+						if (seen_symbols.add(mname))
+						{
+							add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+						}
 					}
 				}
 			}
@@ -86,6 +92,9 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			{
 				if (stmt)
 				{
+					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
+					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
+
 					String sname = cursor::spelling(stmt, tmem);
 					if (sname.len > 0 && (ctx.prefix.len == 0 || sname.starts_with(ctx.prefix)))
 					{

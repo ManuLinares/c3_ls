@@ -184,3 +184,148 @@ fn void test_process_libs_matches_manifest_provides()
 	assert(syms.len() > 0);
 	test::eq(syms.get(0).node.kind, NodeKind.FN_DECL);
 }
+
+<*
+ Issue: Type methods (`Vector2.scale`, `Vector2.reset`) should only be suggested
+ on member access (`v.scale`), NEVER in bare global completion when typing
+ inside a function body.
+*>
+fn void test_methods_excluded_from_bare_global_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct Vector2 {
+    float x;
+    float y;
+}
+
+fn void free_helper_func() {}
+fn void Vector2.scale(&self, float factor) {}
+macro void Vector2.reset(&self) {}
+
+fn void run() {
+    
+}
+`;
+
+	proj.workspace.process_file("/virtual/global_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/global_comp.c3");
+	defer doc_uri.free();
+
+	// Line 12 (0-based) inside `run()` body: bare completion
+	LspPosition pos = { .line = 12, .character = 4 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_helper = false;
+	bool found_vector2 = false;
+	bool found_scale = false;
+	bool found_reset = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "free_helper_func") found_helper = true;
+		if (item.label == "Vector2") found_vector2 = true;
+		if (item.label == "scale") found_scale = true;
+		if (item.label == "reset") found_reset = true;
+	}
+
+	assert(found_helper);
+	assert(found_vector2);
+
+	// FAILS on current code:
+	// `scale` and `reset` are methods, but are currently leaked into global completion
+	assert(!found_scale);
+	assert(!found_reset);
+}
+
+<*
+ Issue: In `change_file`, `input.path` and `input.uri` stored `lookup_key`
+ (allocated in temporary memory `tmem`). When the `@pool()` that triggered
+ `didChange` finishes, the memory is freed, corrupting the queued path
+ when `proj.update()` later processes it.
+*>
+fn void test_change_file_path_survives_tmem_reset() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String file_path = "/virtual/change_path_test.c3";
+	Uri doc_uri = uri::from_file_path(mem, file_path);
+	defer doc_uri.free();
+	DocumentUri raw_uri = (DocumentUri)doc_uri.to_raw_string(mem);
+	defer raw_uri.free(mem);
+
+	proj.open_file({ .uri = raw_uri, .text = "module app;\nfn void original_fn() {}\n" }, true);
+	proj.update();
+
+	LspFile* tracked = proj.files.get(file_path)!!;
+
+	// 1. Simulate `didChange` executing inside a temporary pool that closes
+	@pool()
+	{
+		TextDocumentContentChangeEvent[1] changes = {
+			{ .text = "module app;\nfn void reindexed_fn() {}\n" }
+		};
+		proj.change_file({
+			.document = { .uri = raw_uri, .version = 2 },
+			.content_changes = &changes
+		});
+	}; // Pool closes here, invalidating any strings allocated in tmem!
+
+	// Check 1: Pointer ownership
+	// The path pushed to the queue MUST point to `tracked.uri.path.ptr` (persistent heap),
+	// NOT to `tmem` which was just invalidated when the pool closed.
+	// FAILS on current code: process_queue[0].path.ptr is pointing to tmem!
+	test::eq(proj.process_queue[0].path.ptr, tracked.uri.path.ptr);
+	test::eq(proj.process_queue[0].uri.ptr, tracked.uri.path.ptr);
+
+	// 2. Thrash tmem to overwrite deallocated pool memory with 'X'
+	@pool()
+	{
+		char[] garbage = mem::temp_array(char, 2048);
+		for (sz i = 0; i < garbage.len; i++) garbage[i] = 'X';
+	};
+
+	// Check 2: String integrity after tmem reuse
+	// FAILS on current code: process_queue[0].path has been overwritten with 'X's!
+	test::eq(proj.process_queue[0].path, file_path);
+
+	// 3. Process the queue and verify workspace file path lookup
+	// FAILS on current code: SourceFile is registered under corrupted 'X' path,
+	// causing get_source_file_by_path to return null!
+	proj.update();
+	SourceFile* sf = proj.workspace.get_source_file_by_path(file_path);
+	assert(sf != null);
+	test::eq(sf.path, file_path);
+}
+
+import lsp::core::cache;
+
+<*
+ Issue: `.lsp-cache` was created at the workspace root, showing up as an
+ untracked directory in git status. It should reside under `build/.lsp-cache`
+ where default C3 .gitignore rules automatically cover it.
+*>
+fn void test_cache_directory_located_in_build_folder() @test
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path mock_root = tmp_dir.tappend("mock_project_root")!!;
+	(void)path::mkdir(mock_root, recursive: true);
+	defer (void)path::rmtree(mock_root);
+
+	Path? cache_path = cache::get_or_create_cache_dir((String)mock_root);
+	assert(@ok(cache_path));
+
+	String cache_str = (String)cache_path!!;
+
+	// FAILS on current code:
+	// Returns `.../mock_project_root/.lsp-cache` (does not contain "build")
+	assert(cache_str.contains("build"));
+}

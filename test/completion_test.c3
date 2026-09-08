@@ -927,3 +927,110 @@ fn void test() {
 	assert(found_host2);
 	assert(found_tls2);
 }
+
+<*
+ Bug 1: Interface completion should insert a plain type identifier,
+ NOT a function-call snippet with parentheses like `Printable($1)`.
+*>
+fn void test_interface_completion_is_plain_text_not_snippet() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+interface Printable {
+    fn void print();
+}
+
+struct Foo (Print
+`;
+
+	proj.workspace.process_file("/virtual/iface_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/iface_comp.c3");
+	defer doc_uri.free();
+
+	// Cursor right after `Print` on line 5, character 17
+	LspPosition pos = { .line = 5, .character = 17 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found = false;
+	foreach (item : items)
+	{
+		if (item.label == "Printable")
+		{
+			found = true;
+			// FAILS on current code:
+			// item.insertText is "Printable($1)" and item.insertTextFormat is SNIPPET
+			test::eq(item.insertText, "Printable");
+			test::eq(item.insertTextFormat, InsertTextFormat.PLAIN_TEXT);
+			assert(!item.insertText.contains("("));
+			break;
+		}
+	}
+	assert(found);
+}
+
+<*
+ Bug 2: When completing members under a module namespace (`geom::`),
+ only free functions, structs, and module-level symbols should be suggested.
+ Methods and macro methods attached to types (with associated_type) MUST be excluded.
+*>
+fn void test_methods_excluded_from_module_namespace_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String geom_mod = `module geom;
+
+struct Vector2 {
+    float x;
+    float y;
+}
+
+fn void free_func() {}
+fn void Vector2.scale(&self, float factor) {}
+macro void Vector2.reset(&self) {}
+`;
+
+	String app_code = `module app;
+import geom;
+
+fn void main() {
+    geom::
+}
+`;
+
+	proj.workspace.process_file("/virtual/geom.c3", geom_mod);
+	proj.workspace.process_file("/virtual/app.c3", app_code);
+
+	Uri app_uri = uri::from_file_path(mem, "/virtual/app.c3");
+	defer app_uri.free();
+
+	// Cursor right after `geom::` on line 4, character 10
+	LspPosition pos = { .line = 4, .character = 10 };
+	CompletionItem[] items = completion::resolve(&proj, app_uri, pos)!!;
+
+	bool found_free_func = false;
+	bool found_vector2 = false;
+	bool found_scale_method = false;
+	bool found_reset_macro = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "free_func") found_free_func = true;
+		if (item.label == "Vector2") found_vector2 = true;
+		if (item.label == "scale") found_scale_method = true;
+		if (item.label == "reset") found_reset_macro = true;
+	}
+
+	// Module globals/types MUST be suggested
+	assert(found_free_func);
+	assert(found_vector2);
+
+	// FAILS on current code:
+	// `scale` and `reset` are methods, but are currently leaked into `geom::`
+	assert(!found_scale_method);
+	assert(!found_reset_macro);
+}

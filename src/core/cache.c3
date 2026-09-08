@@ -15,7 +15,8 @@ struct MetaData
 fn Path? get_or_create_cache_dir(String workspace_root)
 {
 	Path base = path::tnew(workspace_root)!;
-	Path cache_dir = base.tappend(CACHE_DIR_NAME)!;
+	Path build_dir = base.tappend("build")!;
+	Path cache_dir = build_dir.tappend(CACHE_DIR_NAME)!;
 
 	if (!path::exists(cache_dir))
 	{

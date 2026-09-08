@@ -884,6 +884,8 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 						foreach (node : mod.nodes)
 						{
 							if (!node || node.kind == ERROR) continue;
+							if (node.kind == FN_DECL && node.as(FnDecl).associated_type != null) continue;
+							if (node.kind == MACRO_DECL && @ok(node.as(MacroDecl).associated_type.get())) continue;
 
 							if (node.kind == FAULTDEF_DECL)
 							{

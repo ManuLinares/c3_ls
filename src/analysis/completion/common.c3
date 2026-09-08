@@ -179,8 +179,6 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 		case INTERFACE_DECL:
 			item_kind = INTERFACE;
 			type_desc = "interface";
-			insert_text = string::tformat("%s($1)", insert_text);
-			format = SNIPPET;
 			node_type = symbol_name;
 		case STRUCT_DECL:
 			item_kind = STRUCT;

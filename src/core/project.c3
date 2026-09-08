@@ -200,8 +200,8 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	}
 	FileInput input = {
 		.source_text = file.text,
-		.uri = lookup_key,
-		.path = lookup_key,
+		.uri = file.uri.path,
+		.path = file.uri.path,
 		.is_library = file.is_library,
 	};
 	self.process_queue.push(input);
