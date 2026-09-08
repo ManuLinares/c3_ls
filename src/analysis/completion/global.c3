@@ -36,7 +36,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 				if (!fndecl.associated_type)
 				{
 					String fname = fndecl.name ? fndecl.name.text : "";
-					if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+					if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 					{
 						if (seen_symbols.add(fname))
 						{
@@ -52,7 +52,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			if (ty_info && ty_info.node)
 			{
 				String tname = cursor::spelling(ty_info.node, tmem);
-				if (tname.len > 0 && (ctx.prefix.len == 0 || tname.starts_with(ctx.prefix)))
+				if (tname.len > 0 && fuzzy_match(tname, ctx.prefix))
 				{
 					if (seen_symbols.add(tname))
 					{
@@ -70,7 +70,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 				if (!@ok(mac.associated_type.get()))
 				{
 					String mname = mac.name ? mac.name.text : "";
-					if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+					if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
 					{
 						if (seen_symbols.add(mname))
 						{
@@ -96,7 +96,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
 
 					String sname = cursor::spelling(stmt, tmem);
-					if (sname.len > 0 && (ctx.prefix.len == 0 || sname.starts_with(ctx.prefix)))
+					if (sname.len > 0 && fuzzy_match(sname, ctx.prefix))
 					{
 						if (seen_symbols.add(sname))
 						{

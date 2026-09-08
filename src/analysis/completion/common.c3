@@ -98,6 +98,32 @@ fn bool is_symbol_accessible(SourceFile* caller_sf, String caller_mod, Node* tar
 	return true;
 }
 
+fn bool fuzzy_match(String target, String prefix)
+{
+	if (prefix.len == 0) return true;
+	if (prefix.starts_with("@")) prefix = prefix[1..];
+	if (target.starts_with("@")) target = target[1..];
+	if (prefix.len == 0) return true;
+	if (target.len < prefix.len) return false;
+
+	if (target.starts_with(prefix)) return true;
+
+	sz pi = 0;
+	sz ti = 0;
+	while (ti < target.len && pi < prefix.len)
+	{
+		char tc = (target[ti] >= 'A' && target[ti] <= 'Z') ? target[ti] + 32 : target[ti];
+		char pc = (prefix[pi] >= 'A' && prefix[pi] <= 'Z') ? prefix[pi] + 32 : prefix[pi];
+		if (tc == pc)
+		{
+			pi++;
+		}
+		ti++;
+	}
+
+	return pi == prefix.len;
+}
+
 fn void provide_keywords(Context* ctx, List{CompletionItem} * items)
 {
 	if (ctx.access != NONE) return;
@@ -124,7 +150,7 @@ fn void provide_keywords(Context* ctx, List{CompletionItem} * items)
 			default:
 				break;
 		}
-		if (ctx.prefix.len == 0 || kw.name.starts_with(ctx.prefix))
+		if (fuzzy_match(kw.name, ctx.prefix))
 		{
 			items.push(
 			{
@@ -156,6 +182,17 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 
 	InsertTextFormat format = PLAIN_TEXT;
 
+	bool is_stmt = (ctx.scope == EXECUTION);
+	if (is_stmt && ctx.sf && ctx.offset <= ctx.sf.content.len)
+	{
+		sz p = ctx.offset;
+		while (p < ctx.sf.content.len && ctx.sf.content[p] != '\n')
+		{
+			if (ctx.sf.content[p] == ';') { is_stmt = false; break; }
+			p++;
+		}
+	}
+
 	switch (node.kind)
 	{
 		case FN_DECL:
@@ -163,18 +200,54 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 				FnDecl* fd = node.as(FnDecl);
 				item_kind = FUNCTION;
 				type_desc = "fn";
-				insert_text = string::tformat("%s($1)", insert_text);
+				bool is_void = false;
+				if (fd.ret_type)
+				{
+					String rt = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+					node_type = rt;
+					if (rt == "void") is_void = true;
+				}
+				else
+				{
+					is_void = true;
+				}
+
+				if (is_void && is_stmt)
+				{
+					insert_text = string::tformat("%s($1);", insert_text);
+				}
+				else
+				{
+					insert_text = string::tformat("%s($1)", insert_text);
+				}
 				format = SNIPPET;
-				if (fd.ret_type) node_type = cursor::raw_type_identifier(fd.ret_type) ?? "";
 			}
 		case MACRO_DECL:
 			{
 				MacroDecl* md = node.as(MacroDecl);
 				item_kind = FUNCTION;
 				type_desc = "macro";
-				insert_text = string::tformat("%s($1)", insert_text);
+				bool is_void = false;
+				if (try rt = md.ret_type.get())
+				{
+					String rt_str = cursor::raw_type_identifier(rt) ?? cursor::spelling(rt, tmem);
+					node_type = rt_str;
+					if (rt_str == "void") is_void = true;
+				}
+				else
+				{
+					is_void = true;
+				}
+
+				if (is_void && is_stmt)
+				{
+					insert_text = string::tformat("%s($1);", insert_text);
+				}
+				else
+				{
+					insert_text = string::tformat("%s($1)", insert_text);
+				}
 				format = SNIPPET;
-				if (try rt = md.ret_type.get()) node_type = cursor::raw_type_identifier(rt) ?? "";
 			}
 		case INTERFACE_DECL:
 			item_kind = INTERFACE;
@@ -223,6 +296,14 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 	if (ctx.expected_type.len > 0 && node_type.len > 0 && node_type == ctx.expected_type)
 	{
 		sort_prefix = "0001";
+	}
+	else if (ctx.prefix.len > 0 && symbol_name.starts_with(ctx.prefix))
+	{
+		sort_prefix = "0002";
+	}
+	else if (ctx.prefix.len > 0)
+	{
+		sort_prefix = "0008";
 	}
 
 	String data_str = "";

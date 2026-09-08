@@ -630,7 +630,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, Str
 						if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
 						{
 							String mname = fndecl.name ? fndecl.name.text : "";
-							if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+							if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
 							{
 								if (seen_methods.add(mname))
 								{
@@ -659,7 +659,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, Str
 							if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
 							{
 								String mname = mac.name ? mac.name.text : "";
-								if (mname.len > 0 && (ctx.prefix.len == 0 || mname.starts_with(ctx.prefix)))
+								if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
 								{
 									if (seen_methods.add(mname))
 									{
@@ -803,7 +803,7 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 			while (fdecl != null)
 			{
 				String fname = fdecl.name ? fdecl.name.text : "";
-				if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+				if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 				{
 					if (seen_fields.add(fname))
 					{

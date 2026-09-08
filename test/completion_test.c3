@@ -1120,3 +1120,174 @@ fn void main() {
 	// Module paths belong in import statements, not inside expression bodies
 	assert(!found_module_in_expr);
 }
+
+<*
+ Feature 1: Typing inside a function or method call argument list
+ suggests parameter names as named argument completions (`host: `, `enable_tls: `),
+ while properly excluding parameters already satisfied positionally or by name.
+*>
+fn void test_named_argument_completion_inside_call() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void configure(int port, String host, bool ssl_enabled) {}
+
+fn void main() {
+    configure(8080, );
+    configure(8080, host: "localhost", );
+}
+`;
+
+	proj.workspace.process_file("/virtual/named_arg_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/named_arg_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Line 5: `    configure(8080, );` cursor after first comma (col 20)
+	// `port` was satisfied by positional argument 8080 -> must NOT suggest `port:`
+	LspPosition pos1 = { .line = 5, .character = 20 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_port1 = false;
+	bool found_host1 = false;
+	bool found_ssl1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "port:") found_port1 = true;
+		if (item.label == "host:") found_host1 = true;
+		if (item.label == "ssl_enabled:") found_ssl1 = true;
+	}
+
+	assert(!found_port1);
+	assert(found_host1);
+	assert(found_ssl1);
+
+	// 2. Line 6: `    configure(8080, host: "localhost", );` cursor after second comma (col 39)
+	// `port` satisfied positionally, `host` satisfied by name -> only `ssl_enabled:` allowed!
+	LspPosition pos2 = { .line = 6, .character = 39 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_port2 = false;
+	bool found_host2 = false;
+	bool found_ssl2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "port:") found_port2 = true;
+		if (item.label == "host:") found_host2 = true;
+		if (item.label == "ssl_enabled:") found_ssl2 = true;
+	}
+
+	assert(!found_port2);
+	assert(!found_host2);
+	assert(found_ssl2);
+}
+
+<*
+ Feature 2: Completing a void function at the statement level
+ appends a semicolon (`do_log($1);`), whereas non-void calls do not.
+*>
+fn void test_auto_semicolon_on_void_call_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void do_log(String msg) {}
+fn int compute_val(int x) => x * 2;
+
+fn void main() {
+    do_
+    int r = compute_
+}
+`;
+
+	proj.workspace.process_file("/virtual/auto_semi_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/auto_semi_comp.c3");
+	defer doc_uri.free();
+
+	// 1. Completion on `do_` at statement level (line 6, col 7)
+	LspPosition pos1 = { .line = 6, .character = 7 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_log = false;
+	foreach (item : items1)
+	{
+		if (item.label == "do_log")
+		{
+			found_log = true;
+			test::eq(item.insertText, "do_log($1);");
+			test::eq(item.insertTextFormat, InsertTextFormat.SNIPPET);
+		}
+	}
+	assert(found_log);
+
+	// 2. Completion on `compute_` inside expression/assignment (line 7, col 20)
+	LspPosition pos2 = { .line = 7, .character = 20 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_compute = false;
+	foreach (item : items2)
+	{
+		if (item.label == "compute_val")
+		{
+			found_compute = true;
+			test::eq(item.insertText, "compute_val($1)");
+		}
+	}
+	assert(found_compute);
+}
+
+<*
+ Feature 3: Fuzzy subsequence completion matching (`v2` matches `Vector2`,
+ and `ccl` matches `custom_clamp`).
+*>
+fn void test_fuzzy_completion_matching() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct Vector2 {
+    float x;
+    float y;
+}
+fn double double.custom_clamp(self, double min, double max) => self;
+
+fn void main() {
+    v2
+    double d = 3.14;
+    d.ccl
+}
+`;
+
+	proj.workspace.process_file("/virtual/fuzzy_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/fuzzy_comp.c3");
+	defer doc_uri.free();
+
+	// 1. `v2` fuzzy matches `Vector2` (line 9, col 6)
+	LspPosition pos1 = { .line = 9, .character = 6 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_v2 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "Vector2") found_v2 = true;
+	}
+	assert(found_v2);
+
+	// 2. `d.ccl` fuzzy matches `custom_clamp` (line 11, col 9)
+	LspPosition pos2 = { .line = 11, .character = 9 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_clamp = false;
+	foreach (item : items2)
+	{
+		if (item.label == "custom_clamp") found_clamp = true;
+	}
+	assert(found_clamp);
+}

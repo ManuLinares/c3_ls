@@ -513,6 +513,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	}
 	else
 	{
+		provide_named_args(&ctx, &items);
 		if (expected_type.len > 0)
 		{
 			provide_expected_type_completions(&ctx, &items, expected_type);
