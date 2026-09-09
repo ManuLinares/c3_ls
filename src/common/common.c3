@@ -179,3 +179,49 @@ struct FoldingRangeParams
 {
 	TextDocumentIdentifier text_document;
 }
+
+struct Command
+{
+	String title;
+	String command;
+	String[] arguments;
+}
+
+struct CodeAction
+{
+	String title;
+	String kind;
+	LspDiagnostic[] diagnostics;
+	bool isPreferred;
+	Command command;
+}
+
+struct CodeActionContext
+{
+	LspDiagnostic[] diagnostics;
+	String[] only;
+}
+
+struct CodeActionParams
+{
+	TextDocumentIdentifier text_document;
+	LspRange range;
+	CodeActionContext context;
+}
+
+struct ExecuteCommandParams
+{
+	String command;
+	String[] arguments;
+}
+
+struct FileEvent
+{
+	DocumentUri uri;
+	int type;
+}
+
+struct DidChangeWatchedFilesParams
+{
+	FileEvent[] changes;
+}

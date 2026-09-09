@@ -1002,6 +1002,9 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 
 	while (!ctx.is(RBRACE) && !ctx.eof())
 	{
+		if (consume(ctx, EOS)) continue;
+
+		int start_pos = ctx.pos;
 		if (ctx.is(STRUCT) || ctx.is(UNION) || ctx.is(BITSTRUCT))
 		{
 			Node* sub_decl;
@@ -1030,7 +1033,22 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 			struct_flags.is_struct = true;
 			struct_flags.is_inline = consume(ctx, INLINE);
 			Node* field = parse_var_decl(scope.with_only_flags(struct_flags), null);
-			fields.push(field);
+			if (field) fields.push(field);
+		}
+
+		if (ctx.pos == start_pos)
+		{
+			diagnostics::error(ctx.context, ctx.current.range, "Unexpected token in struct body");
+			error_node(ctx, (Node*)node);
+			skip_until(ctx, { EOS, RBRACE });
+			if (ctx.pos == start_pos)
+			{
+				advance(ctx);
+			}
+			else
+			{
+				consume(ctx, EOS);
+			}
 		}
 	}
 

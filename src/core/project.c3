@@ -6,11 +6,13 @@ import std::collections::list;
 import std::collections::object;
 import std::compression::zip;
 import std::encoding::json;
+import std::io::file;
 
 import lsp::analysis;
 import lsp::server;
 import lsp::core::config;
 import analyzer::core;
+import analyzer::core::source_file;
 import uri;
 import lsp::utils;
 
@@ -77,7 +79,6 @@ fn void LspProject.free(&self)
 
 <*
  Start tracking a document.
-
  @param from_disk : "true for a workspace scan, which carries no text and is read off disk; false for a didOpen, which carries the editor's buffer"
 *>
 fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = false)
@@ -140,25 +141,12 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 
 	self.files[lookup_key] = lsp_file;
 
-	FileInput file;
-
-	if (!from_disk)
-	{
-		file = {
-			.source_text = lsp_file.text,
-			.uri = lookup_key,
-			.path = lookup_key,
-			.is_library = false,
-		};
-	}
-	else
-	{
-		file = {
-			.path = lookup_key,
-			.uri = lookup_key,
-			.is_library = true,
-		};
-	}
+	FileInput file = {
+		.source_text = lsp_file.text,
+		.uri = lookup_key,
+		.path = lookup_key,
+		.is_library = from_disk,
+	};
 
 	self.process_queue.push(file);
 }
@@ -208,24 +196,100 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	self.process_queue.push(input);
 }
 
+fn void LspProject.close_document(&self, DocumentUri document)
+{
+	String raw_uri = document;
+	String lookup_key = raw_uri;
+	if (raw_uri.contains("://"))
+	{
+		Uri? query_uri = uri::parse(tmem, raw_uri);
+		if (catch query_uri) return;
+		lookup_key = query_uri.path;
+	}
+
+	LspFile* file = self.files.get(lookup_key) ?? null;
+	if (!file) return;
+
+	if (file::exists(lookup_key) && !lookup_key.starts_with("/virtual/"))
+	{
+		if (file.text.len > 0)
+		{
+			file.text.free(self.allocator);
+			file.text = "";
+		}
+		file.is_library = true;
+
+		FileInput input = {
+			.source_text = "",
+			.uri = file.uri.path,
+			.path = file.uri.path,
+			.is_library = true,
+		};
+		self.process_queue.push(input);
+		return;
+	}
+
+	self.close_file(document);
+}
+
 fn void LspProject.close_file(&self, DocumentUri document)
 {
 	String raw_uri = document;
-	Uri? query_uri = uri::parse(tmem, raw_uri);
-	if (catch query_uri) return;
-
-	String lookup_key = query_uri.path;
+	String lookup_key = raw_uri;
+	if (raw_uri.contains("://"))
+	{
+		Uri? query_uri = uri::parse(tmem, raw_uri);
+		if (catch query_uri) return;
+		lookup_key = query_uri.path;
+	}
 
 	log::debug("Deregistering file: %s", lookup_key);
 
 	if (!self.files.has_key(lookup_key))
 	{
-		log::error("Attempted to drop non-existent file path identifier (%s)", lookup_key);
+		// Check if a directory path was passed (e.g. `rm -rf lib`)
+		List{String} to_evict;
+		to_evict.tinit();
+
+		self.files.@each(; f_path, f)
+		{
+			if (f_path.starts_with(lookup_key))
+			{
+				to_evict.push(f_path);
+			}
+		};
+
+		foreach (p : to_evict)
+		{
+			if (try f = self.files.get(p))
+			{
+				if (self.workspace.ctx)
+				{
+					SourceFile* sf = self.workspace.get_source_file_by_path(p);
+					if (sf)
+					{
+						source_file::free(self.workspace.ctx, sf);
+					}
+				}
+				f.free(self.allocator);
+				alloc::free(self.allocator, f);
+				(void)self.files.remove(p);
+			}
+		}
 		return;
 	}
 
 	LspFile* file = self.files.get(lookup_key) ?? null;
 	if (!file) return;
+
+	if (self.workspace.ctx)
+	{
+		SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
+		if (sf)
+		{
+			source_file::free(self.workspace.ctx, sf);
+		}
+	}
 
 	file.free(self.allocator);
 	alloc::free(self.allocator, file);
@@ -234,10 +298,45 @@ fn void LspProject.close_file(&self, DocumentUri document)
 
 fn void LspProject.update(&self)
 {
+	// Check if any disk-backed library files were deleted externally
+	List{String} dead_libs;
+	dead_libs.tinit();
+
+	self.files.@each(; p, lf)
+	{
+		if (lf && lf.is_library && !lf.uri.path.starts_with("/virtual/") && !file::exists(lf.uri.path))
+		{
+			dead_libs.push(p);
+		}
+	};
+
+	if (dead_libs.len() > 0)
+	{
+		foreach (dead_p : dead_libs)
+		{
+			self.close_file((DocumentUri)dead_p);
+		}
+
+		// Re-queue open user files so missing module diagnostics are recalculated
+		self.files.@each(; path_key, lsp_f)
+		{
+			if (lsp_f && !lsp_f.is_library)
+			{
+				self.process_queue.push({
+					.source_text = lsp_f.text,
+					.uri = lsp_f.uri.path,
+					.path = lsp_f.uri.path,
+					.is_library = false
+				});
+			}
+		};
+	}
+
 	if (self.process_queue.is_empty()) return;
 
 	FileInput[] files = self.process_queue.array_view();
 	defer self.process_queue.clear();
+
 	// Pass 1: Parse and register all AST nodes across queued files into global workspace registry
 	foreach (f : files)
 	{
@@ -255,6 +354,7 @@ fn void LspProject.update(&self)
 			self.workspace.parse_and_register_file(target_path, text);
 		}
 	}
+
 	// Pass 2: Execute semantic analysis only on user files (not stdlib/library files).
 	// Library files are already registered in Pass 1; running the variable pass over
 	// their bodies is redundant since diagnostics for library files are discarded anyway.
