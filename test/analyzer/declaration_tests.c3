@@ -813,3 +813,28 @@ fn void test_invalid_fault_name_in_block_emits_error() @test
 	bool success = context::process(context, source_code, "test_err.c3");
 	test::eq(success, false);
 }
+
+<*
+ Verifies that invalid tokens or illegal function pointer field signatures
+ inside a struct do not stall the parser in an infinite loop.
+*>
+fn void test_struct_with_invalid_field_does_not_infinite_loop() @test
+{
+	String source_code = `
+		module hello;
+
+		struct Sqlite3ApiRoutines
+		{
+			void (*xFunc)(void*);
+			fn void() callback;
+			int valid_field;
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_bad_struct.c3");
+	test::eq(success, false);
+
+	Module* mod = context.modules.get("hello")!!;
+	test::eq(parser_tests::count_kind(mod, STRUCT_DECL), 1);
+}

@@ -36,6 +36,11 @@ struct RenameOptions
 	bool prepareProvider;
 }
 
+struct ExecuteCommandOptions
+{
+	String[] commands;
+}
+
 <*
 	https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities
 *>
@@ -55,4 +60,6 @@ struct LspServerCapabilities
 	bool foldingRangeProvider;
 	bool documentFormattingProvider;
 	bool documentRangeFormattingProvider;
+	bool codeActionProvider;
+	ExecuteCommandOptions executeCommandProvider;
 }

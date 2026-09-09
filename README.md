@@ -21,6 +21,16 @@ binary is in `build/c3_ls`.
 * `-v, --version`: print version and exit.
 * `-h, --help`: print help manual.
 
+### bindgen flags
+
+* `--bindgen <header.h>`: generate C3 bindings from C header file.
+* `-o, --output <path>`: output file path (.c3 or .c3i) for bindings.
+* `-m, --module <name>`: module name for generated bindings.
+* `--type-prefix <prefix>`: type prefix for generated types (e.g. `RL`).
+* `--strip-prefix <prefix>`: function prefix to strip (default: `<module>_`).
+* `-I, --include <dir>`: include directory for clang.
+* `-D, --define <macro>`: macro definition for clang.
+
 ## features
 
 * diagnostics
@@ -35,6 +45,7 @@ binary is in `build/c3_ls`.
 * inlay hints
 * folding ranges
 * formatting & range formatting
+* C binding generator (`--bindgen` & Quick Fix on missing ex:`import sqlite3;`)
 
 ## license
 

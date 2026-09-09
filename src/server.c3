@@ -14,6 +14,8 @@ import lsp::analysis::workspace_symbols;
 import lsp::analysis::inlay_hints;
 import lsp::analysis::folding_ranges;
 import lsp::analysis::formatting;
+import lsp::analysis::code_actions;
+import lsp::bindgen;
 import lsp::translator;
 import lsp::core::config;
 import lsp::core::logger;
@@ -172,6 +174,20 @@ struct LspFoldingRangeResponse
 	String jsonrpc;
 	int id;
 	FoldingRange[] result;
+}
+
+struct LspCodeActionResponse
+{
+	String jsonrpc;
+	int id;
+	CodeAction[] result;
+}
+
+struct LspExecuteCommandResponse
+{
+	String jsonrpc;
+	int id;
+	Object* result;
 }
 
 struct LspPublishDiagnosticsNotification
@@ -341,6 +357,10 @@ fn void dispatch(LspMessage* message)
 							.foldingRangeProvider = true,
 							.documentFormattingProvider = true,
 							.documentRangeFormattingProvider = true,
+							.codeActionProvider = true,
+							.executeCommandProvider = {
+								.commands = { code_actions::CMD_GENERATE_BINDINGS }
+							}
 						},
 						.serverInfo = {
 							.name = "c3_ls",
@@ -407,7 +427,7 @@ fn void dispatch(LspMessage* message)
 			project.change_file(message.params.did_change);
 
 		case DID_CLOSE:
-			project.close_file(message.params.did_close.document.uri);
+			project.close_document(message.params.did_close.document.uri);
 
 		case COMPLETION:
 			{
@@ -626,6 +646,114 @@ fn void dispatch(LspMessage* message)
 					.result = edits ?? {}
 				};
 				io_handler::write(translator::encode(resp, tmem));
+			}
+
+		case CODE_ACTION:
+			{
+				Uri? file_uri = uri::parse(tmem, message.params.code_action.text_document.uri);
+				if (catch file_uri) return;
+				CodeAction[]? actions = code_actions::get_code_actions(&project, file_uri, message.params.code_action);
+				LspCodeActionResponse resp = {
+					.jsonrpc = message.rpc,
+					.id = message.has_id ? message.id : -1,
+					.result = actions ?? {}
+				};
+				io_handler::write(translator::encode(resp, tmem));
+			}
+
+		case WS_EXECUTE_COMMAND:
+			{
+				String cmd_name = message.params.execute_command.command;
+				if (cmd_name == code_actions::CMD_GENERATE_BINDINGS)
+				{
+					String[] args = message.params.execute_command.arguments;
+					if (args.len >= 3)
+					{
+						String header_path = args[0];
+						String module_name = args[1];
+						String output_path = args[2];
+
+						sz last_slash = output_path.rindex_of_char('/') ?? output_path.rindex_of_char('\\') ?? (sz)0;
+						if (last_slash > 0)
+						{
+							String dir = output_path[:last_slash];
+							if (!file::exists(dir))
+							{
+								(void)path::mkdir(dir, recursive: true);
+							}
+						}
+
+						bindgen::BindgenOptions opts = {
+							.header_path = header_path,
+							.output_path = output_path,
+							.module_name = module_name,
+							.type_prefix = "",
+							.strip_func_prefix = "",
+							.clang_path = "clang"
+						};
+
+						int run_res = bindgen::run_bindgen(opts, is_cli: false);
+						if (run_res == 0)
+						{
+							Uri file_u = uri::from_file_path(tmem, output_path);
+							DocumentUri out_uri = (DocumentUri)file_u.to_raw_string(tmem);
+							project.open_file({ .uri = out_uri }, from_disk: true);
+
+							// Queue all open user documents for re-analysis so the new module clears diagnostics
+							project.files.@each(; path_key, lsp_f)
+							{
+								if (lsp_f && !lsp_f.is_library)
+								{
+									project.process_queue.push({
+										.source_text = lsp_f.text,
+										.uri = lsp_f.uri.path,
+										.path = lsp_f.uri.path,
+										.is_library = false
+									});
+								}
+							};
+
+							project.update();
+						}
+					}
+				}
+
+				LspExecuteCommandResponse resp = {
+					.jsonrpc = message.rpc,
+					.id = message.has_id ? message.id : -1,
+					.result = null
+				};
+				io_handler::write(translator::encode(resp, tmem));
+			}
+
+		case WS_CHANGE_WATCHED:
+			{
+				bool needs_update = false;
+				foreach (ev : message.params.did_change_watched.changes)
+				{
+					if (ev.type == 3) // FileChangeType.DELETED
+					{
+						project.close_file(ev.uri);
+						needs_update = true;
+					}
+				}
+				if (needs_update)
+				{
+					// Re-analyze open user documents to update diagnostics
+					project.files.@each(; path_key, lsp_f)
+					{
+						if (lsp_f && !lsp_f.is_library)
+						{
+							project.process_queue.push({
+								.source_text = lsp_f.text,
+								.uri = lsp_f.uri.path,
+								.path = lsp_f.uri.path,
+								.is_library = false
+							});
+						}
+					};
+					project.update();
+				}
 			}
 
 		case SET_TRACE:

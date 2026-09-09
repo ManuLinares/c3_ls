@@ -266,12 +266,16 @@ union MessageParams
 	FoldingRangeParams folding_range;
 	DocumentFormattingParams formatting;
 	DocumentRangeFormattingParams range_formatting;
+	CodeActionParams code_action;
+	ExecuteCommandParams execute_command;
 
 	PublishDiagnosticsParams pub_diag;
 	LogMessageParams log_message;
 
 	CancelParams cancel;
 	SetTraceParams set_trace;
+
+	DidChangeWatchedFilesParams did_change_watched;
 }
 
 struct FormattingOptions

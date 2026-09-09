@@ -108,6 +108,27 @@ fn void LspMessage.free(&self)
 			self.params.formatting.text_document.uri.free(self.allocator);
 		case RANGE_FORMATTING:
 			self.params.range_formatting.text_document.uri.free(self.allocator);
+		case CODE_ACTION:
+			self.params.code_action.text_document.uri.free(self.allocator);
+		case WS_EXECUTE_COMMAND:
+			self.params.execute_command.command.free(self.allocator);
+			if (self.params.execute_command.arguments.len > 0)
+			{
+				foreach (arg : self.params.execute_command.arguments)
+				{
+					arg.free(self.allocator);
+				}
+				alloc::free(self.allocator, self.params.execute_command.arguments);
+			}
+		case WS_CHANGE_WATCHED:
+			if (self.params.did_change_watched.changes.len > 0)
+			{
+				foreach (c : self.params.did_change_watched.changes)
+				{
+					c.uri.free(self.allocator);
+				}
+				alloc::free(self.allocator, self.params.did_change_watched.changes);
+			}
 		default:
 			break;
 	}
@@ -559,6 +580,108 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 						rfmt_params.options.trim_final_newlines = opt.get_bool("trimFinalNewlines") ?? true;
 					}
 					msg.params.range_formatting = rfmt_params;
+				}
+
+			case CODE_ACTION:
+				{
+					CodeActionParams ca_params;
+					if (try td = params_obj.get("textDocument"))
+					{
+						String uri_str = td.get_string("uri") ?? "";
+						ca_params.text_document.uri = uri_str.copy(allocator);
+					}
+					if (try r = params_obj.get("range"))
+					{
+						if (try start_pos = r.get("start"))
+						{
+							ca_params.range.start.line = (uint)(start_pos.get_int("line") ?? 0);
+							ca_params.range.start.character = (uint)(start_pos.get_int("character") ?? 0);
+						}
+						if (try end_pos = r.get("end"))
+						{
+							ca_params.range.end.line = (uint)(end_pos.get_int("line") ?? 0);
+							ca_params.range.end.character = (uint)(end_pos.get_int("character") ?? 0);
+						}
+					}
+					if (try ctx_obj = params_obj.get("context"))
+					{
+						if (try diags_arr = ctx_obj.get("diagnostics"))
+						{
+							if (diags_arr.is_array() && diags_arr.len() > 0)
+							{
+								sz d_count = diags_arr.len();
+								LspDiagnostic[] d_list = alloc::alloc_array(allocator, LspDiagnostic, d_count);
+								for (sz i = 0; i < d_count; i++)
+								{
+									if (Object* d_item = diags_arr.get_at(i))
+									{
+										d_list[i].message = (d_item.get_string("message") ?? "").copy(allocator);
+										d_list[i].source = (d_item.get_string("source") ?? "").copy(allocator);
+										d_list[i].severity = (int)(d_item.get_int("severity") ?? 1);
+										if (try dr = d_item.get("range"))
+										{
+											if (try ds = dr.get("start"))
+											{
+												d_list[i].range.start.line = (uint)(ds.get_int("line") ?? 0);
+												d_list[i].range.start.character = (uint)(ds.get_int("character") ?? 0);
+											}
+											if (try de = dr.get("end"))
+											{
+												d_list[i].range.end.line = (uint)(de.get_int("line") ?? 0);
+												d_list[i].range.end.character = (uint)(de.get_int("character") ?? 0);
+											}
+										}
+									}
+								}
+								ca_params.context.diagnostics = d_list;
+							}
+						}
+					}
+					msg.params.code_action = ca_params;
+				}
+
+			case WS_EXECUTE_COMMAND:
+				{
+					ExecuteCommandParams exec_params;
+					exec_params.command = (params_obj.get_string("command") ?? "").copy(allocator);
+					if (try args_arr = params_obj.get("arguments"))
+					{
+						if (args_arr.is_array() && args_arr.len() > 0)
+						{
+							sz count = args_arr.len();
+							String[] args = alloc::alloc_array(allocator, String, count);
+							for (sz i = 0; i < count; i++)
+							{
+								args[i] = (args_arr.get_string_at(i) ?? "").copy(allocator);
+							}
+							exec_params.arguments = args;
+						}
+					}
+					msg.params.execute_command = exec_params;
+				}
+
+			case WS_CHANGE_WATCHED:
+				{
+					DidChangeWatchedFilesParams watched_params;
+					if (try changes = params_obj.get("changes"))
+					{
+						if (changes.is_array())
+						{
+							sz count = changes.len();
+							FileEvent[] arr = alloc::alloc_array(allocator, FileEvent, count);
+							for (sz i = 0; i < count; i++)
+							{
+								if (Object* c = changes.get_at(i))
+								{
+									String curi = c.get_string("uri") ?? "";
+									arr[i].uri = curi.copy(allocator);
+									arr[i].type = (int)(c.get_int("type") ?? 0);
+								}
+							}
+							watched_params.changes = arr;
+						}
+					}
+					msg.params.did_change_watched = watched_params;
 				}
 
 			default:

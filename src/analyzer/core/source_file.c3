@@ -1,6 +1,7 @@
 module analyzer::core::source_file;
 
 import analyzer::core::ast;
+import analyzer::core::mod;
 import analyzer::lexer;
 import analyzer::parser;
 import analyzer::sema;
@@ -198,6 +199,25 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 			}
 		}
 	};
+
+	// Clean up any module entry that has no declarations left
+	List{String} empty_mods;
+	empty_mods.tinit();
+	context.modules.@each(; m_name, m)
+	{
+		if (m && m.nodes.len() == 0 && m.module_decls.len() == 0)
+		{
+			empty_mods.push(m_name);
+		}
+	};
+	foreach (m_name : empty_mods)
+	{
+		if (try m = context.modules.get(m_name))
+		{
+			mod::free(context, m);
+			(void)context.modules.remove(m_name);
+		}
+	}
 }
 
 fn void free(AnalyzerContext* context, SourceFile* sf)

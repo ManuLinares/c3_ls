@@ -329,3 +329,66 @@ fn void test_cache_directory_located_in_build_folder() @test
 	// Returns `.../mock_project_root/.lsp-cache` (does not contain "build")
 	assert(cache_str.contains("build"));
 }
+
+<*
+ Verifies: Closing an editor tab (didClose) for an on-disk file
+ does NOT evict the file or its module from the workspace.
+*>
+fn void test_did_close_retains_on_disk_file_and_module() @test
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path test_dir = tmp_dir.tappend("c3_ls_close_doc_test")!!;
+	Path lib_dir = test_dir.tappend("lib")!!;
+	(void)path::mkdir(lib_dir, recursive: true);
+	defer (void)path::rmtree(test_dir);
+
+	Path dep_path = lib_dir.tappend("sqlite3.c3i")!!;
+	file::save(dep_path, "module sqlite3;\nfn void sqlite3_open() {}\n")!!;
+
+	Path main_path = test_dir.tappend("main.c3")!!;
+	file::save(main_path, "module app;\nimport sqlite3;\nfn void main() { sqlite3::sqlite3_open(); }\n")!!;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	Uri dep_uri = uri::from_file_path(mem, (String)dep_path);
+	defer dep_uri.free();
+	DocumentUri raw_dep_uri = (DocumentUri)dep_uri.to_raw_string(tmem);
+
+	Uri main_uri = uri::from_file_path(mem, (String)main_path);
+	defer main_uri.free();
+	DocumentUri raw_main_uri = (DocumentUri)main_uri.to_raw_string(tmem);
+
+	// 1. Open sqlite3.c3i in editor tab (didOpen)
+	String dep_text = (String)file::load(tmem, dep_path)!!;
+	proj.open_file({ .uri = raw_dep_uri, .text = dep_text }, from_disk: false);
+
+	// 2. Open main.c3 in editor tab
+	String main_text = (String)file::load(tmem, main_path)!!;
+	proj.open_file({ .uri = raw_main_uri, .text = main_text }, from_disk: false);
+	proj.update();
+
+	test::eq(proj.workspace.get_diagnostics((String)main_path).len, 0);
+
+	// 3. Close sqlite3.c3i editor tab (didClose)
+	proj.close_document(raw_dep_uri);
+	proj.update();
+
+	// 4. Edit main.c3
+	TextDocumentContentChangeEvent[1] changes = {
+		{ .text = "module app;\nimport sqlite3;\nfn void main() { sqlite3::sqlite3_open(); // edit\n}\n" }
+	};
+	proj.change_file({
+		.document = { .uri = raw_main_uri, .version = 2 },
+		.content_changes = &changes
+	});
+	proj.update();
+
+	// The sqlite3 module must remain in workspace because the file exists on disk
+	LspDiagnostic[] diags = proj.workspace.get_diagnostics((String)main_path);
+	test::eq(diags.len, 0);
+	assert(proj.workspace.ctx.modules.has_key("sqlite3"));
+}
