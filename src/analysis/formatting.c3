@@ -25,8 +25,11 @@ struct FormatterContext
 	sz[] line_offsets;
 	FormattingOptions options;
 	DString out;
+	Token[] tokens;
+	sz token_idx;
 	int indent_level;
 	int paren_depth;
+	int multiline_paren_depth;
 	int bracket_depth;
 	int for_paren_depth;
 	int foreach_paren_depth;
@@ -135,7 +138,6 @@ fn bool is_strictly_binary_operator(TokenKind kind)
 		case DIV:
 		case MOD:
 		case BIT_OR:
-		case BIT_XOR:
 		case EQ:
 		case EQEQ:
 		case NOT_EQUAL:
@@ -260,6 +262,7 @@ fn bool is_prefix_unary_context(TokenKind prev)
 		case LBRACE:
 		case COMMA:
 		case COLON:
+		case DOTDOT:
 		case EOS:
 		case IF:
 		case WHILE:
@@ -371,13 +374,106 @@ fn bool is_initializer_context(TokenKind prev)
 
 fn bool is_decl_block_start(TokenKind prev, TokenKind prev_prev)
 {
-	if (prev_prev == STRUCT || prev_prev == UNION || prev_prev == BITSTRUCT ||
-	prev_prev == INTERFACE || prev_prev == ENUM || prev_prev == CONSTDEF ||
-	prev_prev == COLON)
+	switch (prev_prev)
 	{
-		return true;
+		case STRUCT:
+		case UNION:
+		case BITSTRUCT:
+		case INTERFACE:
+		case ENUM:
+		case CONSTDEF:
+		case COLON:
+			return true;
+		default:
+			return false;
+	}
+}
+
+fn bool is_enclosing_type_decl_header(Token[] tokens, sz lbrace_idx)
+{
+	if (lbrace_idx == 0) return false;
+	sz k = lbrace_idx;
+	while (k > 0)
+	{
+		k--;
+		TokenKind kind = tokens[k].kind;
+		switch (kind)
+		{
+			case STRUCT:
+			case UNION:
+			case BITSTRUCT:
+			case INTERFACE:
+			case ENUM:
+			case CONSTDEF:
+				return true;
+			case EOS:
+			case RBRACE:
+			case LBRACE:
+				return false;
+			default:
+				break;
+		}
 	}
 	return false;
+}
+
+fn bool is_paren_cast(Token[] tokens, sz rparen_idx)
+{
+	if (rparen_idx == 0 || rparen_idx >= tokens.len) return false;
+	sz idx = rparen_idx;
+	int depth = 1;
+	while (idx > 0)
+	{
+		idx--;
+		TokenKind k = tokens[idx].kind;
+		if (k == RPAREN)
+		{
+			depth++;
+		}
+		else if (k == LPAREN)
+		{
+			depth--;
+			if (depth == 0) break;
+		}
+	}
+	if (depth != 0 || idx + 1 >= rparen_idx) return false;
+
+	TokenKind first = tokens[idx + 1].kind;
+	bool first_is_type = is_type_name_token(first) || first == TYPE_IDENT;
+	if (!first_is_type && first == IDENT && idx + 2 < rparen_idx && tokens[idx + 2].kind == SCOPE)
+	{
+		first_is_type = true;
+	}
+	if (!first_is_type) return false;
+
+	for (sz j = idx + 1; j < rparen_idx; j++)
+	{
+		TokenKind k = tokens[j].kind;
+		switch (k)
+		{
+			case TYPE_IDENT:
+			case SCOPE:
+			case ASTERISK:
+			case QUESTION:
+			case LBRACKET:
+			case RBRACKET:
+			case LVEC:
+			case RVEC:
+			case LBRACE:
+			case RBRACE:
+			case COMMA:
+			case INT_DECIMAL_LITERAL:
+			case INT_HEX_LITERAL:
+				break;
+			case IDENT:
+				if (j + 1 < rparen_idx && tokens[j + 1].kind == SCOPE) break;
+				return false;
+			default:
+				if (k.is_base_type()) break;
+				return false;
+		}
+	}
+	return true;
 }
 
 fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind curr)
@@ -390,8 +486,10 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		case RPAREN:
 		case RBRACKET:
 		case RVEC:
-		case DOT:
 		case SCOPE:
+			return false;
+		case DOT:
+			if (prev == LBRACE || prev == COMMA) return true;
 			return false;
 		default:
 			break;
@@ -508,7 +606,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	}
 	if (prev == RPAREN)
 	{
-		bool prev_was_cast = is_type_name_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == ASTERISK || ctx.prev_prev_token.kind == RBRACKET;
+		bool prev_was_cast = ctx.last_rparen_was_cast;
 
 		if (prev_was_cast)
 		{
@@ -539,11 +637,19 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		{
 			return false;
 		}
-		if (is_type_name_token(ctx.prev_prev_token.kind) || (ctx.prev_prev_token.kind == RBRACE && ctx.generic_depth > 0))
+
+		sz k = ctx.token_idx > 0 ? ctx.token_idx - 1 : 0;
+		while (k > 0 && ctx.tokens[k - 1].kind == ASTERISK)
+		{
+			k--;
+		}
+		TokenKind before_stars = k > 0 ? ctx.tokens[k - 1].kind : ERROR;
+		if (is_type_name_token(before_stars) || before_stars == RBRACKET || (before_stars == RBRACE && ctx.generic_depth > 0))
 		{
 			if (is_word_token(curr)) return true;
 			return false;
 		}
+
 		if (is_prefix_unary_context(ctx.prev_prev_token.kind) || (ctx.prev_prev_token.kind == RPAREN && ctx.last_rparen_was_cast) || ctx.prev_prev_token.kind == RETURN || is_control_or_statement_keyword(ctx.prev_prev_token.kind))
 		{
 			return false;
@@ -598,15 +704,15 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		}
 		return true;
 	}
-	// Dual-use binary operators in operand context: x + y, x - y, x & y, x * y
-	if (curr == PLUS || curr == MINUS)
+	// Dual-use binary operators in operand context: x + y, x - y, x & y, x * y, x ^ y
+	if (curr == PLUS || curr == MINUS || curr == BIT_XOR)
 	{
 		if (is_expr_operand_end(prev))
 		{
 			return true;
 		}
 	}
-	if (prev == PLUS || prev == MINUS || prev == ASTERISK || prev == AMP)
+	if (prev == PLUS || prev == MINUS || prev == ASTERISK || prev == AMP || prev == BIT_XOR)
 	{
 		bool prev_was_cast = (ctx.prev_prev_token.kind == RPAREN && ctx.last_rparen_was_cast);
 		if (!is_prefix_unary_context(ctx.prev_prev_token.kind) &&
@@ -615,10 +721,10 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		!is_control_or_statement_keyword(ctx.prev_prev_token.kind) &&
 		!is_type_name_token(ctx.prev_prev_token.kind))
 		{
-			return true;  // binary +, -, *, &
+			return true;  // binary +, -, *, &, ^
 		}
 	}
-	if ((prev == TYPE_IDENT || is_type_name_token(prev)) && curr == LPAREN && ctx.is_decl_header)
+	if (prev == TYPE_IDENT && curr == LPAREN && ctx.is_type_decl)
 	{
 		return true;
 	}
@@ -650,7 +756,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		if (prev == RBRACE) return false;
 		if (prev == COMMA) return true;
 		if (prev == RETURN) return true;
-		if (prev == COLON) return true;
+		if (prev == COLON) return ctx.bracket_depth == 0;
 		if (is_strictly_binary_operator(prev)) return true;
 		if (is_control_or_statement_keyword(prev)) return true;
 		return false;
@@ -663,7 +769,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		if (ctx.ct_foreach_colons == 1) return true;
 		if (ctx.bracket_depth > 0)
 		{
-			if (prev == LBRACKET || ctx.next_token.kind == RBRACKET) return false;
+			if (prev == LBRACKET || ctx.next_token.kind == RBRACKET || ctx.next_token.kind == BIT_XOR) return false;
 			return true;
 		}
 		if (ctx.foreach_paren_depth > 0) return true;
@@ -680,9 +786,12 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	if (prev == COLON)
 	{
 		if (curr == COLON || curr == SCOPE) return false;
-		if (ctx.bracket_depth > 0 && ctx.prev_prev_token.kind == LBRACKET)
+		if (ctx.bracket_depth > 0)
 		{
-			return false;
+			if (ctx.prev_prev_token.kind == LBRACKET || curr == BIT_XOR || curr == LPAREN)
+			{
+				return false;
+			}
 		}
 		return true;
 	}
@@ -729,8 +838,11 @@ FormattingOptions options
 			.buffer = full_buffer,
 			.line_offsets = line_offsets,
 			.options = options,
+			.tokens = tokens,
+			.token_idx = 0,
 			.indent_level = base_indent,
 			.paren_depth = 0,
+			.multiline_paren_depth = 0,
 			.bracket_depth = 0,
 			.for_paren_depth = 0,
 			.foreach_paren_depth = 0,
@@ -763,6 +875,7 @@ FormattingOptions options
 			ctx.curr_token = tok;
 			ctx.curr_kind = tok.kind;
 			ctx.next_token = next_tok;
+			ctx.token_idx = i;
 			// Top-level module declarations reset indent baseline to 0
 			if (tok.kind == MODULE && ctx.brace_stack_len == 0)
 			{
@@ -1028,6 +1141,11 @@ FormattingOptions options
 
 			if (tok.kind == RPAREN)
 			{
+				if (ctx.multiline_paren_depth > 0)
+				{
+					ctx.multiline_paren_depth--;
+					if (ctx.indent_level > 0) ctx.indent_level--;
+				}
 				if (ctx.paren_depth > 0) ctx.paren_depth--;
 				if (ctx.for_paren_depth > 0 && ctx.paren_depth < ctx.for_paren_depth)
 				{
@@ -1038,7 +1156,7 @@ FormattingOptions options
 					ctx.foreach_paren_depth = 0;
 				}
 
-				bool was_cast = is_type_name_token(ctx.prev_kind) || ctx.prev_kind == ASTERISK || ctx.prev_kind == RBRACKET;
+				bool was_cast = is_paren_cast(ctx.tokens, i);
 				ctx.last_rparen_was_cast = was_cast;
 			}
 
@@ -1064,7 +1182,7 @@ FormattingOptions options
 				int line_diff = tok.range.start.line - ctx.prev_token.range.end.line;
 				if (line_diff >= 2)
 				{
-					if (ctx.at_line_start)
+					if (ctx.at_line_start || tok.kind == LBRACE)
 					{
 						newline(&ctx, 1);
 					}
@@ -1082,7 +1200,9 @@ FormattingOptions options
 			if (tok.kind == LBRACE)
 			{
 				ctx.ternary_depth = 0;
-				bool is_decl_block = (ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) || is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+				bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
+					(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
+					is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
 
@@ -1112,21 +1232,7 @@ FormattingOptions options
 			}
 			else if (should_space_between(&ctx, ctx.prev_kind, tok.kind))
 			{
-				int col_diff = (i > start_idx && tok.range.start.line == ctx.prev_token.range.end.line)
-				? (tok.range.start.column - ctx.prev_token.range.end.column)
-				: 1;
-
-				if (col_diff > 1 && col_diff <= 32)
-				{
-					for (int s = 0; s < col_diff; s++)
-					{
-						ctx.out.append_char(' ');
-					}
-				}
-				else
-				{
-					ctx.out.append_char(' ');
-				}
+				ctx.out.append_char(' ');
 			}
 
 			ctx.out.append(tok.value);
@@ -1199,6 +1305,33 @@ FormattingOptions options
 			if (tok.kind == LPAREN)
 			{
 				ctx.paren_depth++;
+				int p_depth = 1;
+				bool paren_multiline = false;
+				for (sz j = i + 1; j < tokens.len; j++)
+				{
+					if (tokens[j].kind == LPAREN)
+					{
+						p_depth++;
+					}
+					else if (tokens[j].kind == RPAREN)
+					{
+						p_depth--;
+						if (p_depth == 0)
+						{
+							paren_multiline = tokens[j].range.start.line > tok.range.start.line;
+							break;
+						}
+					}
+					else if (tokens[j].kind == EOF)
+					{
+						break;
+					}
+				}
+				if (paren_multiline)
+				{
+					ctx.multiline_paren_depth++;
+					ctx.indent_level++;
+				}
 				if (ctx.prev_kind == FOR || ctx.prev_kind == CT_FOR)
 				{
 					ctx.for_paren_depth = ctx.paren_depth;
@@ -1212,7 +1345,9 @@ FormattingOptions options
 			if (tok.kind == LBRACE)
 			{
 				ctx.ternary_depth = 0;
-				bool is_decl_block = (ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) || is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+				bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
+					(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
+					is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
 				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
 				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
 

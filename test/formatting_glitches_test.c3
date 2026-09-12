@@ -507,3 +507,96 @@ enum SdlFileDialogType : CInt
 	assert(formatted.contains("enum SdlFileDialogType : CInt\n{"));
 	assert(formatted.contains("\tOPENFILE,\n\tSAVEFILE,\n\tOPENFOLDER,\n}"));
 }
+
+fn void test_whitespace_collapse_between_words() @test
+{
+	String code = `fn void foo  (int       foo) {}
+alias  MyFn   = fn    void   (int    i);
+struct Foo {
+    bool    bar;
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("fn void foo(int foo) {}"));
+	assert(formatted.contains("alias MyFn = fn void(int i);"));
+	assert(formatted.contains("struct Foo\n{\n\tbool bar;\n}"));
+}
+
+fn void test_pointer_to_pointer_following_space() @test
+{
+	String code = `fn void foo(int**   bar) {}
+fn void baz(int***   qux) {}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("fn void foo(int** bar) {}"));
+	assert(formatted.contains("fn void baz(int*** qux) {}"));
+}
+
+fn void test_multiline_fn_params_indentation() @test
+{
+	String code = `fn void foo(
+	int foo,
+	    int bar
+)
+{
+	io::print("test");
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("fn void foo(\n\tint foo,\n\tint bar\n)"));
+}
+
+fn void test_open_brace_collapses_empty_newlines() @test
+{
+	String code = `constdef Foo
+
+{
+	BAR = 1,
+}
+`;
+	String formatted = format_code(code);
+	assert(!formatted.contains("constdef Foo\n\n{"));
+	assert(formatted.contains("constdef Foo\n{"));
+}
+
+fn void test_bitstruct_designated_initializer_spacing() @test
+{
+	String code = `bitstruct Foo
+{
+	bool bar: 0;
+	bool baz: 1;
+}
+
+const Foo FLAGS = {  .bar,   .baz       };
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("const Foo FLAGS = { .bar, .baz };"));
+}
+
+fn void test_binary_op_after_parenthesized_expr() @test
+{
+	String code = `fn void asdasd() {
+	y[1] = (z - y[0]) + 2 * PIO2_1T;
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("(z - y[0]) + 2 * PIO2_1T;"));
+}
+
+fn void test_binary_ops_chained_subscripts_and_reverse_index() @test
+{
+	String code = `fn void run() {
+	self.state[2] ^= (((self.state[0] + self.state[3]) * K[0]) + self.state[1]).rotr(21) * K[1];
+	char[] final_data = self.stomach[:(self.bytes % 32)];
+	final_data = final_data[16:^16];
+	final_data = final_data[8 : ^8];
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("(((self.state[0] + self.state[3]) * K[0]) + self.state[1])"));
+	assert(formatted.contains("self.stomach[:(self.bytes % 32)];"));
+	assert(formatted.contains("final_data[16:^16];"));
+	assert(formatted.contains("^8];"));
+	assert(!formatted.contains("^ 8"));
+	assert(!formatted.contains("^ 16"));
+}
