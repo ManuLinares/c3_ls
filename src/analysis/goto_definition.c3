@@ -79,6 +79,14 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 	{
 		target_range = decl_node.as(FaultDecl).name.range;
 	}
+	else if (decl_node.kind == TRY_EXPR && decl_node.as(TryExpr).variable)
+	{
+		target_range = decl_node.as(TryExpr).variable.range;
+	}
+	else if (decl_node.kind == CATCH_EXPR && decl_node.as(CatchExpr).variable)
+	{
+		target_range = decl_node.as(CatchExpr).variable.range;
+	}
 
 	LspLocation[] locations = alloc::alloc_array(tmem, LspLocation, 1);
 	locations[0] = {

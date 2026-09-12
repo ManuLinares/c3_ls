@@ -42,36 +42,30 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 		case TRY_EXPR:
 			{
 				TryExpr* te = c.as(TryExpr);
-				if (te.variable && te.variable.kind == IDENT_EXPR)
+				if (!te.variable || te.variable.kind != IDENT_EXPR) return RECURSE;
+				IdentExpr* ie = te.variable.as(IdentExpr);
+				if (!ie.ident || ie.ident.text != ctx.name) return RECURSE;
+				ctx.found_decl = c;
+				if (te.type)
 				{
-					IdentExpr* ie = te.variable.as(IdentExpr);
-					if (ie.ident && ie.ident.text == ctx.name)
-					{
-						ctx.found_decl = c;
-						if (te.type)
-						{
-							ctx.found_type = cursor::spelling(te.type, tmem);
-						}
-						return BREAK;
-					}
+					ctx.found_type = cursor::spelling(te.type, tmem);
 				}
+				else if (te.init)
+				{
+					String itype = type_of(ctx.context, ctx.sf, te.init);
+					ctx.found_type = itype.trim_right("?*& \t");
+				}
+				return BREAK;
 			}
 		case CATCH_EXPR:
 			{
 				CatchExpr* ce = c.as(CatchExpr);
-				if (ce.variable && ce.variable.kind == IDENT_EXPR)
-				{
-					IdentExpr* ie = ce.variable.as(IdentExpr);
-					if (ie.ident && ie.ident.text == ctx.name)
-					{
-						ctx.found_decl = c;
-						if (ce.type)
-						{
-							ctx.found_type = cursor::spelling(ce.type, tmem);
-						}
-						return BREAK;
-					}
-				}
+				if (!ce.variable || ce.variable.kind != IDENT_EXPR) return RECURSE;
+				IdentExpr* ie = ce.variable.as(IdentExpr);
+				if (!ie.ident || ie.ident.text != ctx.name) return RECURSE;
+				ctx.found_decl = c;
+				ctx.found_type = ce.type ? (cursor::spelling(ce.type, tmem) ?: "fault") : "fault";
+				return BREAK;
 			}
 		case FOREACH_STMT:
 			{
@@ -997,40 +991,47 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				CallExpr* call = expr.as(CallExpr);
 				if (!call.callee) return "";
 
-				switch (call.callee.kind)
+				Node* callee_node = null;
+				if (call.callee.kind == ACCESS_EXPR)
 				{
-					case ACCESS_EXPR:
-						{
-							AccessExpr* acc = call.callee.as(AccessExpr);
-							String parent_type = type_of(context, sf, acc.left, effective_loc);
-							String method_name = cursor::spelling(acc.member, tmem);
-							if (parent_type.len > 0 && method_name.len > 0)
-							{
-								Node* mnode = find_method_in_type(context, parent_type, method_name, sf, effective_loc);
-								if (mnode && mnode.kind == FN_DECL)
-								{
-									FnDecl* fd = mnode.as(FnDecl);
-									if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? "";
-								}
-							}
-						}
-					case IDENT_EXPR:
-						{
-							String fn_name = cursor::spelling(call.callee, tmem);
-							if (context && context.registry)
-							{
-								if (try fn_info = context.registry.functions.get(fn_name))
-								{
-									if (fn_info.node && fn_info.node.kind == FN_DECL && (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod)))
-									{
-										FnDecl* fd = fn_info.node.as(FnDecl);
-										if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? "";
-									}
-								}
-							}
-						}
-					default:
-						break;
+					AccessExpr* acc = call.callee.as(AccessExpr);
+					String parent_type = type_of(context, sf, acc.left, effective_loc);
+					String method_name = cursor::spelling(acc.member, tmem);
+					if (parent_type.len > 0 && method_name.len > 0)
+					{
+						callee_node = find_method_in_type(context, parent_type, method_name, sf, effective_loc);
+					}
+					if (!callee_node)
+					{
+						String recv_name = cursor::spelling(acc.left, tmem);
+						String full_name = string::tformat("%s.%s", recv_name, method_name);
+						callee_node = resolve_callee_by_name(context, sf, full_name, effective_loc);
+					}
+				}
+				else if (call.callee.kind == IDENT_EXPR)
+				{
+					IdentExpr* ie = call.callee.as(IdentExpr);
+					String iname = ie.ident ? ie.ident.text : "";
+					String full_name = iname;
+					if (ie.path_expr && ie.path_expr.kind == PATH_EXPR)
+					{
+						PathExpr* pe = ie.path_expr.as(PathExpr);
+						String ptext = (pe.path && pe.path.text.len > 0) ? pe.path.text : "";
+						full_name = string::tformat("%s%s", ptext, iname);
+					}
+					callee_node = resolve_callee_by_name(context, sf, full_name, effective_loc);
+				}
+
+				if (!callee_node) return "";
+				if (callee_node.kind == FN_DECL)
+				{
+					FnDecl* fd = callee_node.as(FnDecl);
+					if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+				}
+				else if (callee_node.kind == MACRO_DECL)
+				{
+					MacroDecl* md = callee_node.as(MacroDecl);
+					if (try rt = md.ret_type.get()) return cursor::raw_type_identifier(rt) ?? cursor::spelling(rt, tmem);
 				}
 				return "";
 			}
@@ -1667,15 +1668,18 @@ fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String
 	if (try paren_idx = clean.index_of_char('('))
 	{
 		String fn_name = clean[:paren_idx].trim();
-		if (context && context.registry)
+		Node* callee_node = resolve_callee_by_name(context, sf, fn_name, loc);
+		if (callee_node)
 		{
-			if (try fn_info = context.registry.functions.get(fn_name))
+			if (callee_node.kind == FN_DECL)
 			{
-				if (fn_info.node && fn_info.node.kind == FN_DECL)
-				{
-					FnDecl* fd = fn_info.node.as(FnDecl);
-					if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? "";
-				}
+				FnDecl* fd = callee_node.as(FnDecl);
+				if (fd.ret_type) return cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+			}
+			else if (callee_node.kind == MACRO_DECL)
+			{
+				MacroDecl* md = callee_node.as(MacroDecl);
+				if (try rt = md.ret_type.get()) return cursor::raw_type_identifier(rt) ?? cursor::spelling(rt, tmem);
 			}
 		}
 		return "";
@@ -1800,6 +1804,29 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 			if (mac_info.node && (!sf || is_symbol_accessible_from_file(context, sf, mac_info.node, mac_info.mod)))
 			{
 				return mac_info.node;
+			}
+		}
+
+		if (sf)
+		{
+			List{String} imports = get_source_file_imported_modules(sf);
+			foreach (imp : imports)
+			{
+				String imp_qname = string::tformat("%s::%s", imp, callee_name);
+				if (try fn_info = context.registry.functions.get(imp_qname))
+				{
+					if (fn_info.node && (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod)))
+					{
+						return fn_info.node;
+					}
+				}
+				if (try mac_info = context.registry.macros.get(imp_qname))
+				{
+					if (mac_info.node && (!sf || is_symbol_accessible_from_file(context, sf, mac_info.node, mac_info.mod)))
+					{
+						return mac_info.node;
+					}
+				}
 			}
 		}
 	}

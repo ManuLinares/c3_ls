@@ -56,29 +56,30 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 		case TRY_EXPR:
 			{
 				TryExpr* te = c.as(TryExpr);
-				if (te.variable && te.variable.kind == IDENT_EXPR)
+				if (!te.variable || te.variable.kind != IDENT_EXPR) break;
+				IdentExpr* ie = te.variable.as(IdentExpr);
+				String vname = ie.ident ? ie.ident.text : "";
+				if (vname.len == 0 || (lctx.ctx.prefix.len > 0 && !vname.starts_with(lctx.ctx.prefix))) break;
+				if (!lctx.seen.add(vname)) break;
+
+				String vtype = te.type ? (cursor::spelling(te.type, tmem) ?: "var") : "var";
+				if (vtype == "var" && te.init && lctx.ctx.ws && lctx.ctx.ws.ctx)
 				{
-					IdentExpr* ie = te.variable.as(IdentExpr);
-					String vname = ie.ident ? ie.ident.text : "";
-					if (vname.len > 0 && (lctx.ctx.prefix.len == 0 || vname.starts_with(lctx.ctx.prefix)))
-					{
-						if (lctx.seen.add(vname))
-						{
-							String vtype = te.type ? (cursor::spelling(te.type, tmem) ?: "var") : "var";
-							lctx.items.push(
-							{
-								.label = vname,
-								.kind = VARIABLE,
-								.detail = vtype,
-								.insertText = vname,
-								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname),
-								.data = string::tformat("local:%s", vname)
-							}
-							);
-						}
-					}
+					String itype = query::type_of(lctx.ctx.ws.ctx, lctx.ctx.sf, te.init, lctx.loc);
+					itype = itype.trim_right("?*& \t");
+					if (itype.len > 0) vtype = itype;
 				}
+				lctx.items.push(
+				{
+					.label = vname,
+					.kind = VARIABLE,
+					.detail = vtype,
+					.insertText = vname,
+					.filterText = vname,
+					.sortText = string::tformat("0001_%s", vname),
+					.data = string::tformat("local:%s", vname)
+				}
+				);
 			}
 		case CATCH_EXPR:
 			{

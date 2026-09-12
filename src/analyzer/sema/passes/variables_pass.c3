@@ -345,6 +345,55 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 			break;
 	}
 
+	if (node.kind == TRY_EXPR)
+	{
+		TryExpr* te = node.as(TryExpr);
+		if (te.variable && te.variable.kind == IDENT_EXPR)
+		{
+			IdentExpr* ie = te.variable.as(IdentExpr);
+			if (ie.ident && ie.ident.text.len > 0)
+			{
+				if (te.type)
+				{
+					node.resolved_type = resolve_ast_type(ctx, te.type);
+				}
+				else if (te.init)
+				{
+					String itype = query::type_of(ctx.context, ctx.context.current_source_file, te.init);
+					itype = itype.trim_right("?*& \t");
+					if (itype.len > 0)
+					{
+						Node* ty_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, itype);
+						lookup::register_type(ctx.context.lookup, ctx.context.allocator, itype, ty_node);
+						node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, itype);
+					}
+				}
+				scope::add_variable(ctx.scope, ctx.allocator, ie.ident.text, node);
+			}
+		}
+	}
+
+	if (node.kind == CATCH_EXPR)
+	{
+		CatchExpr* ce = node.as(CatchExpr);
+		if (ce.variable && ce.variable.kind == IDENT_EXPR)
+		{
+			IdentExpr* ie = ce.variable.as(IdentExpr);
+			if (ie.ident && ie.ident.text.len > 0)
+			{
+				if (ce.type)
+				{
+					node.resolved_type = resolve_ast_type(ctx, ce.type);
+				}
+				else
+				{
+					node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "fault");
+				}
+				scope::add_variable(ctx.scope, ctx.allocator, ie.ident.text, node);
+			}
+		}
+	}
+
 	if VAR: (node.kind == VAR_DECL)
 	{
 		VarDecl* decl = node.as(VarDecl);

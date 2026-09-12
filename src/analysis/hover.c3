@@ -252,6 +252,10 @@ fn String format_node_signature(Node* node, String name)
 			{
 				TryExpr* te = node.as(TryExpr);
 				String vtype = cursor::spelling(te.type, tmem) ?: "var";
+				if (vtype == "var" && node.resolved_type && node.resolved_type.name.len > 0)
+				{
+					vtype = node.resolved_type.name;
+				}
 				buf.appendf("try %s %s", vtype, name);
 			}
 		case CATCH_EXPR:

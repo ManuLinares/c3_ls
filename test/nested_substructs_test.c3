@@ -111,3 +111,55 @@ fn void run() {
 	assert(href_locs.len > 0);
 	assert(href_locs[0].range.start.line == 15);
 }
+
+fn void test_nested_union_with_doc_comment_above()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct EcsQueryIter { int q; }
+struct EcsPageIter { int p; }
+struct EcsWorkerIter { int w; }
+struct EcsEachIter { int e; }
+
+struct EcsIter {
+	<*
+	 Private iterator data used by iterator implementations to keep track of
+	 progress.
+	*>
+	union {
+		EcsQueryIter query;
+		EcsPageIter page;
+		EcsWorkerIter worker;
+		EcsEachIter each;
+	}
+
+	<* Query applied after matching a table. *>
+	void* entity_iter;
+}
+
+fn void test() {
+	EcsIter it;
+	it.query.q = 10;
+	it.page.p = 20;
+}
+`;
+
+	proj.workspace.process_file("/virtual/nested_union_doc.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/nested_union_doc.c3");
+	defer doc_uri.free();
+
+	LspDiagnostic[] diags = proj.workspace.get_diagnostics("/virtual/nested_union_doc.c3");
+	test::eq(diags.len, 0);
+
+	LspPosition query_pos = { .line = 25, .character = 4 };
+	String h_query = hover::hover(&proj, doc_uri, query_pos)!!;
+	assert(h_query.contains("EcsQueryIter query"));
+
+	LspLocation[] locs_query = goto_definition::goto_definition(&proj, doc_uri, query_pos)!!;
+	assert(locs_query.len > 0);
+	assert(locs_query[0].range.start.line == 13);
+}

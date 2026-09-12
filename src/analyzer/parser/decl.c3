@@ -1005,6 +1005,16 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 		if (consume(ctx, EOS)) continue;
 
 		int start_pos = ctx.pos;
+		Node* member_contract = null;
+		if (ctx.is(DOCS_START))
+		{
+			member_contract = parse_contract_decl(scope);
+		}
+
+		ParseFlags struct_flags;
+		struct_flags.is_struct = true;
+		struct_flags.is_inline = consume(ctx, INLINE);
+
 		if (ctx.is(STRUCT) || ctx.is(UNION) || ctx.is(BITSTRUCT))
 		{
 			Node* sub_decl;
@@ -1020,6 +1030,10 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 
 			if (sub_decl && sub_decl.kind != ERROR)
 			{
+				if (member_contract)
+				{
+					sub_decl.as(StructDecl).contract.set(member_contract);
+				}
 				tail_node.as(StructDecl).next = sub_decl;
 				while (tail_node.as(StructDecl).next != null)
 				{
@@ -1029,11 +1043,15 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 		}
 		else
 		{
-			ParseFlags struct_flags;
-			struct_flags.is_struct = true;
-			struct_flags.is_inline = consume(ctx, INLINE);
 			Node* field = parse_var_decl(scope.with_only_flags(struct_flags), null);
-			if (field) fields.push(field);
+			if (field)
+			{
+				if (member_contract && field.kind == VAR_DECL)
+				{
+					field.as(VarDecl).contract.set(member_contract);
+				}
+				fields.push(field);
+			}
 		}
 
 		if (ctx.pos == start_pos)
