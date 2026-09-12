@@ -172,18 +172,30 @@ fn void CTranslationUnit.free(&self)
 
 fn String deduplicate_name(HashSet{String}* seen, String name, Allocator allocator)
 {
-	if (seen.add(name))
+	String base = name;
+	if (base.len > MAX_IDENTIFIER_LEN)
 	{
-		return name;
+		base = base[:MAX_IDENTIFIER_LEN];
 	}
+
+	if (seen.add(base))
+	{
+		return base;
+	}
+
 	int counter = 2;
-	String unique_name = string::format(allocator, "%s_%d", name, counter);
-	while (!seen.add(unique_name))
+	while (true)
 	{
+		String suffix = string::format(tmem, "_%d", counter);
+		sz max_base_len = MAX_IDENTIFIER_LEN > suffix.len ? MAX_IDENTIFIER_LEN - suffix.len : (sz)0;
+		String trimmed_base = base.len > max_base_len ? base[:max_base_len] : base;
+		String unique_name = string::format(allocator, "%s%s", trimmed_base, suffix);
+		if (seen.add(unique_name))
+		{
+			return unique_name;
+		}
 		counter++;
-		unique_name = string::format(allocator, "%s_%d", name, counter);
 	}
-	return unique_name;
 }
 
 fn List{String} clean_c_type_words(String s)
