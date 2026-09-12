@@ -543,6 +543,51 @@ fn CParam parse_param_decl(
 	};
 }
 <*
+ Strips function/variable prefix based on options or module name.
+*>
+fn String strip_symbol_prefix(String name, BindgenOptions options) @local
+{
+	String c3_name = name;
+
+	if (options.strip_func_prefix.len > 0)
+	{
+		String p = to_snake_case(tmem, options.strip_func_prefix).trim_right("_");
+		String p_with_underscore = string::tformat("%s_", p);
+		if (c3_name.starts_with(p_with_underscore))
+		{
+			c3_name = c3_name[p_with_underscore.len..];
+		}
+		else if (c3_name.starts_with(p))
+		{
+			c3_name = c3_name[p.len..].strip_prefix("_");
+		}
+	}
+	else if (options.module_name.len > 0)
+	{
+		String mod_lower = to_snake_case(tmem, options.module_name).trim_right("_");
+		String mod_prefix = string::tformat("%s_", mod_lower);
+		String base_mod = mod_lower.trim_right("0123456789_");
+		String base_prefix = base_mod.len > 0 ? string::tformat("%s_", base_mod) : "";
+
+		if (c3_name.starts_with(mod_prefix))
+		{
+			c3_name = c3_name[mod_prefix.len..];
+		}
+		else if (base_prefix.len > 0 && c3_name.starts_with(base_prefix))
+		{
+			c3_name = c3_name[base_prefix.len..];
+		}
+	}
+
+	if (c3_name.len == 0 || (c3_name[0] >= '0' && c3_name[0] <= '9'))
+	{
+		c3_name = name;
+	}
+
+	return c3_name;
+}
+
+<*
  Parses a Clang VarDecl object.
 *>
 fn void parse_var_decl(
@@ -580,7 +625,8 @@ fn void parse_var_decl(
 
 	String c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, false, tinfo.desugared_type);
 	String snake_name = to_snake_case(tmem, c_name);
-	String c3_name = sanitize_identifier(allocator, snake_name);
+	String c3_name = strip_symbol_prefix(snake_name, options);
+	c3_name = sanitize_identifier(allocator, c3_name);
 
 	HashSet{String} seen_var_names;
 	seen_var_names.tinit();
@@ -645,43 +691,7 @@ fn void parse_function_decl(
 	String ret_c3 = map_c_type_to_c3(allocator, ret_c, options.type_prefix, false, ret_desugared);
 
 	String snake_name = to_snake_case(tmem, c_name);
-	String c3_name = snake_name;
-
-	if (options.strip_func_prefix.len > 0)
-	{
-		String p = to_snake_case(tmem, options.strip_func_prefix).trim_right("_");
-		String p_with_underscore = string::tformat("%s_", p);
-		if (c3_name.starts_with(p_with_underscore))
-		{
-			c3_name = c3_name[p_with_underscore.len..];
-		}
-		else if (c3_name.starts_with(p))
-		{
-			c3_name = c3_name[p.len..].strip_prefix("_");
-		}
-	}
-	else if (options.module_name.len > 0)
-	{
-		String mod_lower = to_snake_case(tmem, options.module_name).trim_right("_");
-		String mod_prefix = string::tformat("%s_", mod_lower);
-		String base_mod = mod_lower.trim_right("0123456789_");
-		String base_prefix = base_mod.len > 0 ? string::tformat("%s_", base_mod) : "";
-
-		if (c3_name.starts_with(mod_prefix))
-		{
-			c3_name = c3_name[mod_prefix.len..];
-		}
-		else if (base_prefix.len > 0 && c3_name.starts_with(base_prefix))
-		{
-			c3_name = c3_name[base_prefix.len..];
-		}
-	}
-
-	if (c3_name.len == 0 || (c3_name[0] >= '0' && c3_name[0] <= '9'))
-	{
-		c3_name = snake_name;
-	}
-
+	String c3_name = strip_symbol_prefix(snake_name, options);
 	c3_name = sanitize_identifier(allocator, c3_name);
 
 	HashSet{String} seen_fn_names;
