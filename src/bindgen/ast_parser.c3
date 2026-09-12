@@ -179,7 +179,12 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 *>
 fn String extract_function_return_type(String qual_type) @local
 {
-	String s = qual_type.trim();
+	String s = strip_clang_attributes(qual_type).trim();
+	if (try last_paren = s.rindex_of_char(')'))
+	{
+		s = s[:last_paren + 1].trim();
+	}
+
 	if (!s.ends_with(")"))
 	{
 		return "void";
@@ -316,7 +321,11 @@ fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOp
 *>
 fn String parse_function_pointer_type(Allocator allocator, String qual_type, BindgenOptions options) @local
 {
-	String s = qual_type.trim();
+	String s = strip_clang_attributes(qual_type).trim();
+	if (try last_paren = s.rindex_of_char(')'))
+	{
+		s = s[:last_paren + 1].trim();
+	}
 	String ret_c = "void";
 	String rest = "";
 

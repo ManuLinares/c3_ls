@@ -205,7 +205,7 @@ fn List{String} clean_c_type_words(String s)
 	String[] words = s.tsplit(" ");
 	foreach (w : words)
 	{
-		String tw = w.trim();
+		String tw = w.trim().trim_right(",;");
 		if (tw.len == 0)
 		{
 			continue;
@@ -606,7 +606,7 @@ fn bool is_fundamental_c_type(String s) => map_c_standard_type(s).len > 0;
 *>
 fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String type_prefix)
 {
-	if (raw_name.len == 0 || raw_name.contains("(") || raw_name.contains(")"))
+	if (raw_name.len == 0 || raw_name.contains("(") || raw_name.contains(")") || raw_name.contains(",") || raw_name.contains(";"))
 	{
 		return "void";
 	}

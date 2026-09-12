@@ -2274,3 +2274,43 @@ fn void test_invalid_typedef_and_struct_name_collision()
 	assert(!code.contains("alias AgAccount = int;"));
 	assert(code.contains("extern fn AgManager* get_manager(AgAccount* account) @cname(\"ag_account_get_manager\");"));
 }
+
+fn void test_function_with_trailing_calling_convention_attribute()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "FunctionDecl",
+				"name": "D3D10CreateDevice1",
+				"loc": { "file": "d3d10_1.h" },
+				"type": {
+					"qualType": "HRESULT (void *, int, void *, unsigned int, int, unsigned int, void **) __attribute__((ms_abi))"
+				},
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "adapter", "type": { "qualType": "void *" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "d3d10_1.h",
+		.module_name = "d3d10_1"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("extern fn Hresult d3d10_create_device1(void* adapter) @cname(\"D3D10CreateDevice1\");"));
+	assert(!code.contains("Attribute"));
+	assert(!code.contains("D3D10DRIVERTYPE"));
+}
