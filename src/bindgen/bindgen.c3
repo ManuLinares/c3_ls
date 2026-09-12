@@ -116,9 +116,10 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 
 		if (is_cli)
 		{
-			io::printfn("Generated C3 bindings: '%s' (%d functions, %d structs, %d enums, %d constdefs, %d aliases).",
+			io::printfn("Generated C3 bindings: '%s' (%d functions, %d variables, %d structs, %d enums, %d constdefs, %d aliases).",
 				options.output_path,
 				(int)tu.functions.len(),
+				(int)tu.variables.len(),
 				(int)tu.structs.len(),
 				(int)enum_count,
 				(int)constdef_count,
@@ -127,9 +128,10 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		}
 		else
 		{
-			log::info("Generated C3 bindings: '%s' (%d functions, %d structs, %d enums, %d constdefs, %d aliases).",
+			log::info("Generated C3 bindings: '%s' (%d functions, %d variables, %d structs, %d enums, %d constdefs, %d aliases).",
 				options.output_path,
 				(int)tu.functions.len(),
+				(int)tu.variables.len(),
 				(int)tu.structs.len(),
 				(int)enum_count,
 				(int)constdef_count,

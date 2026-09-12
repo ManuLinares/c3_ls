@@ -126,6 +126,18 @@ struct CConstant
 }
 
 <*
+ Global variable declaration.
+*>
+struct CVariable
+{
+	String c_name;
+	String c3_name;
+	String c_type;
+	String c3_type;
+	String comment;
+}
+
+<*
  Complete parsed translation unit containing all extracted C symbols.
 *>
 struct CTranslationUnit
@@ -134,6 +146,7 @@ struct CTranslationUnit
 	List{CTypedef} typedefs;
 	List{CEnum} enums;
 	List{CStruct} structs;
+	List{CVariable} variables;
 	List{CFunction} functions;
 }
 
@@ -143,6 +156,7 @@ fn void CTranslationUnit.init(&self, Allocator allocator)
 	self.typedefs.init(allocator);
 	self.enums.init(allocator);
 	self.structs.init(allocator);
+	self.variables.init(allocator);
 	self.functions.init(allocator);
 }
 
@@ -152,6 +166,7 @@ fn void CTranslationUnit.free(&self)
 	self.typedefs.free();
 	self.enums.free();
 	self.structs.free();
+	self.variables.free();
 	self.functions.free();
 }
 

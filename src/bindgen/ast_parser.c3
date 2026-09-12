@@ -543,6 +543,63 @@ fn CParam parse_param_decl(
 	};
 }
 <*
+ Parses a Clang VarDecl object.
+*>
+fn void parse_var_decl(
+	Allocator allocator,
+	CTranslationUnit* tu,
+	Object* node,
+	BindgenOptions options,
+	HashSet{String}* seen_names,
+	HashSet{String}* target_types,
+	HashMap{String, String}* external_typedefs,
+	HashMap{String, Object*}* external_records,
+	HashMap{String, Object*}* external_enums,
+	HashSet{String}* used_external_types
+) @local
+{
+	if (node.get_bool("isInvalid") ?? false)
+	{
+		return;
+	}
+
+	String c_name = node.get_string("name") ?? "";
+	if (c_name.len == 0 || !seen_names.add(c_name))
+	{
+		return;
+	}
+
+	RawTypeInfo tinfo = extract_type_info(node);
+	String c_type = tinfo.qual_type;
+	if (c_type == "void")
+	{
+		return;
+	}
+
+	track_external_type_usage(c_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
+
+	String c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, false, tinfo.desugared_type);
+	String snake_name = to_snake_case(tmem, c_name);
+	String c3_name = sanitize_identifier(allocator, snake_name);
+
+	HashSet{String} seen_var_names;
+	seen_var_names.tinit();
+	for (sz i = 0; i < tu.variables.len(); i++)
+	{
+		seen_var_names.add(tu.variables.get_ref(i).c3_name);
+	}
+	c3_name = deduplicate_name(&seen_var_names, c3_name, allocator);
+
+	tu.variables.push({
+		.c_name = c_name.copy(allocator),
+		.c3_name = c3_name,
+		.c_type = c_type.copy(allocator),
+		.c3_type = c3_type,
+		.comment = ""
+	});
+}
+
+<*
  Parses a Clang FunctionDecl object.
 *>
 fn void parse_function_decl(
@@ -1389,6 +1446,8 @@ fn void parse_clang_ast_json(
 		{
 			case "FunctionDecl":
 				parse_function_decl(allocator, tu, node, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &used_external_types);
+			case "VarDecl":
+				parse_var_decl(allocator, tu, node, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &used_external_types);
 			case "RecordDecl":
 				{
 					String c_name = node.get_string("name") ?? "";

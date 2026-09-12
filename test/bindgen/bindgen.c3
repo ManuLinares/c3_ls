@@ -2067,3 +2067,55 @@ fn void test_enum_and_struct_name_collision_deduplication()
 	assert(code.contains("struct StemmerEncoding_2\n{"));
 	assert(!code.contains("struct StemmerEncoding\n{"));
 }
+
+fn void test_extern_variables_emission()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "_ffi_type",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "test_ffi.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "size", "type": { "qualType": "size_t" } }
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "ffi_type",
+				"loc": { "file": "test_ffi.h" },
+				"type": { "qualType": "struct _ffi_type" }
+			},
+			{
+				"kind": "VarDecl",
+				"name": "ffi_type_void",
+				"loc": { "file": "test_ffi.h" },
+				"type": { "qualType": "ffi_type" }
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test_ffi.h",
+		.module_name = "test_ffi"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	test::eq(tu.variables.len(), 1);
+	test::eq(tu.variables.get(0).c3_name, "ffi_type_void");
+	test::eq(tu.variables.get(0).c3_type, "FfiType");
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("extern FfiType ffi_type_void @cname(\"ffi_type_void\");"));
+}

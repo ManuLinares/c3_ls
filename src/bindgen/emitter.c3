@@ -522,6 +522,11 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 		}
 	}
 
+	foreach (v : tu.variables)
+	{
+		record_missing_type(&known_types, &missing_structs, v.c3_type);
+	}
+
 	foreach (fn_decl : tu.functions)
 	{
 		record_missing_type(&known_types, &missing_structs, fn_decl.ret_type_c3);
@@ -619,6 +624,30 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 }
 
 <*
+ Emits C global variables as C3 extern declarations.
+ @param sb : "String buffer accumulator."
+ @param tu : "Parsed translation unit."
+*>
+fn void emit_variables(DString* sb, CTranslationUnit* tu) @local
+{
+	if (tu.variables.len() == 0)
+	{
+		return;
+	}
+
+	HashSet{String} seen_var_names;
+	seen_var_names.tinit();
+
+	sb.append("// Global Variables\n");
+	foreach (v : tu.variables)
+	{
+		String vname = deduplicate_name(&seen_var_names, v.c3_name, tmem);
+		sb.appendf("extern %s %s @cname(\"%s\");\n", v.c3_type, vname, v.c_name);
+	}
+	sb.append_char('\n');
+}
+
+<*
  Emits C functions as C3 extern declarations with @cname and @noalias attributes.
  @param sb : "String buffer accumulator."
  @param tu : "Parsed translation unit."
@@ -702,6 +731,7 @@ fn String emit_c3_bindings(Allocator allocator, CTranslationUnit* tu, BindgenOpt
 	emit_typedefs(&sb, tu);
 	emit_enums(&sb, tu);
 	emit_structs(&sb, tu);
+	emit_variables(&sb, tu);
 	emit_functions(&sb, tu);
 
 	return sb.str_view().copy(allocator);
