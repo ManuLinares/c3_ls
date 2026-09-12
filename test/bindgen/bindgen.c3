@@ -2314,3 +2314,46 @@ fn void test_function_with_trailing_calling_convention_attribute()
 	assert(!code.contains("Attribute"));
 	assert(!code.contains("D3D10DRIVERTYPE"));
 }
+
+fn void test_function_and_variable_name_collision()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "VarDecl",
+				"name": "MPD_MINALLOC",
+				"loc": { "file": "test_mpd.h" },
+				"type": { "qualType": "long" }
+			},
+			{
+				"kind": "FunctionDecl",
+				"name": "mpd_minalloc",
+				"loc": { "file": "test_mpd.h" },
+				"type": { "qualType": "void (void *)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "result", "type": { "qualType": "void *" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test_mpd.h",
+		.module_name = "test_mpd"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("extern fn void mpd_minalloc(void* result) @cname(\"mpd_minalloc\");"));
+	assert(code.contains("extern CLong mpd_minalloc_2 @cname(\"MPD_MINALLOC\");"));
+}

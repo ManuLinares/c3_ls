@@ -658,48 +658,22 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 }
 
 <*
- Emits C global variables as C3 extern declarations.
- @param sb : "String buffer accumulator."
- @param tu : "Parsed translation unit."
-*>
-fn void emit_variables(DString* sb, CTranslationUnit* tu) @local
-{
-	if (tu.variables.len() == 0)
-	{
-		return;
-	}
-
-	HashSet{String} seen_var_names;
-	seen_var_names.tinit();
-
-	sb.append("// Global Variables\n");
-	foreach (v : tu.variables)
-	{
-		String vname = deduplicate_name(&seen_var_names, v.c3_name, tmem);
-		sb.appendf("extern %s %s @cname(\"%s\");\n", v.c3_type, vname, v.c_name);
-	}
-	sb.append_char('\n');
-}
-
-<*
  Emits C functions as C3 extern declarations with @cname and @noalias attributes.
  @param sb : "String buffer accumulator."
  @param tu : "Parsed translation unit."
+ @param seen_names : "Shared set tracking value/function names."
 *>
-fn void emit_functions(DString* sb, CTranslationUnit* tu) @local
+fn void emit_functions(DString* sb, CTranslationUnit* tu, HashSet{String}* seen_names) @local
 {
 	if (tu.functions.len() == 0)
 	{
 		return;
 	}
 
-	HashSet{String} seen_fn_names;
-	seen_fn_names.tinit();
-
 	sb.append("// Functions\n");
 	foreach (fn_decl : tu.functions)
 	{
-		String fname = deduplicate_name(&seen_fn_names, fn_decl.c3_name, tmem);
+		String fname = deduplicate_name(seen_names, fn_decl.c3_name, tmem);
 
 		sb.appendf("extern fn %s %s(", fn_decl.ret_type_c3, fname);
 
@@ -744,6 +718,28 @@ fn void emit_functions(DString* sb, CTranslationUnit* tu) @local
 }
 
 <*
+ Emits C global variables as C3 extern declarations.
+ @param sb : "String buffer accumulator."
+ @param tu : "Parsed translation unit."
+ @param seen_names : "Shared set tracking value/function names."
+*>
+fn void emit_variables(DString* sb, CTranslationUnit* tu, HashSet{String}* seen_names) @local
+{
+	if (tu.variables.len() == 0)
+	{
+		return;
+	}
+
+	sb.append("// Global Variables\n");
+	foreach (v : tu.variables)
+	{
+		String vname = deduplicate_name(seen_names, v.c3_name, tmem);
+		sb.appendf("extern %s %s @cname(\"%s\");\n", v.c3_type, vname, v.c_name);
+	}
+	sb.append_char('\n');
+}
+
+<*
  Formats the complete CTranslationUnit into a C3 binding source string.
  Sanitizes the module header identifier.
  @param allocator : "Allocator used for the returned string."
@@ -762,12 +758,15 @@ fn String emit_c3_bindings(Allocator allocator, CTranslationUnit* tu, BindgenOpt
 	String mod_name = sanitize_module_name(allocator, options.module_name.len > 0 ? options.module_name : "c_lib");
 	sb.appendf("module %s;\n\n", mod_name);
 
+	HashSet{String} seen_value_names;
+	seen_value_names.tinit();
+
 	emit_constants(&sb, tu);
 	emit_typedefs(&sb, tu);
 	emit_enums(&sb, tu);
 	emit_structs(&sb, tu);
-	emit_variables(&sb, tu);
-	emit_functions(&sb, tu);
+	emit_functions(&sb, tu, &seen_value_names);
+	emit_variables(&sb, tu, &seen_value_names);
 
 	return sb.str_view().copy(allocator);
 }

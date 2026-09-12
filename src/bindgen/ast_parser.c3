@@ -648,6 +648,10 @@ fn void parse_var_decl(
 	{
 		seen_var_names.add(v.c3_name);
 	}
+	foreach (&fn_item : tu.functions)
+	{
+		seen_var_names.add(fn_item.c3_name);
+	}
 	c3_name = deduplicate_name(&seen_var_names, c3_name, allocator);
 
 	tu.variables.push({
