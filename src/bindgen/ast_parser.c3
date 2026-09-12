@@ -1198,7 +1198,37 @@ fn void parse_typedef_decl(
 				}
 
 				String child_kind = child.get_string("kind") ?? "";
-				if (child_kind == "RecordType")
+
+				if (child_kind == "ElaboratedType")
+				{
+					if (try owned_decl = child.get("ownedTagDecl"))
+					{
+						String tag_kind = owned_decl.get_string("kind") ?? "";
+						String tag_name = owned_decl.get_string("name") ?? "";
+						String tag_id = owned_decl.get_string("id") ?? "";
+
+						if (tag_id.len > 0 && (tag_name.len == 0 || tag_name.starts_with("(unnamed") || tag_name.starts_with("(anonymous")))
+						{
+							if (tag_kind == "RecordDecl")
+							{
+								if (try anon_rec = anon_records.get(tag_id))
+								{
+									parse_record_decl_with_name(allocator, tu, anon_rec, c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
+									return;
+								}
+							}
+							else if (tag_kind == "EnumDecl")
+							{
+								if (try anon_e = anon_enums.get(tag_id))
+								{
+									parse_enum_decl_with_name(allocator, tu, anon_e, c_name, options, seen_names, target_types);
+									return;
+								}
+							}
+						}
+					}
+				}
+				else if (child_kind == "RecordType")
 				{
 					if (try decl_obj = child.get("decl"))
 					{
