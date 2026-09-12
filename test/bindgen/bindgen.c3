@@ -2119,3 +2119,106 @@ fn void test_extern_variables_emission()
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 	assert(code.contains("extern FfiType ffi_type_void @cname(\"ffi_type_void\");"));
 }
+
+fn void test_elaborated_type_anonymous_struct_and_enum()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"id": "0xrec01",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "test_elab.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "val", "type": { "qualType": "int" } }
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "anon_cif",
+				"loc": { "file": "test_elab.h" },
+				"type": { "qualType": "struct anon_cif" },
+				"inner": [
+					{
+						"kind": "ElaboratedType",
+						"ownedTagDecl": { "id": "0xrec01", "kind": "RecordDecl", "name": "" },
+						"inner": [
+							{ "kind": "RecordType", "decl": { "id": "0xrec01", "kind": "RecordDecl", "name": "" } }
+						]
+					}
+				]
+			},
+			{
+				"kind": "EnumDecl",
+				"id": "0xenum01",
+				"loc": { "file": "test_elab.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "STATUS_OK" }
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "anon_status",
+				"loc": { "file": "test_elab.h" },
+				"type": { "qualType": "enum anon_status" },
+				"inner": [
+					{
+						"kind": "ElaboratedType",
+						"ownedTagDecl": { "id": "0xenum01", "kind": "EnumDecl", "name": "" },
+						"inner": [
+							{ "kind": "EnumType", "decl": { "id": "0xenum01", "kind": "EnumDecl", "name": "" } }
+						]
+					}
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "alias_to_cif",
+				"loc": { "file": "test_elab.h" },
+				"type": { "qualType": "anon_cif" },
+				"inner": [
+					{
+						"kind": "ElaboratedType",
+						"inner": [
+							{
+								"kind": "TypedefType",
+								"decl": { "id": "0xtd01", "kind": "TypedefDecl", "name": "anon_cif" }
+							}
+						]
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test_elab.h",
+		.module_name = "test_elab"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	test::eq(tu.structs.len(), 1);
+	test::eq(tu.structs.get(0).c3_name, "AnonCif");
+	test::eq(tu.structs.get(0).fields.len(), 1);
+
+	test::eq(tu.enums.len(), 1);
+	test::eq(tu.enums.get(0).c3_name, "AnonStatus");
+
+	test::eq(tu.typedefs.len(), 1);
+	test::eq(tu.typedefs.get(0).c3_name, "AliasToCif");
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("struct AnonCif\n{\n\tint val;\n}"));
+	assert(code.contains("enum AnonStatus\n{\n\tSTATUS_OK\n}"));
+	assert(code.contains("alias AliasToCif = AnonCif;"));
+}
