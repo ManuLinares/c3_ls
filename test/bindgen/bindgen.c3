@@ -2222,3 +2222,55 @@ fn void test_elaborated_type_anonymous_struct_and_enum()
 	assert(code.contains("enum AnonStatus\n{\n\tSTATUS_OK\n}"));
 	assert(code.contains("alias AliasToCif = AnonCif;"));
 }
+
+fn void test_invalid_typedef_and_struct_name_collision()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "_AgAccount",
+				"tagUsed": "struct",
+				"loc": { "file": "ag-types.h" }
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "AgAccount",
+				"isInvalid": true,
+				"loc": { "file": "ag-types.h" },
+				"type": { "qualType": "int" }
+			},
+			{
+				"kind": "FunctionDecl",
+				"name": "ag_account_get_manager",
+				"loc": { "file": "ag-account.h" },
+				"type": { "qualType": "AgManager *(AgAccount *)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "account", "type": { "qualType": "AgAccount *" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "ag-account.h",
+		.module_name = "ag_account"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("struct AgAccount { void* _unused; }"));
+	assert(!code.contains("struct AgAccount_2"));
+	assert(!code.contains("alias AgAccount = int;"));
+	assert(code.contains("extern fn AgManager* get_manager(AgAccount* account) @cname(\"ag_account_get_manager\");"));
+}

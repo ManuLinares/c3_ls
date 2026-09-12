@@ -474,7 +474,12 @@ fn void track_external_type_usage(
 		return;
 	}
 
+	String underscore_base = string::tformat("_%s", base);
 	if (external_typedefs.has_key(base) || external_records.has_key(base) || external_enums.has_key(base))
+	{
+		used_external_types.add(base);
+	}
+	else if (external_records.has_key(underscore_base) || external_enums.has_key(underscore_base))
 	{
 		used_external_types.add(base);
 	}
@@ -630,9 +635,9 @@ fn void parse_var_decl(
 
 	HashSet{String} seen_var_names;
 	seen_var_names.tinit();
-	for (sz i = 0; i < tu.variables.len(); i++)
+	foreach (&v : tu.variables)
 	{
-		seen_var_names.add(tu.variables.get_ref(i).c3_name);
+		seen_var_names.add(v.c3_name);
 	}
 	c3_name = deduplicate_name(&seen_var_names, c3_name, allocator);
 
@@ -696,9 +701,9 @@ fn void parse_function_decl(
 
 	HashSet{String} seen_fn_names;
 	seen_fn_names.tinit();
-	for (sz i = 0; i < tu.functions.len(); i++)
+	foreach (&fn_item : tu.functions)
 	{
-		seen_fn_names.add(tu.functions.get_ref(i).c3_name);
+		seen_fn_names.add(fn_item.c3_name);
 	}
 	c3_name = deduplicate_name(&seen_fn_names, c3_name, allocator);
 
@@ -759,26 +764,17 @@ fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
 	{
 		return true;
 	}
-	for (sz i = 0; i < tu.enums.len(); i++)
+	foreach (&e : tu.enums)
 	{
-		if (tu.enums.get_ref(i).c3_name == name)
-		{
-			return true;
-		}
+		if (e.c3_name == name) return true;
 	}
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		if (tu.structs.get_ref(i).c3_name == name)
-		{
-			return true;
-		}
+		if (st.c3_name == name) return true;
 	}
-	for (sz i = 0; i < tu.typedefs.len(); i++)
+	foreach (&td : tu.typedefs)
 	{
-		if (tu.typedefs.get_ref(i).c3_name == name)
-		{
-			return true;
-		}
+		if (td.c3_name == name) return true;
 	}
 	return false;
 }
@@ -932,43 +928,39 @@ fn void parse_record_decl_with_name(
 	bool is_complete = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
 	String c3_name = sanitize_c3_type_name(allocator, c_name, options.type_prefix);
 
-	sz existing_idx = 0;
-	bool found_existing = false;
-	for (sz i = 0; i < tu.structs.len(); i++)
+	CStruct* existing = null;
+	foreach (&st : tu.structs)
 	{
-		if (tu.structs.get_ref(i).c3_name == c3_name || tu.structs.get_ref(i).c_name == c_name)
+		if (st.c3_name == c3_name || st.c_name == c_name)
 		{
-			existing_idx = i;
-			found_existing = true;
+			existing = st;
 			break;
 		}
 	}
 
-	if (!found_existing)
+	if (!existing)
 	{
 		HashSet{String} seen_type_names;
 		seen_type_names.tinit();
-		for (sz i = 0; i < tu.enums.len(); i++)
+		foreach (&e : tu.enums)
 		{
-			seen_type_names.add(tu.enums.get_ref(i).c3_name);
+			seen_type_names.add(e.c3_name);
 		}
 		c3_name = deduplicate_name(&seen_type_names, c3_name, allocator);
 	}
-
-	if (found_existing)
+	else
 	{
-		if (tu.structs.get_ref(existing_idx).is_opaque && is_complete)
+		if (existing.is_opaque && is_complete)
 		{
 			List{CField} fields;
 			fields.init(allocator);
 
 			is_complete = parse_record_fields(allocator, tu, node, c_name, &fields, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
 
-			CStruct* target = tu.structs.get_ref(existing_idx);
-			target.is_opaque = !is_complete;
-			target.is_union = is_union;
-			target.is_bitfield = false;
-			target.fields = fields;
+			existing.is_opaque = !is_complete;
+			existing.is_union = is_union;
+			existing.is_bitfield = false;
+			existing.fields = fields;
 		}
 		return;
 	}
@@ -1016,9 +1008,9 @@ fn void parse_enum_decl_with_name(
 
 	String c3_name = sanitize_c3_type_name(allocator, c_name, options.type_prefix);
 
-	for (sz i = 0; i < tu.enums.len(); i++)
+	foreach (&e : tu.enums)
 	{
-		if (tu.enums.get_ref(i).c3_name == c3_name || tu.enums.get_ref(i).c_name == c_name)
+		if (e.c3_name == c3_name || e.c_name == c_name)
 		{
 			return;
 		}
@@ -1026,9 +1018,9 @@ fn void parse_enum_decl_with_name(
 
 	HashSet{String} seen_struct_types;
 	seen_struct_types.tinit();
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		seen_struct_types.add(tu.structs.get_ref(i).c3_name);
+		seen_struct_types.add(st.c3_name);
 	}
 	c3_name = deduplicate_name(&seen_struct_types, c3_name, allocator);
 
@@ -1189,6 +1181,11 @@ fn void parse_typedef_decl(
 	HashSet{String}* used_external_types
 ) @local
 {
+	if (node.get_bool("isInvalid") ?? false)
+	{
+		return;
+	}
+
 	String c_name = node.get_string("name") ?? "";
 	if (c_name.len == 0)
 	{
@@ -1321,19 +1318,13 @@ fn void parse_typedef_decl(
 		return;
 	}
 
-	for (sz i = 0; i < tu.enums.len(); i++)
+	foreach (&e : tu.enums)
 	{
-		if (tu.enums.get_ref(i).c3_name == c3_name)
-		{
-			return;
-		}
+		if (e.c3_name == c3_name) return;
 	}
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		if (tu.structs.get_ref(i).c3_name == c3_name)
-		{
-			return;
-		}
+		if (st.c3_name == c3_name) return;
 	}
 
 	tu.typedefs.push({
@@ -1405,6 +1396,11 @@ fn void parse_clang_ast_json(
 	{
 		Object* node = inner_arr.get_at(i);
 		if (!node)
+		{
+			continue;
+		}
+
+		if (node.get_bool("isInvalid") ?? false)
 		{
 			continue;
 		}
@@ -1528,11 +1524,15 @@ fn void parse_clang_ast_json(
 	// Pass 3: Synthesize referenced external types
 	used_external_types.@each(; ext_name)
 	{
-		if (try rec_node = external_records.get(ext_name))
+		String underscore_ext = string::tformat("_%s", ext_name);
+		Object* rec_node = external_records.get(ext_name) ?? external_records.get(underscore_ext) ?? null;
+		Object* enum_node = external_enums.get(ext_name) ?? external_enums.get(underscore_ext) ?? null;
+
+		if (rec_node)
 		{
 			parse_record_decl_with_name(allocator, tu, rec_node, ext_name, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &anon_records, &used_external_types);
 		}
-		else if (try enum_node = external_enums.get(ext_name))
+		else if (enum_node)
 		{
 			parse_enum_decl_with_name(allocator, tu, enum_node, ext_name, options, &seen_names, &target_types);
 		}
@@ -1546,7 +1546,25 @@ fn void parse_clang_ast_json(
 				c3_underlying = "void*";
 			}
 
-			if (c3_name != c3_underlying && !is_c3_type(c3_name) && !is_c3_keyword(c3_name) && seen_names.add(ext_name))
+			bool conflicts = false;
+			foreach (&st : tu.structs)
+			{
+				if (st.c3_name == c3_name)
+				{
+					conflicts = true;
+					break;
+				}
+			}
+			foreach (&e : tu.enums)
+			{
+				if (e.c3_name == c3_name)
+				{
+					conflicts = true;
+					break;
+				}
+			}
+
+			if (!conflicts && c3_name != c3_underlying && !is_c3_type(c3_name) && !is_c3_keyword(c3_name) && seen_names.add(ext_name))
 			{
 				tu.typedefs.push({
 					.c_name = ext_name.copy(allocator),

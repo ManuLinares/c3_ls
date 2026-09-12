@@ -188,17 +188,15 @@ fn String extract_base_type_ident(String type_str) @local
 
 fn CStruct* find_struct_by_name(CTranslationUnit* tu, String name) @local
 {
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		CStruct* st = tu.structs.get_ref(i);
 		if (st.c3_name == name || st.c_name == name)
 		{
 			return st;
 		}
 	}
-	for (sz i = 0; i < tu.typedefs.len(); i++)
+	foreach (&td : tu.typedefs)
 	{
-		CTypedef* td = tu.typedefs.get_ref(i);
 		if (td.c3_name == name)
 		{
 			String target = extract_base_type_ident(td.underlying_c3);
@@ -391,12 +389,10 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 		return;
 	}
 
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		CStruct* st = tu.structs.get_ref(i);
-		for (sz j = 0; j < st.fields.len(); j++)
+		foreach (&f : st.fields)
 		{
-			CField* f = st.fields.get_ref(j);
 			String base = extract_base_type_ident(f.c3_type);
 			if (fam_structs.contains(base))
 			{
@@ -419,9 +415,8 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 		}
 	}
 
-	for (sz i = 0; i < tu.typedefs.len(); i++)
+	foreach (&td : tu.typedefs)
 	{
-		CTypedef* td = tu.typedefs.get_ref(i);
 		String base = extract_base_type_ident(td.underlying_c3);
 		if (fam_structs.contains(base))
 		{
@@ -443,12 +438,10 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 		}
 	}
 
-	for (sz i = 0; i < tu.functions.len(); i++)
+	foreach (&fn_decl : tu.functions)
 	{
-		CFunction* fn_decl = tu.functions.get_ref(i);
-		for (sz j = 0; j < fn_decl.params.len(); j++)
+		foreach (&p : fn_decl.params)
 		{
-			CParam* p = fn_decl.params.get_ref(j);
 			String base = extract_base_type_ident(p.c3_type);
 			if (fam_structs.contains(base))
 			{
@@ -475,6 +468,52 @@ fn void record_missing_type(HashSet{String}* known, List{String}* missing, Strin
 	if (!known.contains(t) && known.add(t))
 	{
 		missing.push(t);
+	}
+}
+
+fn void cleanup_typedef_conflicts(CTranslationUnit* tu) @local
+{
+	HashSet{String} existing_types;
+	existing_types.tinit();
+
+	foreach (&st : tu.structs)
+	{
+		existing_types.add(st.c3_name);
+	}
+	foreach (&e : tu.enums)
+	{
+		existing_types.add(e.c3_name);
+	}
+
+	HashSet{String} seen;
+	seen.tinit();
+
+	sz write_idx = 0;
+	sz total = tu.typedefs.len();
+	for (sz i = 0; i < total; i++)
+	{
+		CTypedef td = tu.typedefs.get(i);
+		if (existing_types.contains(td.c3_name))
+		{
+			continue;
+		}
+		if (td.c3_name == td.underlying_c3 || is_c3_type(td.c3_name) || is_c3_keyword(td.c3_name))
+		{
+			continue;
+		}
+		if (!seen.add(td.c3_name))
+		{
+			continue;
+		}
+		if (write_idx != i)
+		{
+			tu.typedefs.set(write_idx, td);
+		}
+		write_idx++;
+	}
+	while (tu.typedefs.len() > write_idx)
+	{
+		(void)tu.typedefs.pop();
 	}
 }
 
@@ -514,29 +553,29 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 	List{String} missing_structs;
 	missing_structs.tinit();
 
-	foreach (st : tu.structs)
+	foreach (&st : tu.structs)
 	{
-		foreach (f : st.fields)
+		foreach (&f : st.fields)
 		{
 			record_missing_type(&known_types, &missing_structs, f.c3_type);
 		}
 	}
 
-	foreach (v : tu.variables)
+	foreach (&v : tu.variables)
 	{
 		record_missing_type(&known_types, &missing_structs, v.c3_type);
 	}
 
-	foreach (fn_decl : tu.functions)
+	foreach (&fn_decl : tu.functions)
 	{
 		record_missing_type(&known_types, &missing_structs, fn_decl.ret_type_c3);
-		foreach (p : fn_decl.params)
+		foreach (&p : fn_decl.params)
 		{
 			record_missing_type(&known_types, &missing_structs, p.c3_type);
 		}
 	}
 
-	foreach (td : tu.typedefs)
+	foreach (&td : tu.typedefs)
 	{
 		if (td.is_func_ptr)
 		{
@@ -576,20 +615,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 		seen_struct_names.add(td.c3_name);
 	}
 
-	foreach (ms : missing_structs)
-	{
-		if (seen_struct_names.add(ms))
-		{
-			sb.appendf("struct %s { void* _unused; }\n\n", ms);
-		}
-	}
-
-	if (tu.structs.len() == 0)
-	{
-		return;
-	}
-
-	foreach (st : tu.structs)
+	foreach (&st : tu.structs)
 	{
 		String st_name = deduplicate_name(&seen_struct_names, st.c3_name, tmem);
 
@@ -605,7 +631,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 		HashSet{String} seen_field_names;
 		seen_field_names.tinit();
 
-		foreach (f : st.fields)
+		foreach (&f : st.fields)
 		{
 			String fname = deduplicate_name(&seen_field_names, f.c3_name, tmem);
 
@@ -620,6 +646,14 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 		}
 
 		sb.append("}\n\n");
+	}
+
+	foreach (ms : missing_structs)
+	{
+		if (seen_struct_names.add(ms))
+		{
+			sb.appendf("struct %s { void* _unused; }\n\n", ms);
+		}
 	}
 }
 
@@ -720,6 +754,7 @@ fn void emit_functions(DString* sb, CTranslationUnit* tu) @local
 fn String emit_c3_bindings(Allocator allocator, CTranslationUnit* tu, BindgenOptions options)
 {
 	sanitize_fam_arrays(allocator, tu);
+	cleanup_typedef_conflicts(tu);
 
 	DString sb;
 	sb.init(allocator);
