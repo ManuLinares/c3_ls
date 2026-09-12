@@ -939,7 +939,7 @@ fn void parse_record_decl_with_name(
 	String tag = node.get_string("tagUsed") ?? "struct";
 	bool is_union = (tag == "union");
 	bool is_complete = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
-	String c3_name = sanitize_c3_type_name(allocator, c_name, options.type_prefix);
+	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, c_name, options.type_prefix));
 
 	CStruct* existing = null;
 	foreach (&st : tu.structs)
@@ -1019,7 +1019,7 @@ fn void parse_enum_decl_with_name(
 		return;
 	}
 
-	String c3_name = sanitize_c3_type_name(allocator, c_name, options.type_prefix);
+	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, c_name, options.type_prefix));
 
 	foreach (&e : tu.enums)
 	{

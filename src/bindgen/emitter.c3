@@ -617,7 +617,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 
 	foreach (&st : tu.structs)
 	{
-		String st_name = deduplicate_name(&seen_struct_names, st.c3_name, tmem);
+		String st_name = capitalize_ascii(tmem, deduplicate_name(&seen_struct_names, st.c3_name, tmem));
 
 		if (st.is_opaque || st.fields.len() == 0)
 		{

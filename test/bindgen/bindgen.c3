@@ -2357,3 +2357,102 @@ fn void test_function_and_variable_name_collision()
 	assert(code.contains("extern fn void mpd_minalloc(void* result) @cname(\"mpd_minalloc\");"));
 	assert(code.contains("extern CLong mpd_minalloc_2 @cname(\"MPD_MINALLOC\");"));
 }
+
+fn void test_struct_named_uint128_capitalization()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "uint128",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "bluetooth.h" },
+				"inner": [
+					{
+						"kind": "FieldDecl",
+						"name": "data",
+						"type": { "qualType": "unsigned char[16]" }
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "bluetooth.h",
+		.module_name = "bluetooth"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("struct Uint128\n{"));
+	assert(!code.contains("struct uint128\n{"));
+}
+
+fn void test_anonymous_struct_typedef_named_uint128_t_capitalization()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"id": "0xrec_u128",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "bluetooth.h" },
+				"inner": [
+					{
+						"kind": "FieldDecl",
+						"name": "data",
+						"type": { "qualType": "uint8_t[16]" }
+					}
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "uint128_t",
+				"loc": { "file": "bluetooth.h" },
+				"type": { "qualType": "struct uint128_t" },
+				"inner": [
+					{
+						"kind": "ElaboratedType",
+						"ownedTagDecl": { "id": "0xrec_u128", "kind": "RecordDecl", "name": "" },
+						"inner": [
+							{ "kind": "RecordType", "decl": { "id": "0xrec_u128", "kind": "RecordDecl", "name": "" } }
+						]
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "bluetooth.h",
+		.module_name = "bluetooth"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("struct Uint128\n{"));
+	assert(!code.contains("struct uint128\n{"));
+}

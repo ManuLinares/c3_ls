@@ -170,6 +170,20 @@ fn void CTranslationUnit.free(&self)
 	self.functions.free();
 }
 
+<*
+ Capitalizes the first ASCII character of an identifier if it is lowercase.
+*>
+fn String capitalize_ascii(Allocator allocator, String name)
+{
+	if (name.len > 0 && name[0] >= 'a' && name[0] <= 'z')
+	{
+		char[] p = name.copy(allocator);
+		p[0] = (char)(p[0] - 32);
+		return (String)p;
+	}
+	return name;
+}
+
 fn String deduplicate_name(HashSet{String}* seen, String name, Allocator allocator)
 {
 	String base = name;
@@ -676,23 +690,16 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 			pascal = sb.str_view().copy(allocator);
 		}
 	}
-	else if ((s[0] >= 'a' && s[0] <= 'z') || s.contains("_"))
+	else if (s.contains("_"))
 	{
 		pascal = s.snake_to_pascal_copy(allocator);
 	}
 	else
 	{
-		bool has_lower = false;
-		for (sz i = 0; i < s.len; i++)
-		{
-			if (s[i] >= 'a' && s[i] <= 'z')
-			{
-				has_lower = true;
-				break;
-			}
-		}
-		pascal = has_lower ? s.copy(allocator) : string::format(allocator, "%s_t", s);
+		pascal = s.copy(allocator);
 	}
+
+	pascal = capitalize_ascii(allocator, pascal);
 
 	bool has_lower = false;
 	for (sz i = 0; i < pascal.len; i++)
@@ -1257,7 +1264,7 @@ fn String map_c_type_to_c3(
 			String w = clean_words.get(i);
 			if ((w == "struct" || w == "union" || w == "enum") && i + 1 < clean_words.len())
 			{
-				base_c3 = sanitize_c3_type_name(allocator, clean_words.get(i + 1), type_prefix);
+				base_c3 = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, clean_words.get(i + 1), type_prefix));
 				break;
 			}
 		}
