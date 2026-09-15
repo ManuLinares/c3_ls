@@ -1034,6 +1034,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 				{
 					sub_decl.as(StructDecl).contract.set(member_contract);
 				}
+				fields.push(sub_decl);
 				tail_node.as(StructDecl).next = sub_decl;
 				while (tail_node.as(StructDecl).next != null)
 				{

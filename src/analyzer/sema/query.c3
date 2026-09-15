@@ -378,6 +378,24 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 
 	if (constants::is_primitive(clean_type)) return null;
 
+	if (try dot_idx = clean_type.rindex_of_char('.'))
+	{
+		String parent_type = clean_type[:dot_idx].trim();
+		String child_name = clean_type[dot_idx + 1..].trim();
+		Node* parent_node = find_type_node_in_context(context, sf, parent_type);
+		if (parent_node && parent_node.kind == STRUCT_DECL)
+		{
+			foreach (f : parent_node.as(StructDecl).fields)
+			{
+				if (f && f.kind == STRUCT_DECL && f.as(StructDecl).name && f.as(StructDecl).name.text == child_name)
+				{
+					return f;
+				}
+			}
+		}
+		return null;
+	}
+
 	if (context.registry)
 	{
 		if (clean_type.contains("::"))
@@ -976,6 +994,10 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 					VarDecl* vd = member.as(VarDecl);
 					if (vd.type) return cursor::raw_type_identifier(vd.type) ?? "";
 				}
+				else if (member && member.kind == STRUCT_DECL)
+				{
+					return string::tformat("%s.%s", parent_type, mem_name);
+				}
 
 				Node* mnode = find_method_in_type(context, parent_type, mem_name, sf, effective_loc);
 				if (mnode && mnode.kind == FN_DECL)
@@ -1471,21 +1493,8 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 							}
 						case STRUCT_DECL:
 							{
-								StructDecl* sd = stmt.as(StructDecl);
-								foreach (field : sd.fields)
-								{
-									if (!field) continue;
-									if (field.kind == VAR_DECL)
-									{
-										VarDecl* vd = field.as(VarDecl);
-										if (vd.name && vd.name.text == symbol_name) return field;
-									}
-									else if (field.kind == STRUCT_DECL)
-									{
-										Node* nested = cursor::find_member_in_type(field, symbol_name);
-										if (nested) return nested;
-									}
-								}
+								Node* mem_node = cursor::find_member_in_type(stmt, symbol_name);
+								if (mem_node) return mem_node;
 							}
 						default:
 							break;
@@ -1649,6 +1658,10 @@ fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String
 			{
 				VarDecl* vd = member.as(VarDecl);
 				curr_type = vd.type ? cursor::raw_type_identifier(vd.type) ?? "" : "";
+			}
+			else if (member && member.kind == STRUCT_DECL)
+			{
+				curr_type = string::tformat("%s.%s", curr_type, seg);
 			}
 			else
 			{

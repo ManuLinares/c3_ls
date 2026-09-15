@@ -163,3 +163,246 @@ fn void test() {
 	assert(locs_query.len > 0);
 	assert(locs_query[0].range.start.line == 13);
 }
+
+fn void test_issue_6_named_nested_struct_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct MyStruct
+{
+    int foo;
+    int bar;
+
+    struct inner
+    {
+        int baz;
+    }
+}
+
+fn void test() {
+    MyStruct ms = {
+        .
+    };
+
+    MyStruct ms2 = {
+        .inner = {
+            .
+        }
+    };
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_6.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_6.c3");
+	defer doc_uri.free();
+
+	// 1. Completion inside `MyStruct ms = { .` (line 15, col 9)
+	LspPosition pos1 = { .line = 15, .character = 9 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_foo = false;
+	bool found_bar = false;
+	bool found_inner = false;
+	bool found_baz1 = false;
+
+	foreach (item : items1)
+	{
+		if (item.label == "foo") found_foo = true;
+		if (item.label == "bar") found_bar = true;
+		if (item.label == "inner") found_inner = true;
+		if (item.label == "baz") found_baz1 = true;
+	}
+
+	assert(found_foo);
+	assert(found_bar);
+	assert(found_inner);
+	assert(!found_baz1);
+
+	// 2. Completion inside `.inner = { .` (line 20, col 13)
+	LspPosition pos2 = { .line = 20, .character = 13 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_baz2 = false;
+	bool found_global = false;
+
+	foreach (item : items2)
+	{
+		if (item.label == "baz") found_baz2 = true;
+		if (item.label == "ms" || item.label.starts_with("@")) found_global = true;
+	}
+
+	assert(found_baz2);
+	assert(!found_global);
+}
+
+fn void test_deeply_nested_and_mixed_substructs() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct Outer {
+    int root_val;
+
+    struct level1 {
+        int l1_val;
+
+        struct level2 {
+            int l2_val;
+        }
+
+        union {
+            int anon_u_int;
+            float anon_u_float;
+        }
+    }
+
+    struct sibling {
+        int sib_val;
+    }
+}
+
+fn void test() {
+    Outer o;
+    int a = o.root_val;
+    int b = o.level1.l1_val;
+    int c = o.level1.level2.l2_val;
+    int d = o.level1.anon_u_int;
+    int e = o.sibling.sib_val;
+
+    Outer o1 = {
+        .
+    };
+
+    Outer o2 = {
+        .level1 = {
+            .
+        }
+    };
+
+    Outer o3 = {
+        .level1 = {
+            .level2 = {
+                .
+            }
+        }
+    };
+
+    Outer o4 = {
+        .level1.level2.
+    };
+}
+`;
+
+	proj.workspace.process_file("/virtual/deep_nested.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/deep_nested.c3");
+	defer doc_uri.free();
+
+	// 1. Root designated initializer completion `Outer o1 = { .` (line 32, col 9)
+	LspPosition pos1 = { .line = 32, .character = 9 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool has_root_val = false;
+	bool has_level1 = false;
+	bool has_sibling = false;
+	bool leak_l1_val = false;
+	bool leak_level2 = false;
+	bool leak_l2_val = false;
+	bool leak_sib_val = false;
+
+	foreach (item : items1)
+	{
+		if (item.label == "root_val") has_root_val = true;
+		if (item.label == "level1") has_level1 = true;
+		if (item.label == "sibling") has_sibling = true;
+		if (item.label == "l1_val") leak_l1_val = true;
+		if (item.label == "level2") leak_level2 = true;
+		if (item.label == "l2_val") leak_l2_val = true;
+		if (item.label == "sib_val") leak_sib_val = true;
+	}
+
+	assert(has_root_val);
+	assert(has_level1);
+	assert(has_sibling);
+	assert(!leak_l1_val);
+	assert(!leak_level2);
+	assert(!leak_l2_val);
+	assert(!leak_sib_val);
+
+	// 2. Level 1 designated initializer completion `.level1 = { .` (line 37, col 13)
+	LspPosition pos2 = { .line = 37, .character = 13 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool has_l1_val = false;
+	bool has_level2 = false;
+	bool has_anon_u = false;
+	bool leak_root = false;
+	bool leak_sib = false;
+	bool leak_l2 = false;
+
+	foreach (item : items2)
+	{
+		if (item.label == "l1_val") has_l1_val = true;
+		if (item.label == "level2") has_level2 = true;
+		if (item.label == "anon_u_int") has_anon_u = true;
+		if (item.label == "root_val") leak_root = true;
+		if (item.label == "sibling") leak_sib = true;
+		if (item.label == "l2_val") leak_l2 = true;
+	}
+
+	assert(has_l1_val);
+	assert(has_level2);
+	assert(has_anon_u);
+	assert(!leak_root);
+	assert(!leak_sib);
+	assert(!leak_l2);
+
+	// 3. Level 2 designated initializer completion `.level2 = { .` (line 44, col 17)
+	LspPosition pos3 = { .line = 44, .character = 17 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+
+	bool has_l2_val = false;
+	bool leak_outer = false;
+
+	foreach (item : items3)
+	{
+		if (item.label == "l2_val") has_l2_val = true;
+		if (item.label == "l1_val" || item.label == "root_val" || item.label == "level1") leak_outer = true;
+	}
+
+	assert(has_l2_val);
+	assert(!leak_outer);
+
+	// 4. Chained designator dot completion `.level1.level2.` (line 50, col 23)
+	LspPosition pos4 = { .line = 50, .character = 23 };
+	CompletionItem[] items4 = completion::resolve(&proj, doc_uri, pos4)!!;
+
+	bool has_chained_l2 = false;
+	foreach (item : items4)
+	{
+		if (item.label == "l2_val") has_chained_l2 = true;
+	}
+	assert(has_chained_l2);
+
+	// 5. Hover on 3rd level field `o.level1.level2.l2_val` (line 27, col 29)
+	LspPosition hover_pos = { .line = 27, .character = 29 };
+	String h = hover::hover(&proj, doc_uri, hover_pos)!!;
+	assert(h.contains("int l2_val"));
+
+	// 6. Goto definition on 3rd level field `l2_val` -> line 9
+	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	assert(locs.len > 0);
+	assert(locs[0].range.start.line == 9);
+
+	// 7. Goto definition on 2nd level sub-struct `level2` (line 27, col 22) -> line 8
+	LspPosition l2_def_pos = { .line = 27, .character = 22 };
+	LspLocation[] locs_l2 = goto_definition::goto_definition(&proj, doc_uri, l2_def_pos)!!;
+	assert(locs_l2.len > 0);
+	assert(locs_l2[0].range.start.line == 8);
+}

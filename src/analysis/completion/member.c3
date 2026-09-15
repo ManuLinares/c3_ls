@@ -14,6 +14,11 @@ import lsp;
 import lsp::analysis;
 import uri;
 
+fn bool is_designator_delimiter(char c) @local
+{
+	return c == '{' || c == ',' || c == '=' || c == ';' || c == '(';
+}
+
 fn sz scan_base_expression_start(String text, sz end_idx)
 {
 	sz idx = end_idx;
@@ -149,11 +154,14 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 		}
 		else if (p >= 1 && text[p - 1] == '.')
 		{
-			idx = p - 1;
-			while (idx > 0 && text[idx - 1].is_space())
+			sz q = p - 1;
+			while (q > 0 && text[q - 1].is_space()) q--;
+			if (q == 0 || is_designator_delimiter(text[q - 1]))
 			{
-				idx--;
+				// Leading dot of a designated initializer: no LHS expression exists.
+				return end_idx;
 			}
+			idx = q;
 		}
 		else
 		{
@@ -370,6 +378,10 @@ fn String apply_field_path(Context* ctx, SourceFile* sf, String root_type, List{
 				return "";
 			}
 		}
+		else if (member && member.kind == STRUCT_DECL)
+		{
+			curr_type = string::tformat("%s.%s", curr_type, field_name);
+		}
 		else
 		{
 			return "";
@@ -387,7 +399,27 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 	List{String} field_path;
 	field_path.tinit();
 
-	sz idx = text.len;
+	sz scan_p = text.len;
+	while (scan_p > 0)
+	{
+		sz p = scan_p;
+		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+		sz name_end = p;
+		while (p > 0 && (text[p - 1].is_alnum() || text[p - 1] == '_')) p--;
+		if (name_end > p && p > 0 && text[p - 1] == '.')
+		{
+			String prefix_field = text[p : name_end - p].trim();
+			if (prefix_field.len > 0)
+			{
+				field_path.push(prefix_field);
+				scan_p = p - 1;
+				continue;
+			}
+		}
+		break;
+	}
+
+	sz idx = scan_p;
 
 	while (idx > 0)
 	{
@@ -793,12 +825,12 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 {
 	if (!struct_node || struct_node.kind != STRUCT_DECL) return;
 
-	StructDecl* current_st = struct_node.as(StructDecl);
-	while (current_st != null)
+	StructDecl* sd = struct_node.as(StructDecl);
+	foreach (field : sd.fields)
 	{
-		foreach (field : current_st.fields)
+		if (!field) continue;
+		if (field.kind == VAR_DECL)
 		{
-			if (!field || field.kind != VAR_DECL) continue;
 			VarDecl* fdecl = field.as(VarDecl);
 			while (fdecl != null)
 			{
@@ -831,10 +863,7 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 						if (!sub_node && ctx.ws)
 						{
 							List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(sub_type, ctx.sf);
-							if (syms.len() > 0 && syms.get(0).node)
-							{
-								sub_node = syms.get(0).node;
-							}
+							if (syms.len() > 0 && syms.get(0).node) sub_node = syms.get(0).node;
 						}
 						if (sub_node && sub_node.kind == STRUCT_DECL)
 						{
@@ -845,7 +874,33 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 				fdecl = fdecl.next ? fdecl.next.as(VarDecl) : null;
 			}
 		}
-		current_st = current_st.next ? current_st.next.as(StructDecl) : null;
+		else if (field.kind == STRUCT_DECL)
+		{
+			StructDecl* sub = field.as(StructDecl);
+			if (sub.name != null)
+			{
+				String sname = sub.name.text;
+				if (sname.len > 0 && fuzzy_match(sname, ctx.prefix) && seen_fields.add(sname))
+				{
+					String kind_str = sub.is_union ? "union" : (sub.is_bitstruct ? "bitstruct" : "struct");
+					items.push(
+					{
+						.label = sname,
+						.kind = FIELD,
+						.detail = string::tformat("%s %s", kind_str, sname),
+						.insertText = sname,
+						.filterText = sname,
+						.sortText = string::tformat("0001_%s", sname),
+						.data = string::tformat("field:%s:%s", type_name, sname)
+					}
+					);
+				}
+			}
+			else
+			{
+				collect_struct_fields_recursive(ctx, items, field, type_name, seen_fields);
+			}
+		}
 	}
 }
 

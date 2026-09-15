@@ -447,31 +447,29 @@ fn Node* find_member_in_type(Node* node, String name)
 	{
 		case STRUCT_DECL:
 			{
-				StructDecl* current_st = node.as(StructDecl);
-				while (current_st != null)
+				StructDecl* sd = node.as(StructDecl);
+				foreach (field : sd.fields)
 				{
-					foreach (field : current_st.fields)
+					if (!field) continue;
+					if (field.kind == VAR_DECL)
 					{
-						if (!field) continue;
-						if (field.kind == VAR_DECL)
+						VarDecl* vd = field.as(VarDecl);
+						while (vd != null)
 						{
-							VarDecl* vd = field.as(VarDecl);
-							while (vd != null)
-							{
-								if (vd.name && vd.name.text == name)
-								{
-									return (Node*)vd;
-								}
-								vd = vd.next ? vd.next.as(VarDecl) : null;
-							}
+							if (vd.name && vd.name.text == name) return (Node*)vd;
+							vd = vd.next ? vd.next.as(VarDecl) : null;
 						}
-						else if (field.kind == STRUCT_DECL)
+					}
+					else if (field.kind == STRUCT_DECL)
+					{
+						StructDecl* sub = field.as(StructDecl);
+						if (sub.name && sub.name.text == name) return field;
+						if (sub.name == null)
 						{
 							Node* nested = find_member_in_type(field, name);
 							if (nested) return nested;
 						}
 					}
-					current_st = current_st.next ? current_st.next.as(StructDecl) : null;
 				}
 				return null;
 			}
