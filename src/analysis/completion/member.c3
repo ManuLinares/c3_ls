@@ -397,6 +397,127 @@ fn String apply_field_path(Context* ctx, SourceFile* sf, String root_type, List{
 	return curr_type;
 }
 
+fn sz skip_brackets_backward(String text, sz p) @local
+{
+	while (p > 0 && text[p - 1] == ']')
+	{
+		int bdepth = 1;
+		p--;
+		while (p > 0 && bdepth > 0)
+		{
+			p--;
+			if (text[p] == ']')
+			{
+				bdepth++;
+			}
+			else if (text[p] == '[')
+			{
+				bdepth--;
+			}
+		}
+		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+	}
+	return p;
+}
+
+fn sz find_enclosing_open_brace(String text, sz idx) @local
+{
+	int brace_depth = 0;
+	int paren_depth = 0;
+	int bracket_depth = 0;
+	bool in_str = false;
+	bool in_char = false;
+	bool in_raw = false;
+
+	for (sz i = idx; i > 0; i--)
+	{
+		char c = text[i - 1];
+		if (c == '`') { in_raw = !in_raw; continue; }
+		if (in_raw) continue;
+		if (c == '"' && (i < 2 || text[i - 2] != '\\')) { in_str = !in_str; continue; }
+		if (in_str) continue;
+		if (c == '\'' && (i < 2 || text[i - 2] != '\\')) { in_char = !in_char; continue; }
+		if (in_char) continue;
+
+		switch (c)
+		{
+			case '}': brace_depth++;
+			case '{':
+				if (brace_depth > 0)
+				{
+					brace_depth--;
+				}
+				else
+				{
+					return i - 1;
+				}
+			case ')': paren_depth++;
+			case '(': if (paren_depth > 0) paren_depth--;
+			case ']': bracket_depth++;
+			case '[': if (bracket_depth > 0) bracket_depth--;
+			default: break;
+		}
+	}
+	return (sz)-1;
+}
+
+fn String resolve_enclosing_field_type(Context* ctx, SourceFile* sf, String text, sz idx, List{String}* field_path) @local
+{
+	while (idx > 0)
+	{
+		sz open_brace_idx = find_enclosing_open_brace(text, idx);
+		if (open_brace_idx == (sz)-1) return "";
+
+		sz bp = open_brace_idx;
+		while (bp > 0 && text[bp - 1].is_space()) bp--;
+
+		if (bp > 0 && text[bp - 1] == '=')
+		{
+			bp--;
+			while (bp > 0 && text[bp - 1].is_space()) bp--;
+
+			bp = skip_brackets_backward(text, bp);
+
+			sz n_end = bp;
+			while (bp > 0 && (text[bp - 1].is_alnum() || text[bp - 1] == '_')) bp--;
+			sz n_start = bp;
+
+			if (bp > 0 && text[bp - 1] == '.')
+			{
+				String f_name = text[n_start : n_end - n_start].trim();
+				if (f_name.len > 0)
+				{
+					field_path.push(f_name);
+					idx = bp - 1;
+					continue;
+				}
+			}
+
+			if (n_start == n_end)
+			{
+				idx = bp;
+				continue;
+			}
+		}
+
+		String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
+		if (root_type.len > 0)
+		{
+			return apply_field_path(ctx, sf, root_type, *field_path);
+		}
+
+		if (bp > 0 && (text[bp - 1] == '{' || text[bp - 1] == ',' || text[bp - 1] == '('))
+		{
+			idx = bp;
+			continue;
+		}
+
+		break;
+	}
+
+	return "";
+}
+
 fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_offset)
 {
 	if (!sf || dot_offset == 0 || dot_offset > sf.content.len) return "";
@@ -411,26 +532,9 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 		sz p = scan_p;
 		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
 
-		bool bracket_skipped = false;
-		while (p > 0 && text[p - 1] == ']')
-		{
-			int bdepth = 1;
-			p--;
-			bracket_skipped = true;
-			while (p > 0 && bdepth > 0)
-			{
-				p--;
-				if (text[p] == ']')
-				{
-					bdepth++;
-				}
-				else if (text[p] == '[')
-				{
-					bdepth--;
-				}
-			}
-			while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
-		}
+		sz after_brackets = skip_brackets_backward(text, p);
+		bool bracket_skipped = (after_brackets != p);
+		p = after_brackets;
 
 		sz name_end = p;
 		while (p > 0 && (text[p - 1].is_alnum() || text[p - 1] == '_')) p--;
@@ -452,127 +556,7 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 		break;
 	}
 
-	sz idx = scan_p;
-
-	while (idx > 0)
-	{
-		int brace_depth = 0;
-		int paren_depth = 0;
-		int bracket_depth = 0;
-		bool in_str = false;
-		bool in_char = false;
-		bool in_raw = false;
-		sz open_brace_idx = 0;
-		bool found_open_brace = false;
-
-		for (sz i = idx; i > 0; i--)
-		{
-			char c = text[i - 1];
-
-			if (c == '`') { in_raw = !in_raw; continue; }
-			if (in_raw) continue;
-			if (c == '"' && (i < 2 || text[i - 2] != '\\')) { in_str = !in_str; continue; }
-			if (in_str) continue;
-			if (c == '\'' && (i < 2 || text[i - 2] != '\\')) { in_char = !in_char; continue; }
-			if (in_char) continue;
-
-			switch (c)
-			{
-				case '}': brace_depth++;
-				case '{':
-					if (brace_depth > 0)
-					{
-						brace_depth--;
-					}
-					else
-					{
-						open_brace_idx = i - 1;
-						found_open_brace = true;
-					}
-				case ')': paren_depth++;
-				case '(': if (paren_depth > 0) paren_depth--;
-				case ']': bracket_depth++;
-				case '[': if (bracket_depth > 0) bracket_depth--;
-				default: break;
-			}
-			if (found_open_brace) break;
-		}
-
-		if (!found_open_brace) return "";
-
-		sz p = open_brace_idx;
-		while (p > 0 && text[p - 1].is_space()) p--;
-
-		if (p > 0 && text[p - 1] == '=')
-		{
-			p--;
-			while (p > 0 && text[p - 1].is_space()) p--;
-
-			while (p > 0 && text[p - 1] == ']')
-			{
-				int bdepth = 1;
-				p--;
-				while (p > 0 && bdepth > 0)
-				{
-					p--;
-					if (text[p] == ']')
-					{
-						bdepth++;
-					}
-					else if (text[p] == '[')
-					{
-						bdepth--;
-					}
-				}
-				while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
-			}
-
-			sz name_end = p;
-			while (p > 0 && (text[p - 1].is_alnum() || text[p - 1] == '_')) p--;
-			sz name_start = p;
-
-			if (p > 0 && text[p - 1] == '.')
-			{
-				String field_name = text[name_start : name_end - name_start].trim();
-				if (field_name.len > 0)
-				{
-					field_path.push(field_name);
-					idx = p - 1;
-					continue;
-				}
-			}
-
-			if (name_start == name_end)
-			{
-				// Array index initializer (e.g. '[0] = {') - continue outward to enclosing array
-				idx = p;
-				continue;
-			}
-
-			String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
-			if (root_type.len > 0)
-			{
-				return apply_field_path(ctx, sf, root_type, field_path);
-			}
-			return "";
-		}
-
-		String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
-		if (root_type.len > 0)
-		{
-			return apply_field_path(ctx, sf, root_type, field_path);
-		}
-
-		if (p > 0 && (text[p - 1] == '{' || text[p - 1] == ',' || text[p - 1] == '('))
-		{
-			idx = p;
-			continue;
-		}
-
-		return "";
-	}
-
-	return "";
+	return resolve_enclosing_field_type(ctx, sf, text, scan_p, &field_path);
 }
 
 fn String find_designated_assignment_type(Context* ctx, SourceFile* sf, sz offset)
@@ -580,15 +564,8 @@ fn String find_designated_assignment_type(Context* ctx, SourceFile* sf, sz offse
 	if (!sf || offset == 0 || offset > sf.content.len) return "";
 
 	String text = sf.content[:offset];
-	sz eq_pos = 0;
-	if (try idx = text.rindex_of_char('='))
-	{
-		eq_pos = idx;
-	}
-	else
-	{
-		return "";
-	}
+	sz eq_pos = text.rindex_of_char('=') ?? (sz)-1;
+	if (eq_pos == (sz)-1) return "";
 
 	String before_eq = text[:eq_pos].trim_right();
 
@@ -616,117 +593,7 @@ fn String find_designated_assignment_type(Context* ctx, SourceFile* sf, sz offse
 
 	if (field_path.len() == 0) return "";
 
-	sz idx = p;
-	while (idx > 0)
-	{
-		int brace_depth = 0;
-		int paren_depth = 0;
-		int bracket_depth = 0;
-		bool in_str = false;
-		bool in_char = false;
-		bool in_raw = false;
-		sz open_brace_idx = 0;
-		bool found_open_brace = false;
-
-		for (sz i = idx; i > 0; i--)
-		{
-			char c = text[i - 1];
-			if (c == '`') { in_raw = !in_raw; continue; }
-			if (in_raw) continue;
-			if (c == '"' && (i < 2 || text[i - 2] != '\\')) { in_str = !in_str; continue; }
-			if (in_str) continue;
-			if (c == '\'' && (i < 2 || text[i - 2] != '\\')) { in_char = !in_char; continue; }
-			if (in_char) continue;
-
-			switch (c)
-			{
-				case '}': brace_depth++;
-				case '{':
-					if (brace_depth > 0)
-					{
-						brace_depth--;
-					}
-					else
-					{
-						open_brace_idx = i - 1;
-						found_open_brace = true;
-					}
-				case ')': paren_depth++;
-				case '(': if (paren_depth > 0) paren_depth--;
-				case ']': bracket_depth++;
-				case '[': if (bracket_depth > 0) bracket_depth--;
-				default: break;
-			}
-			if (found_open_brace) break;
-		}
-
-		if (!found_open_brace) return "";
-
-		sz bp = open_brace_idx;
-		while (bp > 0 && text[bp - 1].is_space()) bp--;
-
-		if (bp > 0 && text[bp - 1] == '=')
-		{
-			bp--;
-			while (bp > 0 && text[bp - 1].is_space()) bp--;
-
-			while (bp > 0 && text[bp - 1] == ']')
-			{
-				int bdepth = 1;
-				bp--;
-				while (bp > 0 && bdepth > 0)
-				{
-					bp--;
-					if (text[bp] == ']')
-					{
-						bdepth++;
-					}
-					else if (text[bp] == '[')
-					{
-						bdepth--;
-					}
-				}
-				while (bp > 0 && (text[bp - 1] == ' ' || text[bp - 1] == '\t')) bp--;
-			}
-
-			sz n_end = bp;
-			while (bp > 0 && (text[bp - 1].is_alnum() || text[bp - 1] == '_')) bp--;
-			sz n_start = bp;
-
-			if (bp > 0 && text[bp - 1] == '.')
-			{
-				String f_name = text[n_start : n_end - n_start].trim();
-				if (f_name.len > 0)
-				{
-					field_path.push(f_name);
-					idx = bp - 1;
-					continue;
-				}
-			}
-
-			if (n_start == n_end)
-			{
-				idx = bp;
-				continue;
-			}
-		}
-
-		String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
-		if (root_type.len > 0)
-		{
-			return apply_field_path(ctx, sf, root_type, field_path);
-		}
-
-		if (bp > 0 && (text[bp - 1] == '{' || text[bp - 1] == ',' || text[bp - 1] == '('))
-		{
-			idx = bp;
-			continue;
-		}
-
-		break;
-	}
-
-	return "";
+	return resolve_enclosing_field_type(ctx, sf, text, p, &field_path);
 }
 
 fn void detect_access_context(Context* ctx, SourceFile* sf)

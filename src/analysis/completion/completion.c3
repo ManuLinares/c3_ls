@@ -332,17 +332,17 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	};
 }
 
-fn ScopeKind detect_completion_scope(Context* ctx, SourceFile* sf, sz offset, String* out_expected_type, Location loc = { -1, -1 })
+fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Location loc = { -1, -1 })
 {
-	if (!sf || offset == 0 || offset > sf.content.len) return EXECUTION;
+	if (!ctx || !ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return EXECUTION;
 
-	sz line_start = offset;
-	while (line_start > 0 && sf.content[line_start - 1] != '\n')
+	sz line_start = ctx.offset;
+	while (line_start > 0 && ctx.sf.content[line_start - 1] != '\n')
 	{
 		line_start--;
 	}
 
-	String line_prefix = sf.content[line_start : offset - line_start].trim_left();
+	String line_prefix = ctx.sf.content[line_start : ctx.offset - line_start].trim_left();
 
 	if (line_prefix == "import" || line_prefix.starts_with("import ") || line_prefix.starts_with("import\t"))
 	{
@@ -368,17 +368,17 @@ fn ScopeKind detect_completion_scope(Context* ctx, SourceFile* sf, sz offset, St
 			{
 				String var_expr = words[^1].trim();
 				String resolved_type = "";
-				if (var_expr.starts_with(".") && ctx)
+				if (var_expr.starts_with("."))
 				{
-					resolved_type = find_designated_assignment_type(ctx, sf, offset);
+					resolved_type = find_designated_assignment_type(ctx, ctx.sf, ctx.offset);
 				}
-				else if (ctx && ctx.ws && ctx.ws.ctx)
+				else if (ctx.ws && ctx.ws.ctx)
 				{
-					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, sf, var_expr, loc);
+					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, var_expr, loc);
 				}
-				if (resolved_type.len == 0 && sf)
+				if (resolved_type.len == 0)
 				{
-					(void)query::find_local_decl_in_file(sf, var_expr, &resolved_type, ctx ? (ctx.ws ? ctx.ws.ctx : null) : null, loc);
+					(void)query::find_local_decl_in_file(ctx.sf, var_expr, &resolved_type, ctx.ws ? ctx.ws.ctx : null, loc);
 				}
 				if (resolved_type.len > 0)
 				{
@@ -391,7 +391,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, SourceFile* sf, sz offset, St
 
 	if (loc.line >= 0)
 	{
-		foreach (stmt : sf.ast.statements)
+		foreach (stmt : ctx.sf.ast.statements)
 		{
 			if (stmt && stmt.range.contains(loc))
 			{
@@ -504,7 +504,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);
 
 	String expected_type = "";
-	ScopeKind scope = detect_completion_scope(&ctx, sf, offset, &expected_type, loc);
+	ScopeKind scope = detect_completion_scope(&ctx, &expected_type, loc);
 	ctx.scope = scope;
 	ctx.expected_type = expected_type;
 
