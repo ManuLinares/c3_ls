@@ -554,3 +554,46 @@ fn void test_hover_on_incomplete_module_decl_crash() @test
 	String h = hover::hover(&proj, doc_uri, pos) ?? "";
 	assert(h.contains("module"));
 }
+
+fn void test_missing_symbol_in_scoped_module_does_not_resolve_globally() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String mem_mod = `module mem_lib;
+fn void free(void* ptr) {}
+`;
+
+	String sdl_mod = `module sdl3;
+fn void* sdl_load_file(String path, int size) { return null; }
+`;
+
+	String app_code = `module app;
+import mem_lib;
+import sdl3;
+
+fn void main() {
+    void* file = sdl3::sdl_load_file("asd", 13);
+    sdl3::free(file);
+}
+`;
+
+	proj.workspace.process_file("/virtual/mem_lib.c3", mem_mod);
+	proj.workspace.process_file("/virtual/sdl3.c3", sdl_mod);
+	proj.workspace.process_file("/virtual/app_scope.c3", app_code);
+
+	Uri app_uri = uri::from_file_path(mem, "/virtual/app_scope.c3");
+	defer app_uri.free();
+
+	// Cursor on `free` in `sdl3::free(file);` (line 6, character 11)
+	LspPosition pos = { .line = 6, .character = 11 };
+
+	// 1. Goto definition must return 0 locations (must not jump to mem_lib::free)
+	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	test::eq(locs.len, 0);
+
+	// 2. Hover must be empty (must not display signature of mem_lib::free)
+	String h = hover::hover(&proj, app_uri, pos) ?? "";
+	test::eq(h.len, 0);
+}

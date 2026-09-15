@@ -1198,6 +1198,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 						return (Node*)mod.module_decls.get(0);
 					}
 				}
+				return null;
 			}
 
 			String mod_name = pe.path ? pe.path.text.strip_suffix("::") : "";
@@ -1233,6 +1234,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 					}
 				}
 			}
+			return null;
 		}
 	}
 
