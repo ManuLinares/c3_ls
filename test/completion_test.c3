@@ -1522,3 +1522,124 @@ fn void test() {
 	assert(found_foo3);
 	assert(found_bar3);
 }
+
+fn void test_issue_8_module_member_fuzzy_matching() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+module sdl3;
+fn void sdl_init_window() {}
+fn void sdl_destroy_window() {}
+fn void sdl_render_present() {}
+
+module app;
+import sdl3;
+
+fn void main() {
+    sdl3::init_win
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_8.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_8.c3");
+	defer doc_uri.free();
+
+	// Line 12: `    sdl3::init_win` (col 18)
+	LspPosition pos = { .line = 12, .character = 18 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_init_win = false;
+	foreach (item : items)
+	{
+		if (item.label == "sdl_init_window") found_init_win = true;
+	}
+	assert(found_init_win);
+}
+
+fn void test_issue_9_enum_rhs_and_struct_member_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+enum Foo {
+    BAR
+}
+
+constdef Bar {
+    BAZ = 1
+}
+
+struct MyStruct {
+    Foo f;
+    Bar b;
+}
+
+Foo other = BAR;
+
+fn void test() {
+    Foo f = 
+    MyStruct ms = { .f = 
+    MyStruct ms2 = { .b = 
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_9.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_9.c3");
+	defer doc_uri.free();
+
+	// 1. `Foo f = ` (line 18, col 12) -> only BAR, Foo, other
+	LspPosition pos1 = { .line = 18, .character = 12 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool has_bar1 = false;
+	bool has_foo_type1 = false;
+	bool has_other1 = false;
+	bool has_builtin1 = false;
+
+	foreach (item : items1)
+	{
+		if (item.label == "BAR") has_bar1 = true;
+		if (item.label == "Foo") has_foo_type1 = true;
+		if (item.label == "other") has_other1 = true;
+		if (item.label == "any" || item.label == "bool" || item.label == "int") has_builtin1 = true;
+	}
+	assert(has_bar1);
+	assert(has_foo_type1);
+	assert(has_other1);
+	assert(!has_builtin1);
+
+	// 2. `MyStruct ms = { .f = ` (line 19, col 25) -> suggests BAR
+	LspPosition pos2 = { .line = 19, .character = 25 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool has_bar2 = false;
+	bool has_builtin2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "BAR") has_bar2 = true;
+		if (item.label == "any" || item.label == "bool" || item.label == "int") has_builtin2 = true;
+	}
+	assert(has_bar2);
+	assert(!has_builtin2);
+
+	// 3. `MyStruct ms2 = { .b = ` (line 20, col 26) -> suggests BAZ
+	LspPosition pos3 = { .line = 20, .character = 26 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+
+	bool has_baz3 = false;
+	bool has_builtin3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "BAZ") has_baz3 = true;
+		if (item.label == "any" || item.label == "bool" || item.label == "int") has_builtin3 = true;
+	}
+	assert(has_baz3);
+	assert(!has_builtin3);
+}

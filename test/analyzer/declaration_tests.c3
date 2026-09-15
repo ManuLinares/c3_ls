@@ -6,6 +6,7 @@ import analyzer::parser;
 import analyzer::lexer;
 import analyzer::core;
 import analyzer::sema;
+import analyzer::cursor;
 import std::io;
 import std::collections::list;
 import std::io::file;
@@ -837,4 +838,74 @@ fn void test_struct_with_invalid_field_does_not_infinite_loop() @test
 
 	Module* mod = context.modules.get("hello")!!;
 	test::eq(parser_tests::count_kind(mod, STRUCT_DECL), 1);
+}
+
+fn void test_core_substruct_hierarchical_fields_and_lookup() @test
+{
+	String source_code = `
+		module test_core_substruct;
+
+		struct Parent {
+			int root_field;
+
+			struct inner {
+				int inner_field;
+			}
+
+			union {
+				int anon_u_int;
+				float anon_u_float;
+			}
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_core_substruct.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("test_core_substruct")!!;
+	StructDecl* parent = null;
+	foreach (node : mod.nodes)
+	{
+		if (node && node.kind == STRUCT_DECL && node.as(StructDecl).name && node.as(StructDecl).name.text == "Parent")
+		{
+			parent = node.as(StructDecl);
+			break;
+		}
+	}
+	assert(parent != null);
+
+	// 1. Parent.fields must contain direct member fields and sub-struct declarations
+	test::eq(parent.fields.len, 3);
+	test::eq(parent.fields[0].kind, NodeKind.VAR_DECL);
+	test::eq(parent.fields[0].as(VarDecl).name.text, "root_field");
+
+	test::eq(parent.fields[1].kind, NodeKind.STRUCT_DECL);
+	test::eq(parent.fields[1].as(StructDecl).name.text, "inner");
+
+	test::eq(parent.fields[2].kind, NodeKind.STRUCT_DECL);
+	test::eq(parent.fields[2].as(StructDecl).name, null); // Anonymous union
+
+	// 2. Member lookup on Parent
+	Node* root_mem = cursor::find_member_in_type((Node*)parent, "root_field");
+	assert(root_mem != null);
+	test::eq(root_mem.kind, NodeKind.VAR_DECL);
+
+	Node* inner_mem = cursor::find_member_in_type((Node*)parent, "inner");
+	assert(inner_mem != null);
+	test::eq(inner_mem.kind, NodeKind.STRUCT_DECL);
+
+	Node* anon_mem = cursor::find_member_in_type((Node*)parent, "anon_u_int");
+	assert(anon_mem != null);
+	test::eq(anon_mem.kind, NodeKind.VAR_DECL);
+
+	// 3. Named sub-struct fields must NOT leak into Parent
+	Node* leaked = cursor::find_member_in_type((Node*)parent, "inner_field");
+	test::eq(leaked, null);
+
+	// 4. Member lookup on inner sub-struct
+	Node* sub_mem = cursor::find_member_in_type(inner_mem, "inner_field");
+	assert(sub_mem != null);
+	test::eq(sub_mem.kind, NodeKind.VAR_DECL);
+	test::eq(sub_mem.as(VarDecl).name.text, "inner_field");
 }

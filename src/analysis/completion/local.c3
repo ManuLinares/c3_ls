@@ -36,9 +36,13 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 				String vname = vd.name ? vd.name.text : "";
 				if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
 				{
+					String vtype = vd.type ? (cursor::spelling(vd.type, tmem) ?: "var") : "var";
+					if (lctx.ctx.scope == TYPE_ASSIGNMENT && lctx.ctx.expected_type.len > 0 && vtype != lctx.ctx.expected_type)
+					{
+						break;
+					}
 					if (lctx.seen.add(vname))
 					{
-						String vtype = vd.type ? (cursor::spelling(vd.type, tmem) ?: "var") : "var";
 						lctx.items.push(
 						{
 							.label = vname,

@@ -347,8 +347,20 @@ fn bool is_type_position(Context* ctx) @local
 	// Generics e.g. List{...}, param separation e.g. (int a, ...)
 	if (prev_char == '{' || prev_char == ',' || prev_char == '<') return true;
 
-	// Typedef alias e.g. typedef Foo = ...
-	if (prev_char == '=') return true;
+	if (prev_char == '=')
+	{
+		if (ctx.scope == TYPE_ASSIGNMENT) return false;
+
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+		foreach (stmt : ctx.sf.ast.statements)
+		{
+			if (stmt && stmt.range.contains(loc))
+			{
+				return stmt.kind == TYPEDEF_DECL || stmt.kind == ALIAS_DECL;
+			}
+		}
+		return false;
+	}
 
 	// Check words preceding the type
 	sz word_end = p;

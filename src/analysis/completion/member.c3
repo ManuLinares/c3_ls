@@ -575,6 +575,160 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 	return "";
 }
 
+fn String find_designated_assignment_type(Context* ctx, SourceFile* sf, sz offset)
+{
+	if (!sf || offset == 0 || offset > sf.content.len) return "";
+
+	String text = sf.content[:offset];
+	sz eq_pos = 0;
+	if (try idx = text.rindex_of_char('='))
+	{
+		eq_pos = idx;
+	}
+	else
+	{
+		return "";
+	}
+
+	String before_eq = text[:eq_pos].trim_right();
+
+	List{String} field_path;
+	field_path.tinit();
+
+	sz p = before_eq.len;
+	while (p > 0)
+	{
+		sz name_end = p;
+		while (p > 0 && (before_eq[p - 1].is_alnum() || before_eq[p - 1] == '_')) p--;
+		if (name_end > p && p > 0 && before_eq[p - 1] == '.')
+		{
+			String field_name = before_eq[p : name_end - p].trim();
+			if (field_name.len > 0)
+			{
+				field_path.push(field_name);
+				p--;
+				while (p > 0 && (before_eq[p - 1] == ' ' || before_eq[p - 1] == '\t')) p--;
+				continue;
+			}
+		}
+		break;
+	}
+
+	if (field_path.len() == 0) return "";
+
+	sz idx = p;
+	while (idx > 0)
+	{
+		int brace_depth = 0;
+		int paren_depth = 0;
+		int bracket_depth = 0;
+		bool in_str = false;
+		bool in_char = false;
+		bool in_raw = false;
+		sz open_brace_idx = 0;
+		bool found_open_brace = false;
+
+		for (sz i = idx; i > 0; i--)
+		{
+			char c = text[i - 1];
+			if (c == '`') { in_raw = !in_raw; continue; }
+			if (in_raw) continue;
+			if (c == '"' && (i < 2 || text[i - 2] != '\\')) { in_str = !in_str; continue; }
+			if (in_str) continue;
+			if (c == '\'' && (i < 2 || text[i - 2] != '\\')) { in_char = !in_char; continue; }
+			if (in_char) continue;
+
+			switch (c)
+			{
+				case '}': brace_depth++;
+				case '{':
+					if (brace_depth > 0)
+					{
+						brace_depth--;
+					}
+					else
+					{
+						open_brace_idx = i - 1;
+						found_open_brace = true;
+					}
+				case ')': paren_depth++;
+				case '(': if (paren_depth > 0) paren_depth--;
+				case ']': bracket_depth++;
+				case '[': if (bracket_depth > 0) bracket_depth--;
+				default: break;
+			}
+			if (found_open_brace) break;
+		}
+
+		if (!found_open_brace) return "";
+
+		sz bp = open_brace_idx;
+		while (bp > 0 && text[bp - 1].is_space()) bp--;
+
+		if (bp > 0 && text[bp - 1] == '=')
+		{
+			bp--;
+			while (bp > 0 && text[bp - 1].is_space()) bp--;
+
+			while (bp > 0 && text[bp - 1] == ']')
+			{
+				int bdepth = 1;
+				bp--;
+				while (bp > 0 && bdepth > 0)
+				{
+					bp--;
+					if (text[bp] == ']')
+					{
+						bdepth++;
+					}
+					else if (text[bp] == '[')
+					{
+						bdepth--;
+					}
+				}
+				while (bp > 0 && (text[bp - 1] == ' ' || text[bp - 1] == '\t')) bp--;
+			}
+
+			sz n_end = bp;
+			while (bp > 0 && (text[bp - 1].is_alnum() || text[bp - 1] == '_')) bp--;
+			sz n_start = bp;
+
+			if (bp > 0 && text[bp - 1] == '.')
+			{
+				String f_name = text[n_start : n_end - n_start].trim();
+				if (f_name.len > 0)
+				{
+					field_path.push(f_name);
+					idx = bp - 1;
+					continue;
+				}
+			}
+
+			if (n_start == n_end)
+			{
+				idx = bp;
+				continue;
+			}
+		}
+
+		String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
+		if (root_type.len > 0)
+		{
+			return apply_field_path(ctx, sf, root_type, field_path);
+		}
+
+		if (bp > 0 && (text[bp - 1] == '{' || text[bp - 1] == ',' || text[bp - 1] == '('))
+		{
+			idx = bp;
+			continue;
+		}
+
+		break;
+	}
+
+	return "";
+}
+
 fn void detect_access_context(Context* ctx, SourceFile* sf)
 {
 	ctx.access = NONE;
@@ -862,7 +1016,7 @@ fn void provide_enum_variants(List{CompletionItem} * items, Node* enum_node, Str
 		if (!variant || variant.kind != VAR_DECL) continue;
 		VarDecl* var_decl = variant.as(VarDecl);
 		String vname = var_decl.name ? var_decl.name.text : "";
-		if (vname.len > 0 && (prefix.len == 0 || vname.starts_with(prefix)))
+		if (vname.len > 0 && fuzzy_match(vname, prefix))
 		{
 			String insert_str = missing_second_colon ? string::tformat(":%s", vname) : vname;
 			items.push(
@@ -1011,7 +1165,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 
 									FaultDecl* fdecl = fault_node.as(FaultDecl);
 									String fname = fdecl.name ? fdecl.name.text : "";
-									if (fname.len > 0 && (ctx.prefix.len == 0 || fname.starts_with(ctx.prefix)))
+									if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 									{
 										add_symbol_completion(ctx, items, fname, fault_node, clean_type, ctx.prefix);
 									}
@@ -1023,7 +1177,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 
 							String sym_name = cursor::spelling(node, tmem);
 							if (sym_name.len == 0) continue;
-							if (ctx.prefix.len == 0 || sym_name.starts_with(ctx.prefix))
+							if (fuzzy_match(sym_name, ctx.prefix))
 							{
 								add_symbol_completion(ctx, items, sym_name, node, clean_type, ctx.prefix);
 							}

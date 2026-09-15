@@ -332,7 +332,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	};
 }
 
-fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expected_type, AnalyzerContext* actx = null, Location loc = { -1, -1 })
+fn ScopeKind detect_completion_scope(Context* ctx, SourceFile* sf, sz offset, String* out_expected_type, Location loc = { -1, -1 })
 {
 	if (!sf || offset == 0 || offset > sf.content.len) return EXECUTION;
 
@@ -368,13 +368,17 @@ fn ScopeKind detect_completion_scope(SourceFile* sf, sz offset, String* out_expe
 			{
 				String var_expr = words[^1].trim();
 				String resolved_type = "";
-				if (actx && sf)
+				if (var_expr.starts_with(".") && ctx)
 				{
-					resolved_type = query::resolve_type_of_chain(actx, sf, var_expr, loc);
+					resolved_type = find_designated_assignment_type(ctx, sf, offset);
+				}
+				else if (ctx && ctx.ws && ctx.ws.ctx)
+				{
+					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, sf, var_expr, loc);
 				}
 				if (resolved_type.len == 0 && sf)
 				{
-					(void)query::find_local_decl_in_file(sf, var_expr, &resolved_type, actx, loc);
+					(void)query::find_local_decl_in_file(sf, var_expr, &resolved_type, ctx ? (ctx.ws ? ctx.ws.ctx : null) : null, loc);
 				}
 				if (resolved_type.len > 0)
 				{
@@ -442,7 +446,7 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * i
 			if (!variant || variant.kind != VAR_DECL) continue;
 			VarDecl* vd = variant.as(VarDecl);
 			String vname = vd.name ? vd.name.text : "";
-			if (vname.len > 0 && (ctx.prefix.len == 0 || vname.starts_with(ctx.prefix)))
+			if (vname.len > 0 && fuzzy_match(vname, ctx.prefix))
 			{
 				items.push(
 				{
@@ -481,8 +485,6 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.line = (int)pos.line,
 		.column = (int)pos.character
 	};
-	String expected_type = "";
-	ScopeKind scope = detect_completion_scope(sf, offset, &expected_type, project.workspace.ctx, loc);
 
 	String caller_mod = query::get_module_name_at_location(sf, loc);
 
@@ -492,14 +494,19 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.ws = &project.workspace,
 		.sf = sf,
 		.allocator = tmem,
-		.scope = scope,
+		.scope = EXECUTION,
 		.offset = offset,
-		.expected_type = expected_type,
+		.expected_type = "",
 		.caller_mod = caller_mod,
 		.missing_second_colon = false,
 	};
 
 	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);
+
+	String expected_type = "";
+	ScopeKind scope = detect_completion_scope(&ctx, sf, offset, &expected_type, loc);
+	ctx.scope = scope;
+	ctx.expected_type = expected_type;
 
 	detect_access_context(&ctx, sf);
 
@@ -513,15 +520,39 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	}
 	else
 	{
-		provide_named_args(&ctx, &items);
-		if (expected_type.len > 0)
+		bool is_enum_expected = false;
+		if (expected_type.len > 0 && project.workspace.ctx)
+		{
+			Node* node = query::find_type_node_in_context(project.workspace.ctx, sf, expected_type);
+			if (!node)
+			{
+				List{SymbolEntry} syms = project.workspace.find_symbol_by_name(expected_type, sf);
+				if (syms.len() > 0 && syms.get(0).node) node = syms.get(0).node;
+			}
+			if (node && node.kind == ENUM_DECL)
+			{
+				is_enum_expected = true;
+			}
+		}
+
+		if (is_enum_expected)
 		{
 			provide_expected_type_completions(&ctx, &items, expected_type);
+			provide_locals(&ctx, &items);
+			provide_global(&ctx, &items);
 		}
-		provide_locals(&ctx, &items);
-		provide_global(&ctx, &items);
-		provide_builtin_types(&ctx, &items);
-		provide_keywords(&ctx, &items);
+		else
+		{
+			provide_named_args(&ctx, &items);
+			if (expected_type.len > 0)
+			{
+				provide_expected_type_completions(&ctx, &items, expected_type);
+			}
+			provide_locals(&ctx, &items);
+			provide_global(&ctx, &items);
+			provide_builtin_types(&ctx, &items);
+			provide_keywords(&ctx, &items);
+		}
 	}
 
 	foreach (&item : items)

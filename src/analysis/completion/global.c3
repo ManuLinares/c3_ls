@@ -35,12 +35,21 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 				FnDecl* fndecl = fn_info.node.as(FnDecl);
 				if (!fndecl.associated_type)
 				{
-					String fname = fndecl.name ? fndecl.name.text : "";
-					if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
+					bool type_matches = true;
+					if (ctx.scope == TYPE_ASSIGNMENT && ctx.expected_type.len > 0)
 					{
-						if (seen_symbols.add(fname))
+						String rtype = fndecl.ret_type ? (cursor::raw_type_identifier(fndecl.ret_type) ?? "") : "";
+						if (rtype != ctx.expected_type) type_matches = false;
+					}
+					if (type_matches)
+					{
+						String fname = fndecl.name ? fndecl.name.text : "";
+						if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 						{
-							add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
+							if (seen_symbols.add(fname))
+							{
+								add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
+							}
 						}
 					}
 				}
@@ -52,7 +61,8 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			if (ty_info && ty_info.node)
 			{
 				String tname = cursor::spelling(ty_info.node, tmem);
-				if (tname.len > 0 && fuzzy_match(tname, ctx.prefix))
+				bool type_matches = (ctx.scope != TYPE_ASSIGNMENT || ctx.expected_type.len == 0 || tname == ctx.expected_type);
+				if (type_matches && tname.len > 0 && fuzzy_match(tname, ctx.prefix))
 				{
 					if (seen_symbols.add(tname))
 					{
@@ -62,24 +72,27 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			}
 		};
 
-		reg.macros.@each(; qname, mac_info)
+		if (ctx.scope != TYPE_ASSIGNMENT || ctx.expected_type.len == 0)
 		{
-			if (mac_info && mac_info.node && mac_info.node.kind == MACRO_DECL)
+			reg.macros.@each(; qname, mac_info)
 			{
-				MacroDecl* mac = mac_info.node.as(MacroDecl);
-				if (!@ok(mac.associated_type.get()))
+				if (mac_info && mac_info.node && mac_info.node.kind == MACRO_DECL)
 				{
-					String mname = mac.name ? mac.name.text : "";
-					if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
+					MacroDecl* mac = mac_info.node.as(MacroDecl);
+					if (!@ok(mac.associated_type.get()))
 					{
-						if (seen_symbols.add(mname))
+						String mname = mac.name ? mac.name.text : "";
+						if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
 						{
-							add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+							if (seen_symbols.add(mname))
+							{
+								add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+							}
 						}
 					}
 				}
-			}
-		};
+			};
+		}
 	}
 
 	ctx.ws.ctx.files.@each(; file_path, sf)
@@ -94,6 +107,31 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 				{
 					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
+
+					if (ctx.scope == TYPE_ASSIGNMENT && ctx.expected_type.len > 0)
+					{
+						if (stmt.kind == VAR_DECL)
+						{
+							VarDecl* vd = stmt.as(VarDecl);
+							String vtype = vd.type ? (cursor::raw_type_identifier(vd.type) ?? "") : "";
+							if (vtype != ctx.expected_type) continue;
+						}
+						else if (stmt.kind == FN_DECL)
+						{
+							FnDecl* fd = stmt.as(FnDecl);
+							String rtype = fd.ret_type ? (cursor::raw_type_identifier(fd.ret_type) ?? "") : "";
+							if (rtype != ctx.expected_type) continue;
+						}
+						else if (stmt.kind == STRUCT_DECL || stmt.kind == ENUM_DECL || stmt.kind == TYPEDEF_DECL || stmt.kind == ALIAS_DECL)
+						{
+							String tname = cursor::spelling(stmt, tmem);
+							if (tname != ctx.expected_type) continue;
+						}
+						else
+						{
+							continue;
+						}
+					}
 
 					String sname = cursor::spelling(stmt, tmem);
 					if (sname.len > 0 && fuzzy_match(sname, ctx.prefix))
