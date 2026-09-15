@@ -63,6 +63,7 @@ Fields:
 struct AliasDecl
 {
 	inline Node node;
+	NullableNode contract;
 	Ident* name;
 	TokenKind name_kind;
 	AliasDeclKind alias_kind;
@@ -85,6 +86,7 @@ struct AliasDecl
 struct TypedefDecl
 {
 	inline Node node;
+	NullableNode contract;
 	Ident* name;
 	Node* base_type;
 	Node* generics;

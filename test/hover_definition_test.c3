@@ -239,6 +239,57 @@ fn void test_hover_on_typedef_and_alias()
 	assert(hover_alias.contains("alias StringList ="));
 }
 
+fn void test_issue_3_doc_comments_on_hover_for_alias_and_typedef() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `<*
+ func
+ doc
+ comment
+*>
+alias MyFunction = fn void();
+
+<* my typedef *>
+typedef Foo = int;
+
+fn void test() {
+    MyFunction func;
+    Foo foo = 0;
+}
+`;
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_3_doc.c3");
+	defer doc_uri.free();
+
+	proj.workspace.process_file("/virtual/issue_3_doc.c3", source);
+
+	// 1. Hover on alias declaration (line 5, col 8)
+	LspPosition alias_decl_pos = { .line = 5, .character = 8 };
+	String h_alias_decl = hover::hover(&proj, doc_uri, alias_decl_pos)!!;
+	assert(h_alias_decl.contains("alias MyFunction = fn void()"));
+	assert(h_alias_decl.contains("func\n doc\n comment"));
+
+	// 2. Hover on alias usage (line 11, col 6)
+	LspPosition alias_use_pos = { .line = 11, .character = 6 };
+	String h_alias_use = hover::hover(&proj, doc_uri, alias_use_pos)!!;
+	assert(h_alias_use.contains("alias MyFunction = fn void()"));
+	assert(h_alias_use.contains("func\n doc\n comment"));
+
+	// 3. Hover on typedef declaration (line 8, col 10)
+	LspPosition td_decl_pos = { .line = 8, .character = 10 };
+	String h_td_decl = hover::hover(&proj, doc_uri, td_decl_pos)!!;
+	assert(h_td_decl.contains("typedef Foo = int"));
+	assert(h_td_decl.contains("my typedef"));
+
+	// 4. Hover on typedef usage (line 12, col 6)
+	LspPosition td_use_pos = { .line = 12, .character = 6 };
+	String h_td_use = hover::hover(&proj, doc_uri, td_use_pos)!!;
+	assert(h_td_use.contains("typedef Foo = int"));
+	assert(h_td_use.contains("my typedef"));
+}
+
 fn void test_goto_definition_struct_member_designated_init()
 {
 	LspProject proj;

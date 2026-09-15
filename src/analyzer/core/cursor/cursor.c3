@@ -414,6 +414,16 @@ fn Node*? contract(Node* node)
 				EnumDecl* decl = node.as(EnumDecl);
 				if (try val = decl.contract.get()) return val;
 			}
+		case ALIAS_DECL:
+			{
+				AliasDecl* decl = node.as(AliasDecl);
+				if (try val = decl.contract.get()) return val;
+			}
+		case TYPEDEF_DECL:
+			{
+				TypedefDecl* decl = node.as(TypedefDecl);
+				if (try val = decl.contract.get()) return val;
+			}
 		default:
 			break;
 	}

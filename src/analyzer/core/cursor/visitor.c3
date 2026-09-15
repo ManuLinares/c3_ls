@@ -230,6 +230,10 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case TYPEDEF_DECL:
 			{
 				TypedefDecl* td = node.as(TypedefDecl);
+				if (try contract = td.contract.get())
+				{
+					if (!visit(contract, parent, hooks, data)) return false;
+				}
 				if (td.generics && !visit(td.generics, parent, hooks, data)) return false;
 				if (td.base_type && !visit(td.base_type, parent, hooks, data)) return false;
 				foreach (inter : td.interfaces)
@@ -245,6 +249,10 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case ALIAS_DECL:
 			{
 				AliasDecl* ad = node.as(AliasDecl);
+				if (try contract = ad.contract.get())
+				{
+					if (!visit(contract, parent, hooks, data)) return false;
+				}
 				if (ad.generics && !visit(ad.generics, parent, hooks, data)) return false;
 				if (ad.target && !visit(ad.target, parent, hooks, data)) return false;
 				foreach (attr : ad.attributes)
