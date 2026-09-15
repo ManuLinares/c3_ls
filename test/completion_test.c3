@@ -1643,3 +1643,130 @@ fn void test() {
 	assert(has_baz3);
 	assert(!has_builtin3);
 }
+
+fn void test_issue_5_exclude_already_set_fields() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct MyStruct {
+    int foo;
+    int bar;
+}
+
+fn void test() {
+    MyStruct ms = {
+        .foo = 0,
+        .
+    };
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_5_set.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_5_set.c3");
+	defer doc_uri.free();
+
+	// Cursor at line 10, col 9 (`        .`)
+	LspPosition pos = { .line = 10, .character = 9 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_bar = false;
+	bool found_foo = false;
+	foreach (item : items)
+	{
+		if (item.label == "bar")
+		{
+			found_bar = true;
+			test::eq(item.insertText, "bar = $1");
+			test::eq(item.insertTextFormat, InsertTextFormat.SNIPPET);
+		}
+		if (item.label == "foo") found_foo = true;
+	}
+
+	assert(found_bar);
+	assert(!found_foo);
+}
+
+fn void test_issue_5_optional_dot_and_auto_insertion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct MyStruct {
+    int foo;
+    int bar;
+}
+
+fn void test() {
+    MyStruct ms = {
+        
+    };
+
+    MyStruct ms2 = {
+        .foo = 0,
+        
+    };
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_5_opt.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_5_opt.c3");
+	defer doc_uri.free();
+
+	// 1. Line 9, col 8 inside `MyStruct ms = { | }` (no dot present)
+	LspPosition pos1 = { .line = 9, .character = 8 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_foo1 = false;
+	bool found_bar1 = false;
+	bool found_global1 = false;
+
+	foreach (item : items1)
+	{
+		if (item.label == "foo")
+		{
+			found_foo1 = true;
+			test::eq(item.insertText, ".foo = $1");
+			test::eq(item.insertTextFormat, InsertTextFormat.SNIPPET);
+		}
+		if (item.label == "bar") found_bar1 = true;
+		if (item.label == "ms" || item.label == "while" || item.label == "import" || item.label.starts_with("@"))
+		{
+			found_global1 = true;
+		}
+	}
+
+	assert(found_foo1);
+	assert(found_bar1);
+	assert(!found_global1);
+
+	// 2. Line 14, col 8 inside `ms2` after `.foo = 0,` (no dot present)
+	LspPosition pos2 = { .line = 14, .character = 8 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_foo2 = false;
+	bool found_bar2 = false;
+	bool found_global2 = false;
+
+	foreach (item : items2)
+	{
+		if (item.label == "foo") found_foo2 = true;
+		if (item.label == "bar")
+		{
+			found_bar2 = true;
+			test::eq(item.insertText, ".bar = $1");
+			test::eq(item.insertTextFormat, InsertTextFormat.SNIPPET);
+		}
+		if (item.label == "ms" || item.label.starts_with("@")) found_global2 = true;
+	}
+
+	assert(!found_foo2);
+	assert(found_bar2);
+	assert(!found_global2);
+}

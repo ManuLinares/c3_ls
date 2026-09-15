@@ -31,6 +31,8 @@ struct Context
 	String expected_type;
 	String caller_mod;
 	bool missing_second_colon;
+	bool is_designated_initializer;
+	bool designated_has_dot;
 }
 
 fn void resolve_item(LspProject* project, CompletionItem* item)
@@ -499,6 +501,8 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.expected_type = "",
 		.caller_mod = caller_mod,
 		.missing_second_colon = false,
+		.is_designated_initializer = false,
+		.designated_has_dot = false,
 	};
 
 	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);

@@ -601,6 +601,8 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	ctx.access = NONE;
 	ctx.base_identifier = "";
 	ctx.missing_second_colon = false;
+	ctx.is_designated_initializer = false;
+	ctx.designated_has_dot = false;
 
 	if (!sf || ctx.offset == 0 || ctx.offset > sf.content.len) return;
 
@@ -640,6 +642,24 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	}
 	else
 	{
+		sz p = cursor_idx;
+		while (p > 0 && text[p - 1].is_space()) p--;
+		if (p > 0 && (text[p - 1] == '{' || text[p - 1] == ','))
+		{
+			String struct_type = find_designated_initializer_type(ctx, sf, cursor_idx);
+			if (struct_type.len > 0)
+			{
+				Node* type_node = query::find_type_node_in_context(ctx.ws ? ctx.ws.ctx : null, sf, struct_type);
+				if (type_node && type_node.kind == STRUCT_DECL)
+				{
+					ctx.access = INSTANCE;
+					ctx.base_identifier = struct_type;
+					ctx.is_designated_initializer = true;
+					ctx.designated_has_dot = false;
+					return;
+				}
+			}
+		}
 		return;
 	}
 
@@ -659,6 +679,8 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 		{
 			ctx.access = INSTANCE;
 			ctx.base_identifier = struct_type;
+			ctx.is_designated_initializer = true;
+			ctx.designated_has_dot = true;
 		}
 		else
 		{
@@ -901,6 +923,60 @@ fn void provide_enum_variants(List{CompletionItem} * items, Node* enum_node, Str
 	}
 }
 
+fn void collect_already_set_fields(String text, sz open_brace_idx, sz cursor_offset, sz prefix_len, HashSet{String}* out_set) @local
+{
+	int brace_depth = 0;
+	int paren_depth = 0;
+	int bracket_depth = 0;
+	bool in_str = false;
+	bool in_char = false;
+	bool in_raw = false;
+
+	sz limit = cursor_offset > prefix_len ? cursor_offset - prefix_len : cursor_offset;
+
+	for (sz i = open_brace_idx + 1; i < limit && i < text.len; i++)
+	{
+		char c = text[i];
+		if (c == '`') { in_raw = !in_raw; continue; }
+		if (in_raw) continue;
+		if (c == '"' && (i == 0 || text[i - 1] != '\\')) { in_str = !in_str; continue; }
+		if (in_str) continue;
+		if (c == '\'' && (i == 0 || text[i - 1] != '\\')) { in_char = !in_char; continue; }
+		if (in_char) continue;
+
+		switch (c)
+		{
+			case '{': brace_depth++;
+			case '}': if (brace_depth > 0) brace_depth--;
+			case '(': paren_depth++;
+			case ')': if (paren_depth > 0) paren_depth--;
+			case '[': bracket_depth++;
+			case ']': if (bracket_depth > 0) bracket_depth--;
+			case '.':
+				if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0)
+				{
+					sz start = i + 1;
+					sz end = start;
+					while (end < text.len && (text[end].is_alnum() || text[end] == '_')) end++;
+					if (end > start && end <= limit)
+					{
+						sz next_p = end;
+						while (next_p < text.len && (text[next_p] == ' ' || text[next_p] == '\t')) next_p++;
+						if (next_p < text.len && text[next_p] == '.')
+						{
+							continue;
+						}
+
+						String field_name = text[start : end - start];
+						out_set.add(field_name);
+						i = end - 1;
+					}
+				}
+			default: break;
+		}
+	}
+}
+
 fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * items, Node* struct_node, String type_name, HashSet{String} * seen_fields)
 {
 	if (!struct_node || struct_node.kind != STRUCT_DECL) return;
@@ -920,12 +996,27 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 					if (seen_fields.add(fname))
 					{
 						String ftype = cursor::spelling(fdecl.type, tmem);
+						String insert_str = fname;
+						InsertTextFormat format = PLAIN_TEXT;
+						if (ctx.is_designated_initializer)
+						{
+							if (ctx.designated_has_dot)
+							{
+								insert_str = string::tformat("%s = $1", fname);
+							}
+							else
+							{
+								insert_str = string::tformat(".%s = $1", fname);
+							}
+							format = SNIPPET;
+						}
 						items.push(
 						{
 							.label = fname,
 							.kind = FIELD,
 							.detail = ftype,
-							.insertText = fname,
+							.insertText = insert_str,
+							.insertTextFormat = format,
 							.filterText = fname,
 							.sortText = string::tformat("0001_%s", fname),
 							.data = string::tformat("field:%s:%s", type_name, fname)
@@ -963,12 +1054,27 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem} * ite
 				if (sname.len > 0 && fuzzy_match(sname, ctx.prefix) && seen_fields.add(sname))
 				{
 					String kind_str = sub.is_union ? "union" : (sub.is_bitstruct ? "bitstruct" : "struct");
+					String insert_str = sname;
+					InsertTextFormat format = PLAIN_TEXT;
+					if (ctx.is_designated_initializer)
+					{
+						if (ctx.designated_has_dot)
+						{
+							insert_str = string::tformat("%s = $1", sname);
+						}
+						else
+						{
+							insert_str = string::tformat(".%s = $1", sname);
+						}
+						format = SNIPPET;
+					}
 					items.push(
 					{
 						.label = sname,
 						.kind = FIELD,
 						.detail = string::tformat("%s %s", kind_str, sname),
-						.insertText = sname,
+						.insertText = insert_str,
+						.insertTextFormat = format,
 						.filterText = sname,
 						.sortText = string::tformat("0001_%s", sname),
 						.data = string::tformat("field:%s:%s", type_name, sname)
@@ -1152,10 +1258,21 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 				{
 					HashSet{String} seen_fields;
 					seen_fields.tinit();
+					if (ctx.is_designated_initializer && ctx.sf)
+					{
+						sz open_brace = find_enclosing_open_brace(ctx.sf.content, ctx.offset);
+						if (open_brace != (sz)-1)
+						{
+							collect_already_set_fields(ctx.sf.content, open_brace, ctx.offset, ctx.prefix.len, &seen_fields);
+						}
+					}
 					collect_struct_fields_recursive(ctx, items, type_node, clean_type, &seen_fields);
 				}
 
-				provide_methods_for_type(ctx, items, type_name, &seen_methods);
+				if (!ctx.is_designated_initializer)
+				{
+					provide_methods_for_type(ctx, items, type_name, &seen_methods);
+				}
 				return true;
 			}
 
