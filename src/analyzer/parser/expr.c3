@@ -1281,7 +1281,16 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 				switch (consume(ctx, EQ))
 				{
 				case true:
-					Node* val = parse_expr(scope);
+					Node* val;
+					if (ctx.is(RBRACE) || ctx.is(COMMA) || ctx.is(EOS) || ctx.is(RPAREN))
+					{
+						diagnostics::error(ctx.context, ctx.current.range, "Expected expression after '='");
+						val = ctx.ast.error(ctx.current.range);
+					}
+					else
+					{
+						val = parse_expr(scope);
+					}
 					DesignatedInitializerExpr* des_init_node = ctx.ast.alloc_node(DesignatedInitializerExpr, path_token.range);
 					des_init_node.range.end = ctx.current.range.end;
 
@@ -1301,6 +1310,7 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 		exprs.push(expr);
 
 		if (consume(ctx, RBRACE)) break;
+		if (ctx.is(EOS) || ctx.is(RPAREN) || is_token_start_of_decl(ctx.current.kind)) break;
 		expect(ctx, node, COMMA);
 		if (ctx.is(RBRACE))
 		{

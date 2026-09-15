@@ -1770,3 +1770,295 @@ fn void test() {
 	assert(found_bar2);
 	assert(!found_global2);
 }
+
+fn void test_issue_11_designated_assignment_without_space_before_dot() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module allalaa;
+
+enum Dir {
+	NORTH
+}
+
+struct Game {
+	int score;
+	Dir dir;
+}
+
+fn int main(String[] args)
+{
+	Game g1 = {.dir = };
+	Game g2 = { .score = 12,.dir = };
+	Game g3 = {
+		.score = 12,.dir = 
+	}
+	return 0;
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_11.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_11.c3");
+	defer doc_uri.free();
+
+	// 1. `g1 = {.dir = ` (line 13, col 19)
+	LspPosition pos1 = { .line = 13, .character = 19 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "NORTH")
+		{
+			found1 = true;
+			test::eq(item.sortText, "0000_NORTH");
+		}
+	}
+	assert(found1);
+
+	// 2. `g2 = { .score = 12,.dir = ` (line 14, col 32)
+	LspPosition pos2 = { .line = 14, .character = 32 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "NORTH")
+		{
+			found2 = true;
+			test::eq(item.sortText, "0000_NORTH");
+		}
+	}
+	assert(found2);
+
+	// 3. `g3 = {\n\t\t.score = 12,.dir = ` (line 16, col 21)
+	LspPosition pos3 = { .line = 16, .character = 21 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "NORTH")
+		{
+			found3 = true;
+			test::eq(item.sortText, "0000_NORTH");
+		}
+	}
+	assert(found3);
+}
+
+fn void test_detect_completion_scope_edge_cases() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+enum State {
+	IDLE,
+	RUNNING
+}
+
+struct Inner {
+	State st;
+}
+
+struct Outer {
+	int id;
+	Inner in;
+	State state;
+}
+
+fn void main() {
+	Outer o1 = {.state = };
+	Outer o2 = { .id = 1,.state = };
+	Outer o3 = {
+		.id = 2,.in = { .st = }
+	};
+
+	Outer o4;
+	o4.state = 
+
+	int a = 1,b = 
+
+	if (a == 1) {}
+}
+`;
+
+	proj.workspace.process_file("/virtual/scope_edges.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/scope_edges.c3");
+	defer doc_uri.free();
+
+	// 1. `{.state = ` -> suggests State enum (IDLE) (line 18, col 22)
+	LspPosition pos1 = { .line = 18, .character = 22 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_idle1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "IDLE") found_idle1 = true;
+	}
+	assert(found_idle1);
+
+	// 2. `.id = 1,.state = ` -> suggests State enum (RUNNING) (line 19, col 31)
+	LspPosition pos2 = { .line = 19, .character = 31 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_running2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "RUNNING") found_running2 = true;
+	}
+	assert(found_running2);
+
+	// 3. Nested designated `.st = ` -> suggests State enum (IDLE) (line 21, col 24)
+	LspPosition pos3 = { .line = 21, .character = 24 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_idle3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "IDLE") found_idle3 = true;
+	}
+	assert(found_idle3);
+
+	// 4. `o4.state = ` -> member assignment resolves to State enum (line 25, col 12)
+	LspPosition pos4 = { .line = 25, .character = 12 };
+	CompletionItem[] items4 = completion::resolve(&proj, doc_uri, pos4)!!;
+	bool found_idle4 = false;
+	foreach (item : items4)
+	{
+		if (item.label == "IDLE") found_idle4 = true;
+	}
+	assert(found_idle4);
+
+	// 5. `int a = 1,b = ` -> compact multiple decl resolves to int (line 27, col 15)
+	LspPosition pos5 = { .line = 27, .character = 15 };
+	CompletionItem[] items5 = completion::resolve(&proj, doc_uri, pos5)!!;
+	assert(items5.len > 0);
+
+	// 6. `if (a == 1)` -> comparison expression must not be trapped as type assignment (line 29, col 12)
+	LspPosition pos6 = { .line = 29, .character = 12 };
+	CompletionItem[] items6 = completion::resolve(&proj, doc_uri, pos6)!!;
+	assert(items6.len > 0);
+}
+
+fn void test_designated_initializer_no_space_comprehensive() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module allalaa;
+
+enum Dir {
+	NORTH,
+	SOUTH
+}
+
+struct Game {
+	int score;
+	Dir dir;
+}
+
+fn void play(Game g) {}
+
+fn void main() {
+	Game g1 = {.;
+	Game g2 = { .score = 12,.;
+	Game g3 = {.d;
+	Game g4 = { .score = 12,.d;
+	Game g5 = {.dir = N;
+	Game g6 = { .score = 12,.dir = N;
+	play({.dir = );
+	play({.score = 12,.dir = );
+}
+`;
+
+	proj.workspace.process_file("/virtual/comprehensive_edges.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/comprehensive_edges.c3");
+	defer doc_uri.free();
+
+	// 1. Field completion on `{.` without space (line 15, col 13)
+	LspPosition pos1 = { .line = 15, .character = 13 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_score1 = false;
+	bool found_dir1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "score") found_score1 = true;
+		if (item.label == "dir") found_dir1 = true;
+	}
+	assert(found_score1);
+	assert(found_dir1);
+
+	// 2. Field completion on `,.` without space (line 16, col 26) -> excludes already-set `score`
+	LspPosition pos2 = { .line = 16, .character = 26 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_score2 = false;
+	bool found_dir2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "score") found_score2 = true;
+		if (item.label == "dir") found_dir2 = true;
+	}
+	assert(!found_score2);
+	assert(found_dir2);
+
+	// 3. Field prefix completion on `{.d` (line 17, col 14)
+	LspPosition pos3 = { .line = 17, .character = 14 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_dir3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "dir") found_dir3 = true;
+	}
+	assert(found_dir3);
+
+	// 4. Field prefix completion on `,.d` (line 18, col 27)
+	LspPosition pos4 = { .line = 18, .character = 27 };
+	CompletionItem[] items4 = completion::resolve(&proj, doc_uri, pos4)!!;
+	bool found_dir4 = false;
+	foreach (item : items4)
+	{
+		if (item.label == "dir") found_dir4 = true;
+	}
+	assert(found_dir4);
+
+	// 5. Enum value completion with prefix `N` after `{.dir = N` (line 19, col 20)
+	LspPosition pos5 = { .line = 19, .character = 20 };
+	CompletionItem[] items5 = completion::resolve(&proj, doc_uri, pos5)!!;
+	bool found_north5 = false;
+	foreach (item : items5)
+	{
+		if (item.label == "NORTH") found_north5 = true;
+	}
+	assert(found_north5);
+
+	// 6. Enum value completion with prefix `N` after `,.dir = N` (line 20, col 33)
+	LspPosition pos6 = { .line = 20, .character = 33 };
+	CompletionItem[] items6 = completion::resolve(&proj, doc_uri, pos6)!!;
+	bool found_north6 = false;
+	foreach (item : items6)
+	{
+		if (item.label == "NORTH") found_north6 = true;
+	}
+	assert(found_north6);
+
+	// 7. Call arg designated initializer `play({.dir = ` (line 21, col 14)
+	LspPosition pos7 = { .line = 21, .character = 14 };
+	CompletionItem[] items7 = completion::resolve(&proj, doc_uri, pos7)!!;
+	bool found_north7 = false;
+	foreach (item : items7)
+	{
+		if (item.label == "NORTH") found_north7 = true;
+	}
+	assert(found_north7);
+
+	// 8. Call arg designated initializer `play({.score = 12,.dir = ` (line 22, col 26)
+	LspPosition pos8 = { .line = 22, .character = 26 };
+	CompletionItem[] items8 = completion::resolve(&proj, doc_uri, pos8)!!;
+	bool found_north8 = false;
+	foreach (item : items8)
+	{
+		if (item.label == "NORTH") found_north8 = true;
+	}
+	assert(found_north8);
+}

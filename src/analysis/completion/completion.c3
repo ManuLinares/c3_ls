@@ -355,8 +355,43 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 	{
 		if (eq_idx == 0 || (line_prefix[eq_idx - 1] != '=' && line_prefix[eq_idx - 1] != '!' && line_prefix[eq_idx - 1] != '<' && line_prefix[eq_idx - 1] != '>'))
 		{
+			String des_type = find_designated_assignment_type(ctx, ctx.sf, ctx.offset);
+			if (des_type.len > 0)
+			{
+				if (out_expected_type) *out_expected_type = des_type;
+				return TYPE_ASSIGNMENT;
+			}
+
 			String lhs = line_prefix[:eq_idx].trim();
-			String[] words = lhs.tsplit(" ");
+			sz clause_start = 0;
+			int depth = 0;
+			for (sz i = lhs.len; i > 0; i--)
+			{
+				char c = lhs[i - 1];
+				if (c == ')' || c == ']' || c == '}')
+				{
+					depth++;
+				}
+				else if (c == '(' || c == '[' || c == '{')
+				{
+					if (depth > 0)
+					{
+						depth--;
+					}
+					else
+					{
+						clause_start = i;
+						break;
+					}
+				}
+				else if (depth == 0 && (c == ',' || c == ';'))
+				{
+					clause_start = i;
+					break;
+				}
+			}
+			String clause = lhs[clause_start..].trim();
+			String[] words = clause.tsplit(" ");
 			if (words.len >= 2)
 			{
 				String candidate_type = words[^2].trim().trim_right("*& \t");
@@ -370,11 +405,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 			{
 				String var_expr = words[^1].trim();
 				String resolved_type = "";
-				if (var_expr.starts_with("."))
-				{
-					resolved_type = find_designated_assignment_type(ctx, ctx.sf, ctx.offset);
-				}
-				else if (ctx.ws && ctx.ws.ctx)
+				if (ctx.ws && ctx.ws.ctx)
 				{
 					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, var_expr, loc);
 				}

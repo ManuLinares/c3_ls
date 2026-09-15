@@ -588,6 +588,7 @@ fn String find_designated_assignment_type(Context* ctx, SourceFile* sf, sz offse
 				continue;
 			}
 		}
+		if (name_end > p) return "";
 		break;
 	}
 
