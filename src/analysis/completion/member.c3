@@ -90,6 +90,12 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 			{
 				idx--;
 			}
+
+			// In C3, an expression can never begin with `[`. An unattached `[...]` is an array designator.
+			if (idx < text.len && text[idx] == '[')
+			{
+				return end_idx;
+			}
 		}
 		else if (text[idx - 1] == '"')
 		{
@@ -404,6 +410,28 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 	{
 		sz p = scan_p;
 		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+
+		bool bracket_skipped = false;
+		while (p > 0 && text[p - 1] == ']')
+		{
+			int bdepth = 1;
+			p--;
+			bracket_skipped = true;
+			while (p > 0 && bdepth > 0)
+			{
+				p--;
+				if (text[p] == ']')
+				{
+					bdepth++;
+				}
+				else if (text[p] == '[')
+				{
+					bdepth--;
+				}
+			}
+			while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+		}
+
 		sz name_end = p;
 		while (p > 0 && (text[p - 1].is_alnum() || text[p - 1] == '_')) p--;
 		if (name_end > p && p > 0 && text[p - 1] == '.')
@@ -415,6 +443,11 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 				scan_p = p - 1;
 				continue;
 			}
+		}
+
+		if (bracket_skipped)
+		{
+			scan_p = p;
 		}
 		break;
 	}
@@ -475,6 +508,25 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 			p--;
 			while (p > 0 && text[p - 1].is_space()) p--;
 
+			while (p > 0 && text[p - 1] == ']')
+			{
+				int bdepth = 1;
+				p--;
+				while (p > 0 && bdepth > 0)
+				{
+					p--;
+					if (text[p] == ']')
+					{
+						bdepth++;
+					}
+					else if (text[p] == '[')
+					{
+						bdepth--;
+					}
+				}
+				while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t')) p--;
+			}
+
 			sz name_end = p;
 			while (p > 0 && (text[p - 1].is_alnum() || text[p - 1] == '_')) p--;
 			sz name_start = p;
@@ -488,6 +540,13 @@ fn String find_designated_initializer_type(Context* ctx, SourceFile* sf, sz dot_
 					idx = p - 1;
 					continue;
 				}
+			}
+
+			if (name_start == name_end)
+			{
+				// Array index initializer (e.g. '[0] = {') - continue outward to enclosing array
+				idx = p;
+				continue;
 			}
 
 			String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);

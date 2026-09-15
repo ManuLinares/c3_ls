@@ -1443,3 +1443,82 @@ fn void run() {
 	}
 	assert(found_uint2);
 }
+
+fn void test_issue_7_array_index_initializer_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct MyStruct {
+    int foo;
+    int bar;
+}
+
+fn void test() {
+    MyStruct[1] works = {
+        {
+            .
+        }
+    };
+
+    MyStruct[1] nowork = {
+        [0] = {
+            .
+        }
+    };
+
+    MyStruct[1] chained = {
+        [0].
+    };
+}
+`;
+
+	proj.workspace.process_file("/virtual/issue_7.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/issue_7.c3");
+	defer doc_uri.free();
+
+	// 1. `works` without index: line 10, col 13
+	LspPosition pos1 = { .line = 10, .character = 13 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_foo1 = false;
+	bool found_bar1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "foo") found_foo1 = true;
+		if (item.label == "bar") found_bar1 = true;
+	}
+	assert(found_foo1);
+	assert(found_bar1);
+
+	// 2. `nowork` with `[0] = { .`: line 16, col 13
+	LspPosition pos2 = { .line = 16, .character = 13 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_foo2 = false;
+	bool found_bar2 = false;
+	bool found_global2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "foo") found_foo2 = true;
+		if (item.label == "bar") found_bar2 = true;
+		if (item.label == "nowork" || item.label.starts_with("@")) found_global2 = true;
+	}
+	assert(found_foo2);
+	assert(found_bar2);
+	assert(!found_global2);
+
+	// 3. `chained` with `[0].`: line 21, col 12
+	LspPosition pos3 = { .line = 21, .character = 12 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_foo3 = false;
+	bool found_bar3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "foo") found_foo3 = true;
+		if (item.label == "bar") found_bar3 = true;
+	}
+	assert(found_foo3);
+	assert(found_bar3);
+}
