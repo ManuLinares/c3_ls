@@ -986,7 +986,8 @@ fn Node* parse_try_unwrap_chain_expr(ContextScope scope)
 fn Node* parse_ternary_expr(ContextScope scope, Node* left)
 {
 	ParseContext* ctx = scope.ctx;
-	TernaryExpr* node = ctx.ast.alloc_node(TernaryExpr, ctx.current.range);
+	Range start = left ? (Range){ left.range.start, ctx.current.range.end } : ctx.current.range;
+	TernaryExpr* node = ctx.ast.alloc_node(TernaryExpr, start);
 	defer node.range.end = ctx.peek(-1).range.end;
 
 	node.is_const = ctx.is(CT_TERNARY);

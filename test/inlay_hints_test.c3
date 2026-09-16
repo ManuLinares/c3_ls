@@ -106,3 +106,43 @@ fn void main() {
 	assert(hints[0].label == "dx:");
 	assert(hints[1].label == "dy:");
 }
+
+fn void test_inlay_hints_ternary_argument_position() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void test_fn(int foo, int bar) {}
+
+fn void main() {
+  bool check = false;
+  test_fn(
+    0,
+    check ? 1 : 0
+  );
+}
+`;
+
+	proj.workspace.process_file("/virtual/hints_ternary.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/hints_ternary.c3");
+	defer doc_uri.free();
+
+	LspRange full_range = {
+		.start = { .line = 0, .character = 0 },
+		.end = { .line = 12, .character = 0 }
+	};
+
+	InlayHint[] hints = inlay_hints::get_inlay_hints(&proj, doc_uri, full_range)!!;
+	assert(hints.len == 2);
+
+	assert(hints[0].label == "foo:");
+	assert(hints[0].position.line == 7);
+	assert(hints[0].position.character == 4);
+
+	assert(hints[1].label == "bar:");
+	assert(hints[1].position.line == 8);
+	assert(hints[1].position.character == 4);
+}
