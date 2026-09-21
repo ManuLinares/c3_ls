@@ -2456,3 +2456,123 @@ fn void test_anonymous_struct_typedef_named_uint128_t_capitalization()
 	assert(code.contains("struct Uint128\n{"));
 	assert(!code.contains("struct uint128\n{"));
 }
+
+fn void test_auto_discover_peer_includes() @test
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path mock_sdk = tmp_dir.tappend("mock_sdk_root")!!;
+	Path um_dir = mock_sdk.tappend("um")!!;
+	Path shared_dir = mock_sdk.tappend("shared")!!;
+	Path km_dir = mock_sdk.tappend("km")!!;
+
+	(void)path::mkdir(um_dir, recursive: true);
+	(void)path::mkdir(shared_dir, recursive: true);
+	(void)path::mkdir(km_dir, recursive: true);
+	defer (void)path::rmtree(mock_sdk);
+
+	file::save(um_dir.tappend("target.h")!!, "#pragma once\n")!!;
+	file::save(shared_dir.tappend("shared_header.h")!!, "#pragma once\n")!!;
+	file::save(km_dir.tappend("km_header.h")!!, "#pragma once\n")!!;
+
+	BindgenOptions opts = {
+		.header_path = (String)um_dir.tappend("target.h")!!
+	};
+
+	bindgen::auto_discover_peer_includes(&opts);
+
+	bool found_shared = false;
+	bool found_km = false;
+	foreach (inc : opts.include_dirs)
+	{
+		if (inc.contains("shared")) found_shared = true;
+		if (inc.contains("km")) found_km = true;
+	}
+
+	assert(found_shared);
+	assert(found_km);
+}
+
+fn void test_self_healing_missing_header_discovery() @test
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path mock_root = tmp_dir.tappend("mock_heal_root")!!;
+	Path inc_dir = mock_root.tappend("nested_inc")!!;
+	(void)path::mkdir(inc_dir, recursive: true);
+	defer (void)path::rmtree(mock_root);
+
+	// Create a header in the nested directory
+	file::save(inc_dir.tappend("custom_dependency.h")!!, "typedef int CustomHandle;\n")!!;
+
+	BindgenOptions opts = {
+		.header_path = (String)mock_root
+	};
+
+	String? found = bindgen::find_missing_header_directory(opts, "custom_dependency.h");
+	assert(@ok(found));
+	assert(found!!.contains("nested_inc"));
+}
+
+fn void test_deduce_package_dir_rules() @test
+{
+	BindgenOptions sys_opts = {
+		.header_path = "/usr/include/sqlite3.h"
+	};
+	test::eq(bindgen::deduce_package_dir(sys_opts), "");
+
+	BindgenOptions pkg_opts = {
+		.header_path = "/usr/include/libportal/portal.h"
+	};
+	test::eq(bindgen::deduce_package_dir(pkg_opts), "/usr/include/libportal/");
+
+	BindgenOptions local_opts = {
+		.header_path = "/home/user/project/include/mylib/entry.h"
+	};
+	test::eq(bindgen::deduce_package_dir(local_opts), "/home/user/project/include/mylib/");
+}
+
+fn void test_umbrella_header_package_symbol_extraction() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "FunctionDecl",
+				"name": "libportal_init",
+				"loc": { "file": "/usr/include/libportal/init.h" },
+				"type": { "qualType": "void (void)" }
+			},
+			{
+				"kind": "FunctionDecl",
+				"name": "g_object_ref",
+				"loc": { "file": "/usr/include/glib-2.0/gobject.h" },
+				"type": { "qualType": "void (void *)" }
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "/usr/include/libportal/portal.h",
+		.target_dir = "/usr/include/libportal/",
+		.module_name = "libportal"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	test::eq(tu.functions.len(), 1);
+	test::eq(tu.functions.get(0).c_name, "libportal_init");
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("extern fn void init() @cname(\"libportal_init\");"));
+	assert(!code.contains("g_object_ref"));
+}

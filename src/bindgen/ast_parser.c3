@@ -52,32 +52,37 @@ fn String extract_node_file(Object* node) @local
 
 <*
  Determines if a node originated from the target header rather than system includes.
- @param node_file     : "File path where the AST node was defined."
- @param target_header : "Target header path passed in BindgenOptions."
- @return              "True if node should be included in bindings."
+ @param node_file : "File path where the AST node was defined."
+ @param options   : "Bindgen configuration options."
+ @return          "True if node should be included in bindings."
 *>
-fn bool is_target_file(String node_file, String target_header) @local
+fn bool is_target_file(String node_file, BindgenOptions options) @local
 {
 	if (node_file.len == 0)
 	{
 		return false;
 	}
 
-	if (node_file == target_header)
+	if (options.target_dir.len > 0 && node_file.starts_with(options.target_dir))
+	{
+		return true;
+	}
+
+	if (node_file == options.header_path)
 	{
 		return true;
 	}
 
 	sz last_slash_target = 0;
-	if (try idx = target_header.rindex_of_char('/'))
+	if (try idx = options.header_path.rindex_of_char('/'))
 	{
 		last_slash_target = idx + 1;
 	}
-	else if (try idx = target_header.rindex_of_char('\\'))
+	else if (try idx = options.header_path.rindex_of_char('\\'))
 	{
 		last_slash_target = idx + 1;
 	}
-	String base_target = target_header[last_slash_target..];
+	String base_target = options.header_path[last_slash_target..];
 
 	sz last_slash_node = 0;
 	if (try idx = node_file.rindex_of_char('/'))
@@ -1485,7 +1490,7 @@ fn void parse_clang_ast_json(
 			current_file = file_loc;
 		}
 
-		if (!is_target_file(current_file, options.header_path))
+		if (!is_target_file(current_file, options))
 		{
 			continue;
 		}

@@ -101,17 +101,18 @@ fn int main(String[] args)
 		String mod_name = cli.bindgen_mod;
 		if (mod_name.len == 0)
 		{
+			String clean_target = cli.bindgen.trim_right("/\\");
 			sz last_slash = 0;
-			if (try idx = cli.bindgen.rindex_of_char('/'))
+			if (try idx = clean_target.rindex_of_char('/'))
 			{
 				last_slash = idx + 1;
 			}
-			else if (try idx = cli.bindgen.rindex_of_char('\\'))
+			else if (try idx = clean_target.rindex_of_char('\\'))
 			{
 				last_slash = idx + 1;
 			}
 
-			String file_base = cli.bindgen[last_slash..];
+			String file_base = clean_target[last_slash..];
 			if (try dot_idx = file_base.index_of_char('.'))
 			{
 				file_base = file_base[:dot_idx];

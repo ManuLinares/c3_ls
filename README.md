@@ -23,7 +23,7 @@ binary is in `build/c3_ls`.
 
 ### bindgen flags
 
-* `--bindgen <header.h>`: generate C3 bindings from C header file.
+* `--bindgen <header.h|directory>`: generate C3 bindings from a C header file ir a directory.
 * `-o, --output <path>`: output file path (.c3 or .c3i) for bindings.
 * `-m, --module <name>`: module name for generated bindings.
 * `--type-prefix <prefix>`: type prefix for generated types (e.g. `RL`).

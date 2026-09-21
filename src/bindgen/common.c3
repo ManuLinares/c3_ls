@@ -12,6 +12,7 @@ const sz MAX_IDENTIFIER_LEN = 127;
 struct BindgenOptions
 {
 	String header_path;
+	String target_dir;
 	String output_path;
 	String module_name;
 	String type_prefix;
@@ -672,7 +673,7 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 	{
 		if (s.contains("_"))
 		{
-			pascal = s.snake_to_pascal_copy(allocator);
+			pascal = s.to_lower_copy(tmem).snake_to_pascal_copy(allocator);
 		}
 		else
 		{
@@ -692,7 +693,7 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 	}
 	else if (s.contains("_"))
 	{
-		pascal = s.snake_to_pascal_copy(allocator);
+		pascal = s.to_lower_copy(tmem).snake_to_pascal_copy(allocator);
 	}
 	else
 	{
@@ -1216,26 +1217,7 @@ fn String map_c_type_to_c3(
 		trailing_dims = is_field ? "[*]" : "[]";
 	}
 
-	// 3. Extract pointer depth and strip qualifiers around '*'
-	int elem_pointer_depth = 0;
-	while (true)
-	{
-		s = s.trim();
-		if (s.ends_with("const"))        { s = s[:^5].trim_right(); continue; }
-		if (s.ends_with("volatile"))     { s = s[:^8].trim_right(); continue; }
-		if (s.ends_with("__volatile"))   { s = s[:^10].trim_right(); continue; }
-		if (s.ends_with("__volatile__")) { s = s[:^12].trim_right(); continue; }
-		if (s.ends_with("restrict"))     { s = s[:^8].trim_right(); continue; }
-		if (s.ends_with("__restrict"))   { s = s[:^10].trim_right(); continue; }
-		if (s.ends_with("__restrict__")) { s = s[:^12].trim_right(); continue; }
-		if (s.ends_with("*"))
-		{
-			elem_pointer_depth++;
-			s = s[:^1].trim_right();
-			continue;
-		}
-		break;
-	}
+	int elem_pointer_depth = strip_pointer_depth(&s);
 
 	// 4. Extract C99 complex qualifier
 	bool is_complex = false;
@@ -1251,6 +1233,14 @@ fn String map_c_type_to_c3(
 
 	// 5. Clean out inline __attribute__((...))
 	s = strip_clang_attributes(s);
+
+	// Extract pointer depth from desugared type if available
+	int desug_pointer_depth = 0;
+	if (desugared_type.len > 0 && desugared_type != c_type)
+	{
+		String dt = desugared_type.trim();
+		desug_pointer_depth = strip_pointer_depth(&dt);
+	}
 
 	// 6. Extract base type using C type-specifier grammar
 	String base_c3 = map_c_standard_type(s);
@@ -1292,16 +1282,16 @@ fn String map_c_type_to_c3(
 				}
 			}
 		}
-	
 	}
 
 	if (base_c3.len == 0 && desugared_type.len > 0 && desugared_type != c_type)
 	{
 		String desug_base = extract_base_type_name(desugared_type);
 		String desug_std = map_c_standard_type(desug_base);
-		if (desug_std.len > 0 && s.starts_with("_"))
+		if (desug_std.len > 0)
 		{
 			base_c3 = desug_std;
+			elem_pointer_depth = desug_pointer_depth;
 		}
 	}
 
@@ -1330,9 +1320,16 @@ fn String map_c_type_to_c3(
 		return "ZString";
 	}
 
-	if (base_c3 == "void" && elem_pointer_depth == 0 && (trailing_dims.len > 0 || arr_dims.len > 0))
+	if (base_c3 == "void" && elem_pointer_depth == 0)
 	{
-		base_c3 = "char";
+		if (trailing_dims.len > 0 || arr_dims.len > 0)
+		{
+			base_c3 = "char";
+		}
+		else if (is_param || is_field)
+		{
+			elem_pointer_depth = 1;
+		}
 	}
 
 	DString res;
@@ -1356,4 +1353,52 @@ fn String map_c_type_to_c3(
 	}
 
 	return res.str_view().copy(allocator);
+}
+
+fn int strip_pointer_depth(String* s) @local
+{
+	int depth = 0;
+	while (s.len > 0)
+	{
+		*s = s.trim();
+		if (s.ends_with("*"))
+		{
+			depth++;
+			*s = (*s)[:^1].trim_right();
+			continue;
+		}
+
+		const String[*] QUALIFIERS = {
+			"__volatile__",
+			"__volatile",
+			"volatile",
+			"__restrict__",
+			"__restrict",
+			"restrict",
+			"const",
+			"_Atomic"
+		};
+
+		bool matched = false;
+		foreach (q : QUALIFIERS)
+		{
+			if (s.ends_with(q))
+			{
+				sz rem_len = s.len - q.len;
+				if (rem_len == 0 || (!(*s)[rem_len - 1].is_alnum() && (*s)[rem_len - 1] != '_'))
+				{
+					*s = (*s)[:rem_len].trim_right();
+					matched = true;
+					break;
+				}
+			}
+		}
+
+		if (matched)
+		{
+			continue;
+		}
+		break;
+	}
+	return depth;
 }
