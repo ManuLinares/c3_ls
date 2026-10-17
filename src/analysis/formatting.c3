@@ -817,6 +817,14 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	return false;
 }
 
+fn bool is_fmt_marker(Token tok, String marker)
+{
+	if (tok.kind != LINE_COMMENT) return false;
+	String text = tok.value.trim();
+	if (!text.starts_with("//")) return false;
+	return text[2..].trim() == marker;
+}
+
 fn String format_tokens_range(
 Allocator output_allocator,
 String full_buffer,
@@ -865,10 +873,51 @@ FormattingOptions options
 		};
 		ctx.out.tinit();
 
+		// Inside a `fmt:off` region tokens are copied verbatim from the buffer.
+		// The window may begin inside one, so look at the markers before it.
+		bool in_off = false;
+		for (sz k = 0; k < start_idx && k < tokens.len; k++)
+		{
+			if (is_fmt_marker(tokens[k], "fmt:off"))
+			{
+				in_off = true;
+			}
+			else if (is_fmt_marker(tokens[k], "fmt:on"))
+			{
+				in_off = false;
+			}
+		}
+
 		for (sz i = start_idx; i <= end_idx && i < tokens.len; i++)
 		{
 			Token tok = tokens[i];
-			if (tok.kind == EOF) break;
+			if (tok.kind == EOF && !in_off) break;
+
+			if (in_off)
+			{
+				// Preserve whitespace after fmt:off, but stay within a selected range.
+				Location start = i == start_idx ? tok.range.start : tokens[i - 1].range.end;
+				sz raw_start = analysis::offset_from_line_table(line_offsets, full_buffer,
+					(uint)start.line, (uint)start.column);
+				// Copy one contiguous span, including whitespace, bounded by this edit.
+				while (i < end_idx && i + 1 < tokens.len &&
+					tokens[i].kind != EOF && !is_fmt_marker(tokens[i], "fmt:on")) i++;
+				Token last = tokens[i];
+				sz raw_end = analysis::offset_from_line_table(line_offsets, full_buffer,
+					(uint)last.range.end.line, (uint)last.range.end.column);
+				ctx.out.append(full_buffer[raw_start:raw_end - raw_start]);
+				ctx.prev_prev_token = ctx.prev_token;
+				ctx.prev_token = last;
+				ctx.prev_kind = last.kind;
+				ctx.at_line_start = raw_end > 0 && full_buffer[raw_end - 1] == '\n';
+				ctx.consecutive_newlines = ctx.at_line_start ? 1 : 0;
+				if (is_fmt_marker(last, "fmt:on"))
+				{
+					in_off = false;
+					if (i < end_idx) newline(&ctx);
+				}
+				continue;
+			}
 
 			Token next_tok = (i + 1 < tokens.len) ? tokens[i + 1] : (Token){.kind = EOF };
 
@@ -876,6 +925,7 @@ FormattingOptions options
 			ctx.curr_kind = tok.kind;
 			ctx.next_token = next_tok;
 			ctx.token_idx = i;
+
 			// Top-level module declarations reset indent baseline to 0
 			if (tok.kind == MODULE && ctx.brace_stack_len == 0)
 			{
@@ -1011,7 +1061,8 @@ FormattingOptions options
 					? (next_tok.range.start.line - tok.range.end.line)
 					: 1;
 
-				newline(&ctx, next_line_diff >= 2 ? 2 : 1);
+				in_off = is_fmt_marker(tok, "fmt:off");
+				if (!in_off) newline(&ctx, next_line_diff >= 2 ? 2 : 1);
 
 				ctx.prev_prev_token = ctx.prev_token;
 				ctx.prev_kind = tok.kind;
@@ -1442,7 +1493,7 @@ FormattingOptions options
 			ctx.prev_token = tok;
 		}
 
-		if (options.insert_final_newline && !ctx.at_line_start)
+		if (options.insert_final_newline && !ctx.at_line_start && !in_off)
 		{
 			newline(&ctx);
 		}
