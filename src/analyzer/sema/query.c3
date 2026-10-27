@@ -744,6 +744,82 @@ fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String n
 	return null;
 }
 
+fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String symbol_name, SourceFile* sf = null, bool check_access = false)
+{
+	if (!context || !mod || symbol_name.len == 0) return null;
+
+	if (Node* c = find_callable_in_module(context, mod, symbol_name))
+	{
+		if (!check_access || !sf || is_symbol_accessible_from_file(context, sf, c, mod.name)) return c;
+	}
+
+	String qname = string::tformat("%s::%s", mod.name, symbol_name);
+	if (context.registry)
+	{
+		if (try ty_info = context.registry.types.get(qname))
+		{
+			if (ty_info.node && (!check_access || !sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+			{
+				return ty_info.node;
+			}
+		}
+	}
+
+	foreach (stmt : mod.nodes)
+	{
+		if (!stmt || stmt.kind == ERROR) continue;
+		if (check_access && sf && !is_symbol_accessible_from_file(context, sf, stmt, mod.name)) continue;
+
+		String sname = cursor::spelling(stmt, tmem);
+		if (sname.len > 0 && (sname == symbol_name || sname.strip_prefix("@") == symbol_name.strip_prefix("@")))
+		{
+			return stmt;
+		}
+
+		switch (stmt.kind)
+		{
+			case VAR_DECL:
+				{
+					VarDecl* vd = stmt.as(VarDecl);
+					if (vd.name && vd.name.text == symbol_name) return stmt;
+				}
+			case FAULT_DECL:
+				{
+					FaultDecl* fd = stmt.as(FaultDecl);
+					if (fd.name && fd.name.text == symbol_name) return stmt;
+				}
+			case FAULTDEF_DECL:
+				{
+					FaultdefDecl* fd = stmt.as(FaultdefDecl);
+					foreach (fault_node : fd.faults)
+					{
+						if (!fault_node || fault_node.kind != FAULT_DECL) continue;
+						FaultDecl* fdecl = fault_node.as(FaultDecl);
+						if (fdecl.name && fdecl.name.text == symbol_name) return fault_node;
+					}
+				}
+			case ENUM_DECL:
+				{
+					EnumDecl* ed = stmt.as(EnumDecl);
+					foreach (variant : ed.variants)
+					{
+						if (!variant || variant.kind != VAR_DECL) continue;
+						VarDecl* vd = variant.as(VarDecl);
+						if (vd.name && vd.name.text == symbol_name) return variant;
+					}
+				}
+			case STRUCT_DECL:
+				{
+					Node* mem_node = cursor::find_member_in_type(stmt, symbol_name);
+					if (mem_node) return mem_node;
+				}
+			default:
+				break;
+		}
+	}
+	return null;
+}
+
 fn Node* find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "")
 {
 	if (!context || !context.registry || name.len == 0) return null;
@@ -1475,21 +1551,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 			if (mod)
 			{
-				if (Node* c = find_callable_in_module(context, mod, symbol_name)) return c;
-				String qname = string::tformat("%s::%s", mod.name, symbol_name);
-				if (context.registry)
-				{
-					if (try ty_info = context.registry.types.get(qname)) return ty_info.node;
-				}
-				foreach (stmt : mod.nodes)
-				{
-					if (!stmt || stmt.kind == ERROR) continue;
-					if (stmt.kind == VAR_DECL)
-					{
-						VarDecl* vd = stmt.as(VarDecl);
-						if (vd.name && vd.name.text == symbol_name) return stmt;
-					}
-				}
+				return find_symbol_in_module(context, mod, symbol_name);
 			}
 			return null;
 		}
@@ -1658,47 +1720,9 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		{
 			if (mod)
 			{
-				foreach (stmt : mod.nodes)
+				if (Node* n = find_symbol_in_module(context, mod, symbol_name, sf, true))
 				{
-					if (!stmt || stmt.kind == ERROR) continue;
-					if (!is_symbol_accessible_from_file(context, sf, stmt, mod_name)) continue;
-
-					String sname = cursor::spelling(stmt, tmem);
-					if (sname.len > 0 && (sname == symbol_name || sname.strip_prefix("@") == symbol_name.strip_prefix("@")))
-					{
-						return stmt;
-					}
-
-					switch (stmt.kind)
-					{
-						case FAULTDEF_DECL:
-							{
-								FaultdefDecl* fd = stmt.as(FaultdefDecl);
-								foreach (fault_node : fd.faults)
-								{
-									if (!fault_node || fault_node.kind != FAULT_DECL) continue;
-									FaultDecl* fdecl = fault_node.as(FaultDecl);
-									if (fdecl.name && fdecl.name.text == symbol_name) return fault_node;
-								}
-							}
-						case ENUM_DECL:
-							{
-								EnumDecl* ed = stmt.as(EnumDecl);
-								foreach (variant : ed.variants)
-								{
-									if (!variant || variant.kind != VAR_DECL) continue;
-									VarDecl* vd = variant.as(VarDecl);
-									if (vd.name && vd.name.text == symbol_name) return variant;
-								}
-							}
-						case STRUCT_DECL:
-							{
-								Node* mem_node = cursor::find_member_in_type(stmt, symbol_name);
-								if (mem_node) return mem_node;
-							}
-						default:
-							break;
-					}
+					return n;
 				}
 			}
 		};

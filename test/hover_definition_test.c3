@@ -722,3 +722,49 @@ fn void test_multi_module_section_imports_definition()
 	assert(locs_b.len > 0);
 	test::eq(locs_b[0].uri, "file:///virtual/mod_b.c3");
 }
+
+fn void test_qualified_fault_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String faults_code = "module mod_faults;\nfaultdef INVALID_ARG, OUT_OF_BOUNDS;\n";
+	String client_code = "module client;\nimport mod_faults;\nfn void test() {\n  return mod_faults::INVALID_ARG~;\n}\n";
+
+	proj.workspace.process_file("/virtual/faults.c3", faults_code);
+	proj.workspace.process_file("/virtual/client.c3", client_code);
+
+	Uri client_uri = uri::from_file_path(mem, "/virtual/client.c3");
+	defer client_uri.free();
+
+	// Line 3: on INVALID_ARG (char 23)
+	LspPosition pos = { .line = 3, .character = 23 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, client_uri, pos)!!;
+	assert(locs.len > 0);
+	test::eq(locs[0].uri, "file:///virtual/faults.c3");
+	test::eq((int)locs[0].range.start.line, 1);
+}
+
+fn void test_module_multiple_declarations_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String file1_code = "module multi_mod;\nfn void foo() {}\n";
+	String file2_code = "module multi_mod;\nfn void bar() {}\n";
+	String client_code = "module client;\nimport multi_mod;\nfn void test() {\n  multi_mod::foo();\n}\n";
+
+	proj.workspace.process_file("/virtual/file1.c3", file1_code);
+	proj.workspace.process_file("/virtual/file2.c3", file2_code);
+	proj.workspace.process_file("/virtual/client.c3", client_code);
+
+	Uri client_uri = uri::from_file_path(mem, "/virtual/client.c3");
+	defer client_uri.free();
+
+	// Line 3: on multi_mod (char 4)
+	LspPosition pos = { .line = 3, .character = 4 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, client_uri, pos)!!;
+	test::eq(locs.len, 2);
+}
