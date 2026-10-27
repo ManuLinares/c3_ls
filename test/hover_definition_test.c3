@@ -768,3 +768,26 @@ fn void test_module_multiple_declarations_definition()
 	LspLocation[] locs = goto_definition::goto_definition(&proj, client_uri, pos)!!;
 	test::eq(locs.len, 2);
 }
+
+fn void test_global_variable_member_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source_def = "module app;\nstruct Context {\n  bool use_wayland;\n}\nContext global_ctx;\n";
+	String source_use = "module app;\nfn void run() {\n  if (global_ctx.use_wayland) {}\n}\n";
+
+	proj.workspace.process_file("/virtual/def.c3", source_def);
+	proj.workspace.process_file("/virtual/use.c3", source_use);
+
+	Uri use_uri = uri::from_file_path(mem, "/virtual/use.c3");
+	defer use_uri.free();
+
+	// Line 2: on use_wayland (char 18)
+	LspPosition pos = { .line = 2, .character = 18 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, use_uri, pos)!!;
+	assert(locs.len > 0);
+	test::eq(locs[0].uri, "file:///virtual/def.c3");
+	test::eq((int)locs[0].range.start.line, 2);
+}

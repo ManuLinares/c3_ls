@@ -1181,6 +1181,98 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	return null;
 }
 
+fn String type_of_symbol(AnalyzerContext* context, SourceFile* sf, Node* sym, Location loc = { -1, -1 })
+{
+	if (!sym) return "";
+	switch (sym.kind)
+	{
+		case VAR_DECL:
+			{
+				VarDecl* vd = sym.as(VarDecl);
+				if (vd.type)
+				{
+					String t = cursor::raw_type_identifier(vd.type) ?? cursor::spelling(vd.type, tmem);
+					if (t.len > 0) return t;
+				}
+				if (vd.init_expr)
+				{
+					return type_of(context, sf, vd.init_expr, loc);
+				}
+			}
+		case STRUCT_DECL:
+		case ENUM_DECL:
+		case TYPEDEF_DECL:
+			return cursor::spelling(sym, tmem);
+		case ALIAS_DECL:
+			{
+				AliasDecl* ad = sym.as(AliasDecl);
+				if (ad.target)
+				{
+					String t = cursor::raw_type_identifier(ad.target) ?? cursor::spelling(ad.target, tmem);
+					if (t.len > 0) return t;
+				}
+			}
+		default:
+			break;
+	}
+	return "";
+}
+
+fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String symbol_name, Location loc = { -1, -1 })
+{
+	if (!context || symbol_name.len == 0) return null;
+
+	if (symbol_name.contains("::"))
+	{
+		sz last_colons = symbol_name.rindex_of("::") ?? 0;
+		String mod_prefix = symbol_name[:last_colons];
+		String short_name = symbol_name[last_colons + 2..];
+		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_prefix);
+		if (mod) return find_symbol_in_module(context, mod, short_name, sf, true);
+		return null;
+	}
+
+	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+	if (caller_mod.len > 0)
+	{
+		if (Module* m = context.modules.get(caller_mod) ?? null)
+		{
+			if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, false))
+			{
+				return sym;
+			}
+		}
+	}
+
+	if (sf)
+	{
+		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
+		foreach (imp : imports)
+		{
+			if (Module* m = context.modules.get(imp) ?? null)
+			{
+				if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, true))
+				{
+					return sym;
+				}
+			}
+		}
+	}
+
+	Node* found = null;
+	context.modules.@each(; mod_name, mod)
+	{
+		if (!found && mod && mod_name != caller_mod)
+		{
+			if (Node* sym = find_symbol_in_module(context, mod, symbol_name, sf, true))
+			{
+				found = sym;
+			}
+		}
+	};
+	return found;
+}
+
 <*
  Canonical unified type evaluator for AST expressions.
 *>
@@ -1275,29 +1367,10 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 
 					if (mod)
 					{
-						foreach (stmt : mod.nodes)
+						if (Node* sym = find_symbol_in_module(context, mod, id_name, sf, true))
 						{
-							if (!stmt || stmt.kind == ERROR) continue;
-							switch (stmt.kind)
-							{
-								case VAR_DECL:
-									{
-										VarDecl* vd = stmt.as(VarDecl);
-										if (vd.name && vd.name.text == id_name && vd.type)
-										{
-											return cursor::raw_type_identifier(vd.type) ?? "";
-										}
-									}
-								case STRUCT_DECL:
-								case ENUM_DECL:
-								case TYPEDEF_DECL:
-									{
-										String sname = cursor::spelling(stmt, tmem);
-										if (sname == id_name) return id_name;
-									}
-								default:
-									break;
-							}
+							String t = type_of_symbol(context, sf, sym, effective_loc);
+							if (t.len > 0) return t;
 						}
 					}
 				}
@@ -1306,6 +1379,12 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				if (sf && find_local_decl_in_file(sf, id_name, &local_type, context, effective_loc))
 				{
 					if (local_type.len > 0) return local_type;
+				}
+
+				if (Node* sym = find_symbol_in_context(context, sf, id_name, effective_loc))
+				{
+					String t = type_of_symbol(context, sf, sym, effective_loc);
+					if (t.len > 0) return t;
 				}
 
 				if (context && context.registry)
@@ -1714,18 +1793,9 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		};
 	}
 
-	if (context)
+	if (Node* sym = find_symbol_in_context(context, sf, symbol_name, loc))
 	{
-		context.modules.@each(; mod_name, mod)
-		{
-			if (mod)
-			{
-				if (Node* n = find_symbol_in_module(context, mod, symbol_name, sf, true))
-				{
-					return n;
-				}
-			}
-		};
+		return sym;
 	}
 
 	return null;
@@ -1928,6 +1998,12 @@ fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String
 	if (sf && find_local_decl_in_file(sf, clean, &local_type, context, loc))
 	{
 		if (local_type.len > 0) return local_type;
+	}
+
+	if (Node* sym = find_symbol_in_context(context, sf, clean, loc))
+	{
+		String t = type_of_symbol(context, sf, sym, loc);
+		if (t.len > 0) return t;
 	}
 
 	return clean;
