@@ -2062,3 +2062,97 @@ fn void main() {
 	}
 	assert(found_north8);
 }
+
+fn void test_enum_associated_param_completion()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source =
+		"module my_test;\n"
+		"enum StandaloneAssocEnum : int (String tag)\n"
+		"{\n"
+		"    FIRST  { \"first\" },\n"
+		"    SECOND { \"second\" }\n"
+		"}\n"
+		"fn void main() {\n"
+		"    StandaloneAssocEnum asd;\n"
+		"    asd.\n"
+		"    StandaloneAssocEnum.FIRST.\n"
+		"}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/comp_assoc_enum.c3");
+	defer doc_uri.free();
+
+	proj.workspace.process_file("/virtual/comp_assoc_enum.c3", source);
+
+	// 1. Instance dot completion `asd.` (line 8, col 8)
+	LspPosition pos1 = { .line = 8, .character = 8 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_tag_instance = false;
+	bool found_variant_on_instance = false;
+	foreach (item : items1)
+	{
+		if (item.label == "tag") found_tag_instance = true;
+		if (item.label == "FIRST" || item.label == "SECOND") found_variant_on_instance = true;
+	}
+	assert(found_tag_instance);
+	assert(!found_variant_on_instance);
+
+	// 2. Enum constant dot completion `StandaloneAssocEnum.FIRST.` (line 9, col 30)
+	LspPosition pos2 = { .line = 9, .character = 30 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_tag_constant = false;
+	foreach (item : items2)
+	{
+		if (item.label == "tag") found_tag_constant = true;
+	}
+	assert(found_tag_constant);
+}
+
+fn void test_fault_and_excuse_completion()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source =
+		"module my_test;\n"
+		"excuse SOME_EXCUSE;\n"
+		"excuse {\n"
+		"    UAUA1,\n"
+		"    UAUA2\n"
+		"}\n"
+		"fn int? kaka() {\n"
+		"    SOME_\n"
+		"    fault f = \n"
+		"    return 0;\n"
+		"}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/comp_fault.c3");
+	defer doc_uri.free();
+
+	proj.workspace.process_file("/virtual/comp_fault.c3", source);
+
+	// 1. Global excuse completion `SOME_` (line 7, col 9)
+	LspPosition pos1 = { .line = 7, .character = 9 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_some = false;
+	bool found_uaua = false;
+	foreach (item : items1)
+	{
+		if (item.label == "SOME_EXCUSE") found_some = true;
+		if (item.label == "UAUA1") found_uaua = true;
+	}
+	assert(found_some);
+	assert(found_uaua);
+
+	// 2. Type assignment `fault f = ` (line 8, col 14)
+	LspPosition pos2 = { .line = 8, .character = 14 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_fault_assign = false;
+	foreach (item : items2)
+	{
+		if (item.label == "SOME_EXCUSE" || item.label == "UAUA1") found_fault_assign = true;
+	}
+	assert(found_fault_assign);
+}
