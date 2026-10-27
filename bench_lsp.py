@@ -305,7 +305,20 @@ def build_endpoints() -> list[EndpointDef]:
 
 def load_project_files(root: str) -> list[SourceTarget]:
     targets = []
-    for p in Path(root).rglob("*.c3"):
+    root_path = Path(root)
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "*.c3"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        candidates = [root_path / f for f in proc.stdout.splitlines() if f]
+    except Exception:
+        candidates = list((root_path / "src").rglob("*.c3")) + list((root_path / "test").rglob("*.c3"))
+
+    for p in candidates:
         if "build" in p.parts:
             continue
         try:

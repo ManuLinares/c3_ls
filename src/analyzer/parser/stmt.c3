@@ -302,10 +302,11 @@ fn bool parse_switch_body(ContextScope scope, List{Node*} * cases)
 fn Node* parse_case_stmts(ContextScope scope, int row) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
+	ParseFlags flags = scope.flags;
 	CompoundStmt* compound_node = ctx.ast.alloc_node(CompoundStmt, ctx.current.range);
 	defer compound_node.range.end = ctx.current.range.end;
 
-	if (token_type_ends_case(ctx.current.kind))
+	if (!flags.is_comptime && token_type_ends_case(ctx.current.kind))
 	{
 		Location next_loc = ctx.current.range.start;
 
@@ -515,6 +516,8 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 			node.flags.has_error = true;
 		}
 	}
+
+	node.attributes = parse_attributes(scope, (Node*)node);
 
 	if (!consume(ctx, LBRACE))
 	{

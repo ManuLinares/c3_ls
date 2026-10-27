@@ -11,36 +11,48 @@ import uri;
 const String PROJECT_CONFIG_NAME = "project.json";
 const String MANIFEST_CONFIG_NAME = "manifest.json";
 
+macro void free_maybe_string_array(Allocator allocator, maybe_arr)
+{
+	if (try val = maybe_arr.get())
+	{
+		foreach (s : val) s.free(allocator);
+		alloc::free(allocator, val);
+	}
+}
+
 struct TargetConfig
 {
+	Maybe{String[]} sources;
+	Maybe{String[]} sources_override;
+	Maybe{String[]} test_sources;
+	Maybe{String[]} test_sources_override;
 	Maybe{String[]} link_args;
+	Maybe{String[]} link_args_override;
 	Maybe{String[]} dependencies;
+	Maybe{String[]} dependencies_override;
 	Maybe{String[]} linked_libraries;
+	Maybe{String[]} linked_libraries_override;
 }
 
 fn void TargetConfig.free(&self, Allocator allocator)
 {
-	if (try val = self.link_args.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
-	if (try val = self.dependencies.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
-	if (try val = self.linked_libraries.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
+	free_maybe_string_array(allocator, self.sources);
+	free_maybe_string_array(allocator, self.sources_override);
+	free_maybe_string_array(allocator, self.test_sources);
+	free_maybe_string_array(allocator, self.test_sources_override);
+	free_maybe_string_array(allocator, self.link_args);
+	free_maybe_string_array(allocator, self.link_args_override);
+	free_maybe_string_array(allocator, self.dependencies);
+	free_maybe_string_array(allocator, self.dependencies_override);
+	free_maybe_string_array(allocator, self.linked_libraries);
+	free_maybe_string_array(allocator, self.linked_libraries_override);
 }
 
 struct ProjectConfig
 {
 	String root_path;
 	String[] sources;
+	Maybe{String[]} test_sources;
 	Maybe{String[]} dependency_search_paths;
 	Maybe{String[]} dependencies;
 	Maybe{String[]} features;
@@ -55,21 +67,10 @@ fn void ProjectConfig.free(&self, Allocator allocator)
 		foreach (s : self.sources) s.free(allocator);
 		alloc::free(allocator, self.sources);
 	}
-	if (try val = self.dependency_search_paths.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
-	if (try val = self.dependencies.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
-	if (try val = self.features.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
+	free_maybe_string_array(allocator, self.test_sources);
+	free_maybe_string_array(allocator, self.dependency_search_paths);
+	free_maybe_string_array(allocator, self.dependencies);
+	free_maybe_string_array(allocator, self.features);
 	if (self.targets.is_initialized())
 	{
 		self.targets.@each(; name, conf)
@@ -117,6 +118,22 @@ fn String[]? parse_string_array(Allocator alloc, Object* obj, String key)
 		result[i] = (arr_obj.get_string_at(i) ?? "").copy(alloc);
 	}
 	return result;
+}
+
+fn TargetConfig parse_target(Allocator alloc, Object* target_obj)
+{
+	TargetConfig conf = {};
+	if (try s = parse_string_array(alloc, target_obj, "sources")) conf.sources = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "sources-override")) conf.sources_override = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "test-sources")) conf.test_sources = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "test-sources-override")) conf.test_sources_override = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "dependencies")) conf.dependencies = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "dependencies-override")) conf.dependencies_override = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "linked-libraries")) conf.linked_libraries = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "linked-libraries-override")) conf.linked_libraries_override = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "link-args")) conf.link_args = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "link-args-override")) conf.link_args_override = maybe::value(s);
+	return conf;
 }
 
 fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
@@ -180,6 +197,10 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 		{
 			conf.sources = srcs;
 		}
+		if (try test_srcs = parse_string_array(allocator, dom, "test-sources"))
+		{
+			conf.test_sources = maybe::value(test_srcs);
+		}
 		if (try search_paths = parse_string_array(allocator, dom, "dependency-search-paths"))
 		{
 			conf.dependency_search_paths = maybe::value(search_paths);
@@ -197,6 +218,16 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 		if (try feats = parse_string_array(allocator, dom, "features"))
 		{
 			conf.features = maybe::value(feats);
+		}
+		if (try targets_obj = dom.get("targets"))
+		{
+			targets_obj.@each_entry(; target_name, target_val)
+			{
+				if (target_val.is_map())
+				{
+					conf.targets[target_name] = parse_target(allocator, target_val);
+				}
+			};
 		}
 		lsp_project.config = conf;
 	}

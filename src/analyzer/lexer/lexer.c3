@@ -476,8 +476,12 @@ fn Token lex_number(Lexer* self)
 	}
 
 	char c = (char)ascii::to_lower(self.current);
-	if (c == 'u' || c == 'i' || c == 'f' || c == 'l')
+	if (c == 'u' || c == 'i' || c == 'f' || c == 'l' || c == 'd')
 	{
+		if ((c == 'f' || c == 'd') && kind == INT_DECIMAL_LITERAL)
+		{
+			kind = FLOAT_DECIMAL_LITERAL;
+		}
 		advance(self);
 		while (self.current != 0 && ascii::is_alnum(self.current))
 		{

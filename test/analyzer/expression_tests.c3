@@ -37,6 +37,8 @@ fn void test_literals()
 		float jx = 0x1.Ap-2F;
 		double jxx = 0x1.Ap-2d;
 		double jxxx = 0x1.Ap-2D;
+		double j_dec = 2.718281828459045d;
+		double j_dec_upper = 2.0D;
 
 		// Strings
 		String k = "Hello";
@@ -143,6 +145,16 @@ fn void test_literals()
 		{
 			test::eq(lit.literal_kind, LiteralKind.REAL_LITERAL);
 			test::eq_approx(lit.real, 0.40625);  // 0x1.Ap-2 is 1.625 * 0.25 = 0.40625
+		}
+		else if (var_name == "j_dec")
+		{
+			test::eq(lit.literal_kind, LiteralKind.REAL_LITERAL);
+			test::eq_approx(lit.real, 2.718281828459045);
+		}
+		else if (var_name == "j_dec_upper")
+		{
+			test::eq(lit.literal_kind, LiteralKind.REAL_LITERAL);
+			test::eq_approx(lit.real, 2.0);
 		}
 		else if (var_name == "k")
 		{
@@ -622,4 +634,30 @@ fn void ct_reflect_expr()
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, MACRO_DECL), 1);
+}
+
+fn void test_vasplat_slice()
+{
+	String source_code = `
+		module hello;
+
+		macro void @forward(...)
+		{
+			take(...$vaarg[1..]);
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test");
+	test::eq(success, true);
+
+	MacroInfo* macro_info = context.registry.macros.get("hello::@forward")!!;
+	MacroDecl* macro_decl = macro_info.node.as(MacroDecl);
+	CompoundStmt* body = macro_decl.body.as(CompoundStmt);
+	ExprStmt* expr_stmt = body.statements[0].as(ExprStmt);
+	CallExpr* call = expr_stmt.expr_stmt.as(CallExpr);
+	test::eq(call.args.len, 1);
+	VasplatExpr* vasplat = call.args[0].as(VasplatExpr);
+	test::ne(vasplat.range_expr, null);
+	test::eq(vasplat.range_expr.kind, NodeKind.DESIGNATOR_EXPR);
 }

@@ -772,3 +772,92 @@ fn void decl_stmt_ambiguity()
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
 }
+
+fn void asm_stmt()
+{
+	String source_code = `
+		module hello;
+
+		fn void foo()
+		{
+			asm("nop");
+			asm { }
+		}
+
+		fn void bar()
+		{
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("hello")!!;
+	test::eq(parser_tests::count_kind(mod, FN_DECL), 2);
+
+	FunctionInfo* func_info = context.registry.functions.get("hello::foo")!!;
+	FnDecl* fn_decl = func_info.node.as(FnDecl);
+	CompoundStmt* body = fn_decl.body.as(CompoundStmt);
+	test::eq(body.statements.len, 2);
+	AsmBlockStmt* asm_str = body.statements[0].as(AsmBlockStmt);
+	test::eq(asm_str.is_string, true);
+	AsmBlockStmt* asm_blk = body.statements[1].as(AsmBlockStmt);
+	test::eq(asm_blk.is_string, false);
+}
+
+fn void switch_jump_attr()
+{
+	String source_code = `
+		module hello;
+
+		fn void foo(int a)
+		{
+			switch (a) @jump
+			{
+				case 0: break;
+				default: break;
+			}
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test");
+	test::eq(success, true);
+
+	FunctionInfo* func_info = context.registry.functions.get("hello::foo")!!;
+	FnDecl* fn_decl = func_info.node.as(FnDecl);
+	CompoundStmt* body = fn_decl.body.as(CompoundStmt);
+	SwitchStmt* sw = body.statements[0].as(SwitchStmt);
+	test::eq(sw.attributes.len, 1);
+	AttributeDecl* attr = sw.attributes[0].as(AttributeDecl);
+	test::eq(attr.name.text, "@jump");
+	test::eq(sw.cases.len, 2);
+}
+
+fn void ct_switch_empty_default_comment()
+{
+	String source_code = `
+		module hello;
+
+		fn void foo()
+		{
+			$switch:
+				$case true:
+					int a = 1;
+				$default:
+					// Do nothing
+			$endswitch
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test");
+	test::eq(success, true);
+
+	FunctionInfo* func_info = context.registry.functions.get("hello::foo")!!;
+	FnDecl* fn_decl = func_info.node.as(FnDecl);
+	CompoundStmt* body = fn_decl.body.as(CompoundStmt);
+	CtSwitchStmt* sw = body.statements[0].as(CtSwitchStmt);
+	test::eq(sw.cases.len, 2);
+}

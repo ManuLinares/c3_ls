@@ -41,6 +41,13 @@ struct FileInput
 	bool is_library;
 }
 
+struct SourceGroup
+{
+	String name;
+	String[] patterns;
+	bool is_loaded;
+}
+
 struct LspProject
 {
 	HashMap{String, LspFile*} files;
@@ -49,6 +56,7 @@ struct LspProject
 	ProjectConfig config;
 	HashMap{String, ManifestConfig} manifests;
 	Allocator allocator;
+	List{SourceGroup} source_groups;
 }
 
 fn void LspProject.init(&self, Allocator allocator)
@@ -57,6 +65,7 @@ fn void LspProject.init(&self, Allocator allocator)
 	self.files.init(allocator);
 	self.process_queue.init(allocator);
 	self.workspace.init(allocator);
+	self.source_groups.init(allocator);
 }
 
 fn void LspProject.free(&self)
@@ -75,6 +84,7 @@ fn void LspProject.free(&self)
 		conf.free(self.allocator);
 	};
 	self.manifests.free();
+	self.source_groups.free();
 }
 
 <*
@@ -97,6 +107,11 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	String lookup_key = file_uri.path;
 	log::warn("Opening file: %s", lookup_key);
 
+	if (!from_disk)
+	{
+		self.ensure_matching_sources_loaded(lookup_key);
+	}
+
 	if (try LspFile* tracked = self.files.get(lookup_key))
 	{
 		defer file_uri.free();
@@ -115,7 +130,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 		}
 
 		if (tracked.text.len > 0) tracked.text.free(self.allocator);
-		tracked.text = document.text.copy(self.allocator);
+		tracked.text = document.text.len > 0 ? document.text.copy(self.allocator) : "";
 		tracked.version = 1;
 		tracked.is_library = false; // User opened this file in editor; publish diagnostics on edit!
 
@@ -394,10 +409,82 @@ fn void LspProject.process_stdlib(&self)
 	}
 }
 
-fn void LspProject.process_config(&self)
+fn void LspProject.add_source_group(&self, String name, String[] patterns) @inline
 {
-	if (self.config.root_path.len == 0) return;
+	self.source_groups.push({ .name = name, .patterns = patterns, .is_loaded = false });
+}
 
+macro void LspProject.add_group_if_present(&self, name, maybe_override, maybe_default)
+{
+	if (try p = maybe_override.get())
+	{
+		self.add_source_group(name, p);
+	}
+	else if (try p = maybe_default.get())
+	{
+		self.add_source_group(name, p);
+	}
+}
+
+fn void LspProject.setup_source_groups(&self)
+{
+	self.source_groups.clear();
+
+	if (self.config.sources.len > 0)
+	{
+		self.add_source_group("sources", self.config.sources);
+	}
+
+	if (try test_srcs = self.config.test_sources.get())
+	{
+		self.add_source_group("test-sources", test_srcs);
+	}
+
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			self.add_group_if_present(target_name, target_conf.sources_override, target_conf.sources);
+			self.add_group_if_present(target_name, target_conf.test_sources_override, target_conf.test_sources);
+		};
+	}
+}
+
+fn bool LspProject.file_matches_patterns(&self, String file_path, String[] patterns)
+{
+	if (self.config.root_path.len == 0) return false;
+	Path? base_path = path::tnew(self.config.root_path);
+	if (catch base_path) return false;
+
+	foreach (source_entry : patterns)
+	{
+		String entry_str = source_entry;
+		if (entry_str.ends_with("/**"))
+		{
+			entry_str = entry_str.strip_suffix("/**");
+		}
+		else if (entry_str.ends_with("/*"))
+		{
+			entry_str = entry_str.strip_suffix("/*");
+		}
+
+		Path? entry_path = base_path.tappend(entry_str);
+		if (catch entry_path) continue;
+
+		if (file_path.starts_with((String)entry_path))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk = true)
+{
+	if (group.is_loaded) return;
+	group.is_loaded = true;
+
+	if (self.config.root_path.len == 0) return;
 	Path? base_path = path::tnew(self.config.root_path);
 	if (catch err = base_path)
 	{
@@ -405,9 +492,7 @@ fn void LspProject.process_config(&self)
 		return;
 	}
 
-	log::info("Base path: %s", base_path);
-
-	foreach (source_entry : self.config.sources)
+	foreach (source_entry : group.patterns)
 	{
 		String entry_str = source_entry;
 		bool recursive = false;
@@ -435,10 +520,48 @@ fn void LspProject.process_config(&self)
 
 		foreach (matched : paths)
 		{
-			log::info("Found source path: %s", matched);
+			log::info("Found source file in group '%s': %s", group.name, matched);
 			Uri file_uri = uri::from_file_path(tmem, matched);
 			DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-			self.open_file({ .uri = uri }, from_disk: false);
+			self.open_file({ .uri = uri }, from_disk: from_disk);
+		}
+	}
+}
+
+fn void LspProject.ensure_matching_sources_loaded(&self, String file_path)
+{
+	if (self.config.root_path.len == 0) return;
+	if (self.source_groups.is_empty())
+	{
+		self.setup_source_groups();
+	}
+
+	for (sz i = 0; i < self.source_groups.len(); i++)
+	{
+		SourceGroup* group = self.source_groups.get_ref(i);
+		if (group.is_loaded) continue;
+
+		if (self.file_matches_patterns(file_path, group.patterns))
+		{
+			self.load_source_group(group, from_disk: true);
+		}
+	}
+}
+
+fn void LspProject.process_config(&self)
+{
+	if (self.source_groups.is_empty())
+	{
+		self.setup_source_groups();
+	}
+
+	for (sz i = 0; i < self.source_groups.len(); i++)
+	{
+		SourceGroup* group = self.source_groups.get_ref(i);
+		if (group.name == "sources")
+		{
+			self.load_source_group(group, from_disk: false);
+			break;
 		}
 	}
 }

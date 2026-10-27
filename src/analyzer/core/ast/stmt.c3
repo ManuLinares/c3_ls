@@ -31,6 +31,7 @@ struct SwitchStmt
 	NodeArray cases;
 	Node* cond;
 	Ident* label;
+	NodeArray attributes;
 }
 
 <*

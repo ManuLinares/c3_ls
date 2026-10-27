@@ -1072,8 +1072,7 @@ fn Node* parse_vasplat_expr(ContextScope scope)
 
 	if (consume(ctx, LBRACKET))
 	{
-		diagnostics::log_warn("This is not implemented!");
-		advance(ctx);
+		node.range_expr = parse_range_expr(scope, null, start);
 	}
 
 	return (Node*)node;

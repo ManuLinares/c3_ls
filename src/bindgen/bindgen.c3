@@ -276,6 +276,8 @@ fn void auto_discover_peer_includes(BindgenOptions* options)
 *>
 fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 {
+	json::max_depth = 512;
+
 	if (options.header_path.len == 0)
 	{
 		if (is_cli)

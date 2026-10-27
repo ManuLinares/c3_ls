@@ -15,8 +15,26 @@ fn Node* parse_asm_block_stmt(ContextScope scope)
 	diagnostics::log_debug("parse_macro");
 	AsmBlockStmt* node = ctx.ast.alloc_node(AsmBlockStmt, start);
 
-	skip_until(ctx, { RBRACE, EOF });
-	advance(ctx);
+	if (consume(ctx, LPAREN))
+	{
+		node.is_string = true;
+		parse_expr(scope);
+		(void)expect(ctx, (Node*)node, RPAREN);
+		(void)expect(ctx, (Node*)node, EOS);
+	}
+	else if (ctx.current.kind == LBRACE)
+	{
+		skip_until(ctx, { RBRACE, EOF });
+		consume(ctx, RBRACE);
+	}
+	else
+	{
+		skip_until(ctx, { RBRACE, EOS, EOF });
+		if (ctx.current.kind == RBRACE || ctx.current.kind == EOS)
+		{
+			advance(ctx);
+		}
+	}
 
 	return node;
 }

@@ -356,6 +356,10 @@ fn bool visit_stmts(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case SWITCH_STMT:
 			{
 				SwitchStmt* swi = node.as(SwitchStmt);
+				foreach (attr : swi.attributes)
+				{
+					if (!visit(attr, parent, hooks, data)) return false;
+				}
 				if (swi.cond && !visit(swi.cond, parent, hooks, data)) return false;
 				foreach (val : swi.cases)
 				{
