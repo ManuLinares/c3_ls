@@ -580,6 +580,116 @@ fn Node* check_macro_list_for_macro(MacroInfo* head)
 	return null;
 }
 
+fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String name)
+{
+	if (!context || !mod) return null;
+	String qname = string::tformat("%s::%s", mod.name, name);
+	if (context.registry)
+	{
+		if (try fn_info = context.registry.functions.get(qname))
+		{
+			if (Node* n = check_fn_list_for_function(fn_info)) return n;
+		}
+		if (try mac_info = context.registry.macros.get(qname))
+		{
+			if (Node* n = check_macro_list_for_macro(mac_info)) return n;
+		}
+	}
+	foreach (stmt : mod.nodes)
+	{
+		if (!stmt || stmt.kind == ERROR) continue;
+		if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
+		if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
+		String sname = cursor::spelling(stmt, tmem);
+		if (sname == name || sname.strip_prefix("@") == name.strip_prefix("@"))
+		{
+			return stmt;
+		}
+	}
+	return null;
+}
+
+fn Node* find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "")
+{
+	if (!context || !context.registry || name.len == 0) return null;
+
+	if (caller_mod.len > 0)
+	{
+		String local_qname = string::tformat("%s::%s", caller_mod, name);
+		if (try fn_info = context.registry.functions.get(local_qname))
+		{
+			if (Node* n = check_fn_list_for_function(fn_info)) return n;
+		}
+		if (try mac_info = context.registry.macros.get(local_qname))
+		{
+			if (Node* n = check_macro_list_for_macro(mac_info)) return n;
+		}
+	}
+
+	if (try fn_info = context.registry.functions.get(name))
+	{
+		if (Node* fn_node = check_fn_list_for_function(fn_info))
+		{
+			if (!sf || is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
+			{
+				return fn_node;
+			}
+		}
+	}
+	if (try mac_info = context.registry.macros.get(name))
+	{
+		if (Node* mac_node = check_macro_list_for_macro(mac_info))
+		{
+			if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
+			{
+				return mac_node;
+			}
+		}
+	}
+
+	String clean_name = name.strip_prefix("@");
+	if (try mac_info = context.registry.macros.get(clean_name))
+	{
+		if (Node* mac_node = check_macro_list_for_macro(mac_info))
+		{
+			if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
+			{
+				return mac_node;
+			}
+		}
+	}
+
+	if (sf)
+	{
+		List{String} imports = get_source_file_imported_modules(sf);
+		foreach (imp : imports)
+		{
+			String imp_qname = string::tformat("%s::%s", imp, name);
+			if (try fn_info = context.registry.functions.get(imp_qname))
+			{
+				if (Node* fn_node = check_fn_list_for_function(fn_info))
+				{
+					if (is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
+					{
+						return fn_node;
+					}
+				}
+			}
+			if (try mac_info = context.registry.macros.get(imp_qname))
+			{
+				if (Node* mac_node = check_macro_list_for_macro(mac_info))
+				{
+					if (is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
+					{
+						return mac_node;
+					}
+				}
+			}
+		}
+	}
+	return null;
+}
+
 fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String method_name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	if (!context || type_name.len == 0 || method_name.len == 0) return null;
@@ -1275,29 +1385,11 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 			if (mod)
 			{
+				if (Node* c = find_callable_in_module(context, mod, symbol_name)) return c;
 				String qname = string::tformat("%s::%s", mod.name, symbol_name);
 				if (context.registry)
 				{
-					if (try fn_info = context.registry.functions.get(qname))
-					{
-						if (Node* n = check_fn_list_for_function(fn_info)) return n;
-					}
-					if (try mac_info = context.registry.macros.get(qname))
-					{
-						if (Node* n = check_macro_list_for_macro(mac_info)) return n;
-					}
 					if (try ty_info = context.registry.types.get(qname)) return ty_info.node;
-				}
-				foreach (stmt : mod.nodes)
-				{
-					if (!stmt || stmt.kind == ERROR) continue;
-					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
-					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
-					String sname = cursor::spelling(stmt, tmem);
-					if (sname == symbol_name || sname.strip_prefix("@") == symbol_name.strip_prefix("@"))
-					{
-						return stmt;
-					}
 				}
 			}
 			return null;
@@ -1371,63 +1463,13 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 				return ty_info.node;
 			}
 		}
-		if (try fn_info = context.registry.functions.get(symbol_name))
-		{
-			if (Node* fn_node = check_fn_list_for_function(fn_info))
-			{
-				if (is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-				{
-					return fn_node;
-				}
-			}
-		}
-		if (try mac_info = context.registry.macros.get(symbol_name))
-		{
-			if (Node* mac_node = check_macro_list_for_macro(mac_info))
-			{
-				if (is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-				{
-					return mac_node;
-				}
-			}
-		}
 
-		String clean_name = symbol_name.strip_prefix("@");
-		if (try mac_info = context.registry.macros.get(clean_name))
-		{
-			if (Node* mac_node = check_macro_list_for_macro(mac_info))
-			{
-				if (is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-				{
-					return mac_node;
-				}
-			}
-		}
+		if (Node* c = find_callable_in_scope(context, sf, symbol_name)) return c;
 
 		List{String} imports = get_source_file_imported_modules(sf);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, symbol_name);
-			if (try fn_info = context.registry.functions.get(imp_qname))
-			{
-				if (Node* fn_node = check_fn_list_for_function(fn_info))
-				{
-					if (!sf || is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-					{
-						return fn_node;
-					}
-				}
-			}
-			if (try mac_info = context.registry.macros.get(imp_qname))
-			{
-				if (Node* mac_node = check_macro_list_for_macro(mac_info))
-				{
-					if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-					{
-						return mac_node;
-					}
-				}
-			}
 			if (try ty_info = context.registry.types.get(imp_qname))
 			{
 				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
@@ -1792,33 +1834,7 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 			};
 		}
 
-		if (mod)
-		{
-			String qname = string::tformat("%s::%s", mod.name, fn_name);
-			if (context.registry)
-			{
-				if (try fn_info = context.registry.functions.get(qname))
-				{
-					if (Node* n = check_fn_list_for_function(fn_info)) return n;
-				}
-				if (try mac_info = context.registry.macros.get(qname))
-				{
-					if (Node* n = check_macro_list_for_macro(mac_info)) return n;
-				}
-			}
-			foreach (stmt : mod.nodes)
-			{
-				if (!stmt || stmt.kind == ERROR) continue;
-				if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
-				if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
-				String sname = cursor::spelling(stmt, tmem);
-				if (sname == fn_name || sname.strip_prefix("@") == fn_name.strip_prefix("@"))
-				{
-					return stmt;
-				}
-			}
-		}
-		return null;
+		return find_callable_in_module(context, mod, fn_name);
 	}
 
 	if (try dot_idx = callee_name.rindex_of_char('.'))
@@ -1835,7 +1851,6 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 		if (mnode) return mnode;
 
 		String recv_type = resolve_type_of_chain(context, sf, recv_name, loc);
-
 		if (recv_type.len > 0)
 		{
 			mnode = find_method_in_type(context, recv_type, method_name, sf, loc);
@@ -1844,83 +1859,5 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 		return null;
 	}
 
-	if (context.registry)
-	{
-		if (caller_mod.len > 0)
-		{
-			String local_qname = string::tformat("%s::%s", caller_mod, callee_name);
-			if (try fn_info = context.registry.functions.get(local_qname))
-			{
-				if (Node* n = check_fn_list_for_function(fn_info)) return n;
-			}
-			if (try mac_info = context.registry.macros.get(local_qname))
-			{
-				if (Node* n = check_macro_list_for_macro(mac_info)) return n;
-			}
-		}
-
-		if (try fn_info = context.registry.functions.get(callee_name))
-		{
-			if (Node* fn_node = check_fn_list_for_function(fn_info))
-			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-				{
-					return fn_node;
-				}
-			}
-		}
-		if (try mac_info = context.registry.macros.get(callee_name))
-		{
-			if (Node* mac_node = check_macro_list_for_macro(mac_info))
-			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-				{
-					return mac_node;
-				}
-			}
-		}
-
-		String clean_name = callee_name.strip_prefix("@");
-		if (try mac_info = context.registry.macros.get(clean_name))
-		{
-			if (Node* mac_node = check_macro_list_for_macro(mac_info))
-			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-				{
-					return mac_node;
-				}
-			}
-		}
-
-		if (sf)
-		{
-			List{String} imports = get_source_file_imported_modules(sf);
-			foreach (imp : imports)
-			{
-				String imp_qname = string::tformat("%s::%s", imp, callee_name);
-				if (try fn_info = context.registry.functions.get(imp_qname))
-				{
-					if (Node* fn_node = check_fn_list_for_function(fn_info))
-					{
-						if (!sf || is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-						{
-							return fn_node;
-						}
-					}
-				}
-				if (try mac_info = context.registry.macros.get(imp_qname))
-				{
-					if (Node* mac_node = check_macro_list_for_macro(mac_info))
-					{
-						if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-						{
-							return mac_node;
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return null;
+	return find_callable_in_scope(context, sf, callee_name, caller_mod);
 }
