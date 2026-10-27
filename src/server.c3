@@ -28,6 +28,7 @@ import std::time;
 import uri;
 import std::os::process;
 import std::collections::object;
+import std::collections::list;
 
 bool is_ready;
 bool is_std_path_alloc;
@@ -39,7 +40,14 @@ LogLevel log_level;
 String log_path;
 String std_path;
 String compiler_path;
-LspProject project;
+ProjectManager project_manager;
+
+fn LspProject* get_project_for_raw_uri(String raw_uri)
+{
+	Uri? u = uri::parse(tmem, raw_uri);
+	if (catch u) return &project_manager.default_project;
+	return project_manager.get_or_create_project_for_uri(u);
+}
 
 struct LspInitializeResponse
 {
@@ -254,8 +262,8 @@ fn void start(CliArgs args)
 
 		io_handler::init();
 
-		project.init(mem);
-		defer project.free();
+		project_manager.init(mem);
+		defer project_manager.free();
 
 		running = true;
 
@@ -311,7 +319,7 @@ fn void loop()
 
 		if (is_ready)
 		{
-			project.update();
+			project_manager.update_all();
 		}
 	};
 }
@@ -406,34 +414,47 @@ fn void dispatch(LspMessage* message)
 				}
 				if (try value = message.params.initialize.workspace_folders.get() && value.len > 0)
 				{
-					config::load(&project, value[0], mem);
+					foreach (wf : value)
+					{
+						project_manager.add_workspace_folder(wf);
+					}
 				}
 				else if (try root_uri_str = message.params.initialize.root_uri.get() && root_uri_str.len > 0)
 				{
 					WorkspaceFolder wf = {.uri = root_uri_str,.name = "" };
-					config::load(&project, wf, mem);
+					project_manager.add_workspace_folder(wf);
 				}
 			}
 
 		case INITIALIZED:
 			log::info("received Initialized");
 			is_ready = true;
-			project.initial_process();
+			project_manager.initial_process_all();
 
 		case DID_OPEN:
-			project.open_file(message.params.did_open.document);
+			{
+				LspProject* proj = get_project_for_raw_uri(message.params.did_open.document.uri);
+				proj.open_file(message.params.did_open.document);
+			}
 
 		case DID_CHANGE:
-			project.change_file(message.params.did_change);
+			{
+				LspProject* proj = get_project_for_raw_uri(message.params.did_change.document.uri);
+				proj.change_file(message.params.did_change);
+			}
 
 		case DID_CLOSE:
-			project.close_document(message.params.did_close.document.uri);
+			{
+				LspProject* proj = get_project_for_raw_uri(message.params.did_close.document.uri);
+				proj.close_document(message.params.did_close.document.uri);
+			}
 
 		case COMPLETION:
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.completion.text_document.uri);
 				if (catch file_uri) return;
-				CompletionItem[]? items = completion::resolve(&project, file_uri, message.params.completion.position);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				CompletionItem[]? items = completion::resolve(proj, file_uri, message.params.completion.position);
 				LspCompletionResponse res = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -448,7 +469,7 @@ fn void dispatch(LspMessage* message)
 		case COMPLETION_RESOLVE:
 			{
 				CompletionItem item = message.params.completion_resolve.item;
-				completion::resolve_item(&project, &item);
+				completion::resolve_item(project_manager.get_active_project(), &item);
 				LspCompletionResolveResponse res = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -461,7 +482,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.hover.document.uri);
 				if (catch file_uri) return;
-				String? h = hover::hover(&project, file_uri, message.params.hover.position);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				String? h = hover::hover(proj, file_uri, message.params.hover.position);
 				LspHoverResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -479,7 +501,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.definition.document.uri);
 				if (catch file_uri) return;
-				LspLocation[]? defs = goto_definition::goto_definition(&project, file_uri, message.params.definition.position);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				LspLocation[]? defs = goto_definition::goto_definition(proj, file_uri, message.params.definition.position);
 				LspGoToDefinitionResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -492,7 +515,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.signature_help.text_document.uri);
 				if (catch file_uri) return;
-				SignatureHelpResult? help_res = signature_help::signature_help(&project, file_uri, message.params.signature_help.position);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				SignatureHelpResult? help_res = signature_help::signature_help(proj, file_uri, message.params.signature_help.position);
 				LspSignatureHelpResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -508,7 +532,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.references.text_document.uri);
 				if (catch file_uri) return;
-				LspLocation[]? refs = references::find_references(&project, file_uri, message.params.references.position, message.params.references.context);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				LspLocation[]? refs = references::find_references(proj, file_uri, message.params.references.position, message.params.references.context);
 				LspReferencesResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -521,7 +546,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.prepare_rename.text_document.uri);
 				if (catch file_uri) return;
-				LspRange? prep_res = rename::prepare_rename(&project, file_uri, message.params.prepare_rename.position);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				LspRange? prep_res = rename::prepare_rename(proj, file_uri, message.params.prepare_rename.position);
 				if (catch prep_res)
 				{
 					LspShutdownResponse null_resp = {
@@ -544,7 +570,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.rename.text_document.uri);
 				if (catch file_uri) return;
-				WorkspaceEdit? edit_res = rename::rename(&project, file_uri, message.params.rename.position, message.params.rename.newName);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				WorkspaceEdit? edit_res = rename::rename(proj, file_uri, message.params.rename.position, message.params.rename.newName);
 				LspRenameResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -560,7 +587,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.semantic_tokens.text_document.uri);
 				if (catch file_uri) return;
-				SemanticTokensResult? tokens_res = semantic_tokens::compute_semantic_tokens(&project, file_uri);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				SemanticTokensResult? tokens_res = semantic_tokens::compute_semantic_tokens(proj, file_uri);
 				LspSemanticTokensResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -576,7 +604,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.document_symbol.text_document.uri);
 				if (catch file_uri) return;
-				SymbolInformation[]? syms = document_symbols::get_document_symbols(&project, file_uri);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				SymbolInformation[]? syms = document_symbols::get_document_symbols(proj, file_uri);
 				LspDocumentSymbolResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -587,11 +616,23 @@ fn void dispatch(LspMessage* message)
 
 		case WS_SYMBOL:
 			{
-				SymbolInformation[]? syms = workspace_symbols::query_workspace_symbols(&project, message.params.workspace_symbol.query);
+				List{SymbolInformation} all_syms;
+				all_syms.tinit();
+				if (try syms = workspace_symbols::query_workspace_symbols(&project_manager.default_project, message.params.workspace_symbol.query))
+				{
+					all_syms.push_all(syms);
+				}
+				project_manager.projects.@each(; root, proj)
+				{
+					if (try syms = workspace_symbols::query_workspace_symbols(proj, message.params.workspace_symbol.query))
+					{
+						all_syms.push_all(syms);
+					}
+				};
 				LspWorkspaceSymbolResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
-					.result = syms ?? {}
+					.result = all_syms.to_tarray()
 				};
 				io_handler::write(translator::encode(resp, tmem));
 			}
@@ -600,7 +641,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.inlay_hint.text_document.uri);
 				if (catch file_uri) return;
-				InlayHint[]? hints = inlay_hints::get_inlay_hints(&project, file_uri, message.params.inlay_hint.range);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				InlayHint[]? hints = inlay_hints::get_inlay_hints(proj, file_uri, message.params.inlay_hint.range);
 				LspInlayHintResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -613,7 +655,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.folding_range.text_document.uri);
 				if (catch file_uri) return;
-				FoldingRange[]? ranges = folding_ranges::get_folding_ranges(&project, file_uri);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				FoldingRange[]? ranges = folding_ranges::get_folding_ranges(proj, file_uri);
 				LspFoldingRangeResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -626,7 +669,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.formatting.text_document.uri);
 				if (catch file_uri) return;
-				TextEdit[]? edits = formatting::format_document(&project, file_uri, message.params.formatting.options);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				TextEdit[]? edits = formatting::format_document(proj, file_uri, message.params.formatting.options);
 				LspFormattingResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -639,7 +683,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.range_formatting.text_document.uri);
 				if (catch file_uri) return;
-				TextEdit[]? edits = formatting::format_range(&project, file_uri, message.params.range_formatting.range, message.params.range_formatting.options);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				TextEdit[]? edits = formatting::format_range(proj, file_uri, message.params.range_formatting.range, message.params.range_formatting.options);
 				LspFormattingResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -652,7 +697,8 @@ fn void dispatch(LspMessage* message)
 			{
 				Uri? file_uri = uri::parse(tmem, message.params.code_action.text_document.uri);
 				if (catch file_uri) return;
-				CodeAction[]? actions = code_actions::get_code_actions(&project, file_uri, message.params.code_action);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+				CodeAction[]? actions = code_actions::get_code_actions(proj, file_uri, message.params.code_action);
 				LspCodeActionResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -697,14 +743,15 @@ fn void dispatch(LspMessage* message)
 						{
 							Uri file_u = uri::from_file_path(tmem, output_path);
 							DocumentUri out_uri = (DocumentUri)file_u.to_raw_string(tmem);
-							project.open_file({ .uri = out_uri }, from_disk: true);
+							LspProject* proj = project_manager.get_or_create_project_for_uri(file_u);
+							proj.open_file({ .uri = out_uri }, from_disk: true);
 
 							// Queue all open user documents for re-analysis so the new module clears diagnostics
-							project.files.@each(; path_key, lsp_f)
+							proj.files.@each(; path_key, lsp_f)
 							{
 								if (lsp_f && !lsp_f.is_library)
 								{
-									project.process_queue.push({
+									proj.process_queue.push({
 										.source_text = lsp_f.text,
 										.uri = lsp_f.uri.path,
 										.path = lsp_f.uri.path,
@@ -713,7 +760,7 @@ fn void dispatch(LspMessage* message)
 								}
 							};
 
-							project.update();
+							proj.update();
 						}
 					}
 				}
@@ -728,31 +775,26 @@ fn void dispatch(LspMessage* message)
 
 		case WS_CHANGE_WATCHED:
 			{
-				bool needs_update = false;
 				foreach (ev : message.params.did_change_watched.changes)
 				{
 					if (ev.type == 3) // FileChangeType.DELETED
 					{
-						project.close_file(ev.uri);
-						needs_update = true;
-					}
-				}
-				if (needs_update)
-				{
-					// Re-analyze open user documents to update diagnostics
-					project.files.@each(; path_key, lsp_f)
-					{
-						if (lsp_f && !lsp_f.is_library)
+						LspProject* proj = get_project_for_raw_uri(ev.uri);
+						proj.close_file(ev.uri);
+						proj.files.@each(; path_key, lsp_f)
 						{
-							project.process_queue.push({
-								.source_text = lsp_f.text,
-								.uri = lsp_f.uri.path,
-								.path = lsp_f.uri.path,
-								.is_library = false
-							});
-						}
-					};
-					project.update();
+							if (lsp_f && !lsp_f.is_library)
+							{
+								proj.process_queue.push({
+									.source_text = lsp_f.text,
+									.uri = lsp_f.uri.path,
+									.path = lsp_f.uri.path,
+									.is_library = false
+								});
+							}
+						};
+						proj.update();
+					}
 				}
 			}
 

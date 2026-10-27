@@ -114,3 +114,37 @@ fn void test_project_multi_target_sources()
 	assert(proj.file_matches_patterns("/mock/root/extra_target/sub/file.c3", t2_sources));
 	assert(!proj.file_matches_patterns("/mock/root/other/file.c3", t2_sources));
 }
+
+fn void test_find_enclosing_project_root()
+{
+	Path cwd = path::tcwd()!!;
+	String test_file = string::tformat("%s/src/server.c3", (String)cwd);
+
+	String dir = test_file;
+	if (!file::is_dir(dir))
+	{
+		dir = dir.path_tdirname() ?? "";
+	}
+
+	String found_root = "";
+	while (dir.len > 0)
+	{
+		Path? base_p = path::tnew(dir);
+		if (catch base_p) break;
+
+		Path proj_json = base_p.tappend(lsp::core::config::PROJECT_CONFIG_NAME) ?? (Path)"";
+		Path manifest_json = base_p.tappend(lsp::core::config::MANIFEST_CONFIG_NAME) ?? (Path)"";
+
+		if (path::exists(proj_json) || path::exists(manifest_json))
+		{
+			found_root = dir.copy(tmem);
+			break;
+		}
+
+		String parent = dir.path_tdirname() ?? "";
+		if (parent.len == 0 || parent == dir) break;
+		dir = parent;
+	}
+
+	test::eq(found_root, (String)cwd);
+}
