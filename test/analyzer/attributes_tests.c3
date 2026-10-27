@@ -80,7 +80,7 @@ fn void module_tag_if()
 	test::eq(attr.attribute_kind, AttributeKind.IF);
 	test::eq(attr.exprs.len, 1);
 	CtFeatureExpr* feat          = attr.exprs[0].as(CtFeatureExpr);
-	IdentExpr* callee_ident_expr = feat.inner_expr.as(IdentExpr);
+	IdentExpr* callee_ident_expr = feat.expr_list[0].as(IdentExpr);
 	test::eq(callee_ident_expr.ident.text, "MY_FEATURE");
 	// end @if()
 }
@@ -116,7 +116,7 @@ fn void function_if()
 	test::eq(attr.exprs.len, 1);
 
 	CtFeatureExpr* feat          = attr.exprs[0].as(CtFeatureExpr);
-	IdentExpr* callee_ident_expr = feat.inner_expr.as(IdentExpr);
+	IdentExpr* callee_ident_expr = feat.expr_list[0].as(IdentExpr);
 	test::eq(callee_ident_expr.ident.text, "MY_FEATURE");
 }
 
@@ -164,7 +164,7 @@ fn void const_var_private_if()
 		test::eq(attr.exprs.len, 1);
 		// $feature()
 		CtFeatureExpr* call          = attr.exprs[0].as(CtFeatureExpr);
-		IdentExpr* callee_ident_expr = call.inner_expr.as(IdentExpr);
+		IdentExpr* callee_ident_expr = call.expr_list[0].as(IdentExpr);
 		test::eq(callee_ident_expr.ident.text, "MY_FEATURE");
 	}
 	test::eq(var_decl_count, 2);

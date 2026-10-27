@@ -762,7 +762,10 @@ fn bool visit_exprs(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case CT_FEATURE_EXPR:
 			{
 				CtFeatureExpr* feat = node.as(CtFeatureExpr);
-				if (feat.inner_expr && !visit(feat.inner_expr, parent, hooks, data)) return false;
+				foreach (expr : feat.expr_list)
+				{
+					if (expr && !visit(expr, parent, hooks, data)) return false;
+				}
 				break;
 			}
 		case CT_EVAL_EXPR:

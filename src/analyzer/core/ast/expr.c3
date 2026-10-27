@@ -348,7 +348,7 @@ struct CtDefinedExpr
 struct CtFeatureExpr
 {
 	inline Node node;
-	Node* inner_expr;
+	NodeArray expr_list;
 }
 
 struct LengthofExpr

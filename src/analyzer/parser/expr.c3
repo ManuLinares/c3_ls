@@ -1540,8 +1540,15 @@ fn Node* parse_ct_feature(ContextScope scope)
 	defer node.range.end = ctx.peek(-1).range.end;
 
 	expect(ctx, node, LPAREN);
-	node.inner_expr = parse_expr(scope);
+	List{Node*} exprs;
+	exprs.init(tmem, 2);
+	while (!ctx.is(RPAREN) && !ctx.eof())
+	{
+		exprs.push(parse_expr(scope));
+		if (!consume(ctx, COMMA)) break;
+	}
 	expect(ctx, node, RPAREN);
+	node.expr_list = alloc::clone_slice(ctx.allocator, exprs.array_view());
 
 	return (Node*)node;
 }
