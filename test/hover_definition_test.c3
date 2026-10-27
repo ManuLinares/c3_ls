@@ -669,3 +669,56 @@ fn void test_module_function_vs_method_definition()
 	assert(locs.len > 0);
 	test::eq((int)locs[0].range.start.line, 2);
 }
+
+fn void test_imported_submodule_short_name_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String os_macos_code = "module std::os::macos;\nfn void dummy() {}\n";
+	String gfx_macos_code = "module std::gfx::macos;\nfn void window_create_wgpu_surface() {}\n";
+	String gfx_impl_code = "module std::gfx;\nimport std::os;\nimport std::gfx::macos;\nfn void test() {\n  macos::window_create_wgpu_surface();\n}\n";
+
+	proj.workspace.process_file("/virtual/os_macos.c3", os_macos_code);
+	proj.workspace.process_file("/virtual/gfx_macos.c3", gfx_macos_code);
+	proj.workspace.process_file("/virtual/gfx_impl.c3", gfx_impl_code);
+
+	Uri impl_uri = uri::from_file_path(mem, "/virtual/gfx_impl.c3");
+	defer impl_uri.free();
+
+	LspPosition pos = { .line = 4, .character = 15 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, impl_uri, pos)!!;
+	assert(locs.len > 0);
+	test::eq((int)locs[0].range.start.line, 1);
+}
+
+fn void test_multi_module_section_imports_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String mod_a_sub = "module mod_a::sub;\nfn void action() {}\n";
+	String mod_b_sub = "module mod_b::sub;\nfn void action() {}\n";
+	String multi_file = "module client_a;\nimport mod_a::sub;\nfn void run_a() {\n  sub::action();\n}\n\nmodule client_b;\nimport mod_b::sub;\nfn void run_b() {\n  sub::action();\n}\n";
+
+	proj.workspace.process_file("/virtual/mod_a.c3", mod_a_sub);
+	proj.workspace.process_file("/virtual/mod_b.c3", mod_b_sub);
+	proj.workspace.process_file("/virtual/multi.c3", multi_file);
+
+	Uri multi_uri = uri::from_file_path(mem, "/virtual/multi.c3");
+	defer multi_uri.free();
+
+	// Line 3: sub::action() inside module client_a -> should resolve to mod_a.c3
+	LspPosition pos_a = { .line = 3, .character = 8 };
+	LspLocation[] locs_a = goto_definition::goto_definition(&proj, multi_uri, pos_a)!!;
+	assert(locs_a.len > 0);
+	test::eq(locs_a[0].uri, "file:///virtual/mod_a.c3");
+
+	// Line 9: sub::action() inside module client_b -> should resolve to mod_b.c3
+	LspPosition pos_b = { .line = 9, .character = 8 };
+	LspLocation[] locs_b = goto_definition::goto_definition(&proj, multi_uri, pos_b)!!;
+	assert(locs_b.len > 0);
+	test::eq(locs_b[0].uri, "file:///virtual/mod_b.c3");
+}

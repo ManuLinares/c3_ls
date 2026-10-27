@@ -232,18 +232,54 @@ fn String get_module_name_at_location(SourceFile* sf, Location loc)
 	return get_source_file_module_name(sf);
 }
 
-fn bool is_same_module(SourceFile* sf, String target_mod)
+fn bool is_same_module(SourceFile* sf, String target_mod, Location loc = { -1, -1 })
 {
 	if (!sf || target_mod.len == 0) return false;
-	String sf_mod = get_source_file_module_name(sf);
+	String sf_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
 	return sf_mod.len > 0 && sf_mod == target_mod;
 }
 
-fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod)
+fn void get_module_section_stmt_range(SourceFile* sf, Location loc, sz* out_start, sz* out_end)
+{
+	*out_start = 0;
+	*out_end = sf ? sf.ast.statements.len() : 0;
+	if (!sf || loc.line < 0) return;
+
+	sz last_mod_decl_idx = 0;
+	bool found_mod_decl = false;
+	for (sz i = 0; i < sf.ast.statements.len(); i++)
+	{
+		Node* stmt = sf.ast.statements.get(i);
+		if (stmt && stmt.kind == MODULE_DECL)
+		{
+			if (stmt.range.start.line <= loc.line)
+			{
+				last_mod_decl_idx = i;
+				found_mod_decl = true;
+			}
+			else
+			{
+				*out_end = i;
+				break;
+			}
+		}
+	}
+	if (found_mod_decl)
+	{
+		*out_start = last_mod_decl_idx;
+	}
+}
+
+fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod, Location loc = { -1, -1 })
 {
 	if (!sf || target_mod.len == 0) return false;
-	foreach (stmt : sf.ast.statements)
+	sz start_idx = 0;
+	sz end_idx = 0;
+	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+
+	for (sz i = start_idx; i < end_idx; i++)
 	{
+		Node* stmt = sf.ast.statements.get(i);
 		if (!stmt || stmt.kind != IMPORT_DECL) continue;
 		ImportDecl* imp = stmt.as(ImportDecl);
 		bool has_public = false;
@@ -270,72 +306,7 @@ fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod)
 	return false;
 }
 
-fn bool is_module_visible_to_file(AnalyzerContext* context, SourceFile* sf, String target_mod)
-{
-	if (!sf || target_mod.len == 0) return false;
-
-	String sf_mod = get_source_file_module_name(sf);
-	if (sf_mod.len > 0 && sf_mod == target_mod) return true;
-
-	Module* target_mod_obj = context ? (context.modules.get(target_mod) ?? null) : null;
-	if (target_mod_obj && is_module_private(target_mod_obj)) return false;
-
-	if (target_mod == "std::core" || target_mod.starts_with("std::core::")) return true;
-
-	if (sf_mod.len > 0)
-	{
-		sz sf_dot = sf_mod.index_of("::") ?? sf_mod.len;
-		sz tg_dot = target_mod.index_of("::") ?? target_mod.len;
-		if (sf_mod[:sf_dot] == target_mod[:tg_dot]) return true;
-	}
-
-	foreach (stmt : sf.ast.statements)
-	{
-		if (!stmt || stmt.kind != IMPORT_DECL) continue;
-		ImportDecl* imp = stmt.as(ImportDecl);
-
-		bool is_pub_import = false;
-		foreach (attr : imp.attributes)
-		{
-			if (attr && attr.kind == ATTRIBUTE_DECL && attr.as(AttributeDecl).attribute_kind == AttributeKind.PUBLIC)
-			{
-				is_pub_import = true;
-				break;
-			}
-		}
-
-		foreach (p : imp.paths)
-		{
-			if (!p || p.kind != PATH_EXPR) continue;
-			PathExpr* pe = p.as(PathExpr);
-			String imp_path = pe.path ? pe.path.text.strip_suffix("::") : "";
-			if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
-			{
-				if (target_mod_obj && is_module_private(target_mod_obj) && !is_pub_import) continue;
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-fn bool is_symbol_accessible_from_file(AnalyzerContext* context, SourceFile* sf, Node* target_node, String target_mod)
-{
-	if (!target_node || !sf) return false;
-	if (sf.contains_node(target_node)) return true;
-
-	Visibility vis = target_node.visibility;
-	if (vis == Visibility.LOCAL) return false;
-	if (vis != Visibility.PRIVATE) return true;
-
-	String caller_mod = get_source_file_module_name(sf);
-	if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
-	if (is_imported_as_public_in_file(sf, target_mod)) return true;
-	return false;
-}
-
-fn List{String} get_source_file_imported_modules(SourceFile* sf)
+fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 {
 	List{String} list;
 	list.tinit();
@@ -347,8 +318,13 @@ fn List{String} get_source_file_imported_modules(SourceFile* sf)
 	list.push("std::core::string");
 	list.push("std::core::types");
 
-	foreach (stmt : sf.ast.statements)
+	sz start_idx = 0;
+	sz end_idx = 0;
+	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+
+	for (sz i = start_idx; i < end_idx; i++)
 	{
+		Node* stmt = sf.ast.statements.get(i);
 		if (!stmt || stmt.kind != IMPORT_DECL) continue;
 		ImportDecl* imp = stmt.as(ImportDecl);
 		foreach (p : imp.paths)
@@ -363,6 +339,165 @@ fn List{String} get_source_file_imported_modules(SourceFile* sf)
 		}
 	}
 	return list;
+}
+
+fn List{String} get_source_file_imported_modules(SourceFile* sf)
+{
+	return get_imported_modules_at_location(sf, { -1, -1 });
+}
+
+fn bool is_module_visible_to_file(AnalyzerContext* context, SourceFile* sf, String target_mod, Location loc = { -1, -1 })
+{
+	if (!sf || target_mod.len == 0) return false;
+
+	String sf_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+	if (sf_mod.len > 0 && sf_mod == target_mod) return true;
+
+	Module* target_mod_obj = context ? (context.modules.get(target_mod) ?? null) : null;
+	if (target_mod_obj && is_module_private(target_mod_obj)) return false;
+
+	if (target_mod == "std::core" || target_mod.starts_with("std::core::")) return true;
+
+	if (sf_mod.len > 0)
+	{
+		sz sf_dot = sf_mod.index_of("::") ?? sf_mod.len;
+		sz tg_dot = target_mod.index_of("::") ?? target_mod.len;
+		if (sf_mod[:sf_dot] == target_mod[:tg_dot]) return true;
+	}
+
+	List{String} imports = get_imported_modules_at_location(sf, loc);
+	foreach (imp_path : imports)
+	{
+		if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
+		{
+			if (target_mod_obj && is_module_private(target_mod_obj)) continue;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+fn bool is_symbol_accessible_from_file(AnalyzerContext* context, SourceFile* sf, Node* target_node, String target_mod, Location loc = { -1, -1 })
+{
+	if (!target_node || !sf) return false;
+	if (sf.contains_node(target_node))
+	{
+		if (target_node.visibility == Visibility.PRIVATE)
+		{
+			String caller_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+			if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
+			return false;
+		}
+		return true;
+	}
+
+	Visibility vis = target_node.visibility;
+	if (vis == Visibility.LOCAL) return false;
+	if (vis != Visibility.PRIVATE) return true;
+
+	String caller_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+	if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
+	if (is_imported_as_public_in_file(sf, target_mod, loc)) return true;
+	return false;
+}
+
+fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, Location loc, String mod_prefix)
+{
+	if (!context || mod_prefix.len == 0) return null;
+
+	if (Module* m = context.modules.get(mod_prefix) ?? null)
+	{
+		return m;
+	}
+
+	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+
+	if (sf)
+	{
+		sz start_idx = 0;
+		sz end_idx = 0;
+		get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+		for (sz i = start_idx; i < end_idx; i++)
+		{
+			Node* stmt = sf.ast.statements.get(i);
+			if (stmt && stmt.kind == ALIAS_DECL)
+			{
+				AliasDecl* ad = stmt.as(AliasDecl);
+				if (ad.alias_kind == MODULE_ALIAS && ad.name && ad.name.text == mod_prefix && ad.target && ad.target.kind == PATH_EXPR)
+				{
+					PathExpr* pe = ad.target.as(PathExpr);
+					String target_path = pe.path ? pe.path.text.strip_suffix("::") : "";
+					if (Module* target_mod = context.modules.get(target_path) ?? null)
+					{
+						return target_mod;
+					}
+				}
+			}
+		}
+	}
+
+	if (sf)
+	{
+		List{String} imports = get_imported_modules_at_location(sf, loc);
+		String suffix = string::tformat("::%s", mod_prefix);
+		foreach (imp : imports)
+		{
+			if (imp == mod_prefix || imp.ends_with(suffix))
+			{
+				if (Module* imp_mod = context.modules.get(imp) ?? null)
+				{
+					return imp_mod;
+				}
+			}
+		}
+	}
+
+	if (caller_mod.len > 0)
+	{
+		String submod_name = string::tformat("%s::%s", caller_mod, mod_prefix);
+		if (Module* submod = context.modules.get(submod_name) ?? null)
+		{
+			return submod;
+		}
+	}
+
+	if (sf)
+	{
+		List{String} imports = get_imported_modules_at_location(sf, loc);
+		foreach (imp : imports)
+		{
+			String imp_sub = string::tformat("%s::%s", imp, mod_prefix);
+			if (Module* submod = context.modules.get(imp_sub) ?? null)
+			{
+				return submod;
+			}
+		}
+	}
+
+	if (caller_mod.len > 0)
+	{
+		if (try dot_idx = caller_mod.index_of("::"))
+		{
+			String top_mod = caller_mod[:dot_idx];
+			String top_sub = string::tformat("%s::%s", top_mod, mod_prefix);
+			if (Module* top_sub_mod = context.modules.get(top_sub) ?? null)
+			{
+				return top_sub_mod;
+			}
+		}
+	}
+
+	String suffix = string::tformat("::%s", mod_prefix);
+	Module* fallback_mod = null;
+	context.modules.@each(; mname, m)
+	{
+		if (!fallback_mod && (mname == mod_prefix || mname.ends_with(suffix)))
+		{
+			fallback_mod = m;
+		}
+	};
+	return fallback_mod;
 }
 
 fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, String type_name)
@@ -1060,18 +1195,7 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				if (ident.path_expr && ident.path_expr.kind == PATH_EXPR)
 				{
 					String mod_name = ident.path_expr.as(PathExpr).path ? ident.path_expr.as(PathExpr).path.text.strip_suffix("::") : "";
-					Module* mod = context ? (context.modules.get(mod_name) ?? null) : null;
-					if (!mod && context)
-					{
-						String suffix = string::tformat("::%s", mod_name);
-						context.modules.@each(; mname, m)
-						{
-							if (!mod && (mname == mod_name || mname.ends_with(suffix)))
-							{
-								mod = m;
-							}
-						};
-					}
+					Module* mod = resolve_module_for_prefix(context, sf, effective_loc, mod_name);
 
 					if (mod)
 					{
@@ -1298,19 +1422,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		String mod_name = path_expr.path ? path_expr.path.text.strip_suffix("::") : "";
 		if (context && mod_name.len > 0)
 		{
-			Module* mod = context.modules.get(mod_name) ?? null;
-			if (!mod)
-			{
-				String suffix = string::tformat("::%s", mod_name);
-				context.modules.@each(; mname, m)
-				{
-					if (!mod && (mname == mod_name || mname.ends_with(suffix)))
-					{
-						mod = m;
-					}
-				};
-			}
-
+			Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
 			if (mod && mod.module_decls.len() > 0)
 			{
 				return (Node*)mod.module_decls.get(0);
@@ -1349,18 +1461,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 				String mod_path = pe.path ? pe.path.text.strip_suffix("::") : "";
 				if (context && mod_path.len > 0)
 				{
-					Module* mod = context.modules.get(mod_path) ?? null;
-					if (!mod)
-					{
-						String suffix = string::tformat("::%s", mod_path);
-						context.modules.@each(; mname, m)
-						{
-							if (!mod && (mname == mod_path || mname.ends_with(suffix)))
-							{
-								mod = m;
-							}
-						};
-					}
+					Module* mod = resolve_module_for_prefix(context, sf, loc, mod_path);
 					if (mod && mod.module_decls.len() > 0)
 					{
 						return (Node*)mod.module_decls.get(0);
@@ -1370,18 +1471,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 			}
 
 			String mod_name = pe.path ? pe.path.text.strip_suffix("::") : "";
-			Module* mod = context ? (context.modules.get(mod_name) ?? null) : null;
-			if (!mod && context)
-			{
-				String suffix = string::tformat("::%s", mod_name);
-				context.modules.@each(; mname, m)
-				{
-					if (!mod && (mname == mod_name || mname.ends_with(suffix)))
-					{
-						mod = m;
-					}
-				};
-			}
+			Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
 
 			if (mod)
 			{
@@ -1390,6 +1480,15 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 				if (context.registry)
 				{
 					if (try ty_info = context.registry.types.get(qname)) return ty_info.node;
+				}
+				foreach (stmt : mod.nodes)
+				{
+					if (!stmt || stmt.kind == ERROR) continue;
+					if (stmt.kind == VAR_DECL)
+					{
+						VarDecl* vd = stmt.as(VarDecl);
+						if (vd.name && vd.name.text == symbol_name) return stmt;
+					}
 				}
 			}
 			return null;
@@ -1816,24 +1915,12 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 
 	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
 
-	if (try idx = callee_name.index_of("::"))
+	if (try idx = callee_name.rindex_of("::"))
 	{
 		String mod_name = callee_name[:idx];
 		String fn_name = callee_name[idx + 2..];
 
-		Module* mod = context.modules.get(mod_name) ?? null;
-		if (!mod)
-		{
-			String suffix = string::tformat("::%s", mod_name);
-			context.modules.@each(; mname, m)
-			{
-				if (!mod && (mname == mod_name || mname.ends_with(suffix)))
-				{
-					mod = m;
-				}
-			};
-		}
-
+		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
 		return find_callable_in_module(context, mod, fn_name);
 	}
 
