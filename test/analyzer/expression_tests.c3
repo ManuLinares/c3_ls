@@ -661,3 +661,21 @@ fn void test_vasplat_slice()
 	test::ne(vasplat.range_expr, null);
 	test::eq(vasplat.range_expr.kind, NodeKind.DESIGNATOR_EXPR);
 }
+
+fn void ct_feature_multiple_args()
+{
+	String source_code = `
+		module hello;
+
+		fn void foo()
+		{
+			$if $feat(MACOS, DARWIN):
+				int a = 1;
+			$endif
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test");
+	test::eq(success, true);
+}

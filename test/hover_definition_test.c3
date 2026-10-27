@@ -648,3 +648,24 @@ fn void main() {
 	String h = hover::hover(&proj, app_uri, pos) ?? "";
 	test::eq(h.len, 0);
 }
+
+fn void test_module_function_vs_method_definition()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String gfx_code = "module std::gfx;\nstruct GfxSurface {}\nfn void? init(String name) {}\nfn void? GfxSurface.init(&self, void* data) {}\n";
+	String app_code = "module app;\nimport std::gfx;\nfn void main() {\n  gfx::init(\"test\");\n}\n";
+
+	proj.workspace.process_file("/virtual/gfx.c3", gfx_code);
+	proj.workspace.process_file("/virtual/app.c3", app_code);
+
+	Uri app_uri = uri::from_file_path(mem, "/virtual/app.c3");
+	defer app_uri.free();
+
+	LspPosition init_pos = { .line = 3, .character = 8 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, init_pos)!!;
+	assert(locs.len > 0);
+	test::eq((int)locs[0].range.start.line, 2);
+}
