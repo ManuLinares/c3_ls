@@ -276,15 +276,15 @@ enum SdlEventAction
 
 fn void test_fn() {
 	SdlEventAction a;
-	a.
+	SdlEventAction.
 }
 `;
 
 	proj.workspace.process_file("/virtual/enum_docs.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_docs.c3");
 	defer doc_uri.free();
-	// 1. Completion on `a.` (line 10, char 3)
-	LspPosition pos = {.line = 10,.character = 3 };
+	// 1. Completion on `SdlEventAction.` (line 10, char 16)
+	LspPosition pos = {.line = 10,.character = 16 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 
 	CompletionItem addevent_item;
@@ -2090,11 +2090,14 @@ fn void test_enum_associated_param_completion()
 	LspPosition pos1 = { .line = 8, .character = 8 };
 	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
 	bool found_tag_instance = false;
+	bool found_variant_on_instance = false;
 	foreach (item : items1)
 	{
 		if (item.label == "tag") found_tag_instance = true;
+		if (item.label == "FIRST" || item.label == "SECOND") found_variant_on_instance = true;
 	}
 	assert(found_tag_instance);
+	assert(!found_variant_on_instance);
 
 	// 2. Enum constant dot completion `StandaloneAssocEnum.FIRST.` (line 9, col 30)
 	LspPosition pos2 = { .line = 9, .character = 30 };

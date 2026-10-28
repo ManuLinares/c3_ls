@@ -1252,8 +1252,31 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 
 				if (type_node && type_node.kind == ENUM_DECL)
 				{
-					provide_enum_associated_params(items, type_node, clean_type, ctx.prefix);
-					provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
+					bool is_type_access = false;
+					Node* base_type = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, base_id);
+					if (!base_type && ctx.ws)
+					{
+						List{SymbolEntry} bsyms = ctx.ws.find_symbol_by_name(base_id, ctx.sf);
+						if (bsyms.len() > 0 && bsyms.get(0).node) base_type = bsyms.get(0).node;
+					}
+					if (base_type && base_type.kind == ENUM_DECL)
+					{
+						String dummy = "";
+						if (!query::find_local_decl_in_file(ctx.sf, base_id, &dummy, ctx.ws ? ctx.ws.ctx : null, loc))
+						{
+							is_type_access = true;
+						}
+					}
+
+					if (is_type_access)
+					{
+						provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
+						analysis::inject_type_properties(items, type_node.kind, clean_type, false);
+					}
+					else
+					{
+						provide_enum_associated_params(items, type_node, clean_type, ctx.prefix);
+					}
 					provide_methods_for_type(ctx, items, clean_type, &seen_methods);
 					return true;
 				}
