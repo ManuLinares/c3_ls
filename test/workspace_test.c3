@@ -179,3 +179,43 @@ fn void test_standalone_file_initializes_stdlib()
 	assert(proj.is_initialized);
 }
 
+fn void test_load_c3i_files_in_source_group()
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path test_dir = tmp_dir.tappend("c3_ls_c3i_source_test")!!;
+	Path src_dir = test_dir.tappend("src")!!;
+	Path bindings_dir = src_dir.tappend("bindings")!!;
+	(void)path::mkdir(bindings_dir, recursive: true);
+	defer (void)path::rmtree(test_dir);
+
+	Path c3i_path = bindings_dir.tappend("miniaudio.c3i")!!;
+	file::save(c3i_path, "module miniaudio;\nfn void device_init() {}\n")!!;
+
+	Path main_path = src_dir.tappend("main.c3")!!;
+	file::save(main_path, "module app;\nimport miniaudio;\nfn void main() { miniaudio::device_init(); }\n")!!;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.config.root_path = ((String)test_dir).copy(mem);
+	String[] srcs = alloc::alloc_array(mem, String, 1);
+	srcs[0] = "src/**".copy(mem);
+	proj.config.sources = srcs;
+
+	proj.setup_source_groups();
+
+	// Open only main.c3 (miniaudio.c3i is NOT opened)
+	Uri main_uri = uri::from_file_path(tmem, (String)main_path);
+	proj.open_file({ .uri = (DocumentUri)main_uri.to_raw_string(tmem), .text = "" }, from_disk: false);
+	proj.update();
+
+	// Verify miniaudio.c3i was automatically discovered and parsed
+	assert(proj.files.has_key((String)c3i_path));
+	assert(proj.workspace.ctx.modules.has_key("miniaudio"));
+	test::eq(proj.workspace.get_diagnostics((String)main_path).len, 0);
+}
+
+

@@ -500,12 +500,16 @@ fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk =
 	{
 		String entry_str = source_entry;
 		bool recursive = false;
-		String mask = "*.c3";
 
 		if (entry_str.ends_with("/**"))
 		{
 			entry_str = entry_str.strip_suffix("/**");
 			recursive = true;
+		}
+		else if (entry_str.ends_with("/*"))
+		{
+			entry_str = entry_str.strip_suffix("/*");
+			recursive = false;
 		}
 
 		Path? entry_path = base_path.tappend(entry_str);
@@ -515,19 +519,31 @@ fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk =
 			continue;
 		}
 
-		PathList paths;
-		if (catch err = @try(paths, path::ls(tmem, entry_path, no_dirs: true, mask: mask, recursive: recursive, rebase: entry_path)))
+		if (path::is_file(entry_path))
 		{
-			log::error("Failed to list directory contents for: %s", entry_str);
+			log::info("Found source file in group '%s': %s", group.name, (String)entry_path);
+			Uri file_uri = uri::from_file_path(tmem, (String)entry_path);
+			DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
+			self.open_file({ .uri = uri }, from_disk: from_disk);
 			continue;
 		}
 
-		foreach (matched : paths)
+		String[2] masks = { "*.c3", "*.c3i" };
+		foreach (mask : masks)
 		{
-			log::info("Found source file in group '%s': %s", group.name, matched);
-			Uri file_uri = uri::from_file_path(tmem, matched);
-			DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-			self.open_file({ .uri = uri }, from_disk: from_disk);
+			PathList paths;
+			if (catch err = @try(paths, path::ls(tmem, entry_path, no_dirs: true, mask: mask, recursive: recursive, rebase: entry_path)))
+			{
+				continue;
+			}
+
+			foreach (matched : paths)
+			{
+				log::info("Found source file in group '%s': %s", group.name, matched);
+				Uri file_uri = uri::from_file_path(tmem, matched);
+				DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
+				self.open_file({ .uri = uri }, from_disk: from_disk);
+			}
 		}
 	}
 }
