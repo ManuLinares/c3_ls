@@ -26,8 +26,7 @@ fn String format_code(String code, uint tab_size = 4, bool insert_spaces = false
 	};
 
 	TextEdit[] edits = formatting::format_document(&proj, doc_uri, options)!!;
-	if (edits.len == 0) return code;
-	return edits[0].newText;
+	return formatting::apply_text_edits(tmem, code, edits);
 }
 
 module lsp::formatting_glitches_test @test;

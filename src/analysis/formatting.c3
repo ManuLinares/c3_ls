@@ -1453,6 +1453,172 @@ FormattingOptions options
 	return final_out.str_view();
 }
 
+fn List{String} split_lines_with_newline(Allocator allocator, String s) @local
+{
+	List{String} lines;
+	lines.init(allocator);
+	if (s.len == 0) return lines;
+
+	sz start = 0;
+	for (sz i = 0; i < s.len; i++)
+	{
+		if (s[i] == '\n')
+		{
+			lines.push(s[start .. i]);
+			start = i + 1;
+		}
+	}
+	if (start < s.len)
+	{
+		lines.push(s[start..]);
+	}
+	return lines;
+}
+
+fn LspRange get_line_range(List{String} old_lines, sz from_line, sz to_line) @local
+{
+	LspPosition start_pos = { .line = (uint)from_line, .character = 0 };
+	LspPosition end_pos;
+
+	if (to_line < old_lines.len())
+	{
+		end_pos = { .line = (uint)to_line, .character = 0 };
+	}
+	else
+	{
+		sz last_idx = old_lines.len() > 0 ? old_lines.len() - 1 : 0;
+		if (old_lines.len() > 0 && !old_lines[last_idx].ends_with("\n"))
+		{
+			end_pos = { .line = (uint)last_idx, .character = (uint)old_lines[last_idx].len };
+		}
+		else
+		{
+			end_pos = { .line = (uint)to_line, .character = 0 };
+		}
+	}
+
+	return { .start = start_pos, .end = end_pos };
+}
+
+fn TextEdit[] compute_line_edits(Allocator allocator, String original, String formatted)
+{
+	if (original == formatted) return {};
+
+	List{String} old_lines = split_lines_with_newline(tmem, original);
+	List{String} new_lines = split_lines_with_newline(tmem, formatted);
+
+	sz old_len = old_lines.len();
+	sz new_len = new_lines.len();
+
+	// 1. Common prefix
+	sz prefix = 0;
+	while (prefix < old_len && prefix < new_len && old_lines[prefix] == new_lines[prefix])
+	{
+		prefix++;
+	}
+
+	if (prefix == old_len && prefix == new_len) return {};
+
+	// 2. Common suffix
+	sz old_end = old_len;
+	sz new_end = new_len;
+	while (old_end > prefix && new_end > prefix && old_lines[old_end - 1] == new_lines[new_end - 1])
+	{
+		old_end--;
+		new_end--;
+	}
+
+	List{TextEdit} edits;
+	edits.init(allocator);
+
+	// If the changed section has the same number of lines, emit fine-grained per-line edits
+	if (old_end - prefix == new_end - prefix)
+	{
+		sz i = prefix;
+		while (i < old_end)
+		{
+			if (old_lines[i] == new_lines[i])
+			{
+				i++;
+				continue;
+			}
+			sz edit_start = i;
+			while (i < old_end && old_lines[i] != new_lines[i])
+			{
+				i++;
+			}
+			sz edit_end = i;
+
+			DString new_text;
+			new_text.tinit();
+			for (sz j = edit_start; j < edit_end; j++)
+			{
+				new_text.append(new_lines[j]);
+			}
+
+			edits.push({
+				.range = get_line_range(old_lines, edit_start, edit_end),
+				.newText = new_text.str_view().copy(allocator)
+			});
+		}
+	}
+	else
+	{
+		DString new_text;
+		new_text.tinit();
+		for (sz j = prefix; j < new_end; j++)
+		{
+			new_text.append(new_lines[j]);
+		}
+
+		edits.push({
+			.range = get_line_range(old_lines, prefix, old_end),
+			.newText = new_text.str_view().copy(allocator)
+		});
+	}
+
+	return edits.to_array(allocator);
+}
+
+fn String apply_text_edits(Allocator allocator, String content, TextEdit[] edits)
+{
+	if (edits.len == 0) return content.copy(allocator);
+
+	List{String} lines = split_lines_with_newline(tmem, content);
+	DString out;
+	out.tinit(content.len);
+
+	sz edit_idx = 0;
+	sz num_lines = lines.len();
+
+	for (sz i = 0; i < num_lines; i++)
+	{
+		if (edit_idx < edits.len && (sz)edits[edit_idx].range.start.line == i)
+		{
+			out.append(edits[edit_idx].newText);
+			sz end_line = (sz)edits[edit_idx].range.end.line;
+			while (i < end_line && i < num_lines)
+			{
+				i++;
+			}
+			i--;
+			edit_idx++;
+		}
+		else
+		{
+			out.append(lines[i]);
+		}
+	}
+
+	while (edit_idx < edits.len)
+	{
+		out.append(edits[edit_idx].newText);
+		edit_idx++;
+	}
+
+	return out.str_view().copy(allocator);
+}
+
 <*
  Formats the entire document buffer.
 *>
@@ -1469,20 +1635,7 @@ fn TextEdit[]? format_document(LspProject* project, Uri uri, FormattingOptions o
 
 	String formatted = format_tokens_range(tmem, sf.content, lexer.tokens.array_view(), 0, lexer.tokens.len() - 1, 0, options);
 
-	Token last_tok = lexer.tokens[lexer.tokens.len() - 1];
-	uint last_line = last_tok.range.end.line >= 0 ? (uint)last_tok.range.end.line : 0;
-	uint last_char = last_tok.range.end.column >= 0 ? (uint)last_tok.range.end.column : 0;
-
-	TextEdit[] edits = alloc::alloc_array(tmem, TextEdit, 1);
-	edits[0] = {
-		.range = {
-			.start = {.line = 0,.character = 0 },
-			.end = {.line = last_line,.character = last_char }
-		},
-		.newText = formatted
-	};
-
-	return edits;
+	return compute_line_edits(tmem, sf.content, formatted);
 }
 
 <*

@@ -96,12 +96,39 @@ fn int square(int x) => x * x;
 
 	FormattingOptions options = {.tab_size = 4,.insert_spaces = false,.insert_final_newline = true };
 	TextEdit[] edits = formatting::format_document(&proj, doc_uri, options)!!;
-	assert(edits.len == 1);
-	String fmt_text = edits[0].newText;
+	String fmt_text = formatting::apply_text_edits(tmem, unformatted, edits);
 
 	assert(fmt_text.contains("// Calculate square"));
 	assert(fmt_text.contains("@require x > 0"));
 	assert(fmt_text.contains("fn int square(int x) => x * x;"));
+}
+
+fn void test_format_document_minimal_edits()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	// 1. When already formatted, returns 0 edits
+	String formatted_code = "module app;\n\nfn void main()\n{\n\treturn;\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/fmt_min.c3");
+	defer doc_uri.free();
+
+	proj.workspace.process_file("/virtual/fmt_min.c3", formatted_code);
+
+	FormattingOptions options = {.tab_size = 4,.insert_spaces = false,.insert_final_newline = true };
+	TextEdit[] edits = formatting::format_document(&proj, doc_uri, options)!!;
+	assert(edits.len == 0);
+
+	// 2. When only one line in the middle is unformatted, only that line is edited
+	String code_with_bad_line = "module app;\n\nfn void main()\n{\n    return;\n}\n";
+	proj.workspace.process_file("/virtual/fmt_min.c3", code_with_bad_line);
+
+	edits = formatting::format_document(&proj, doc_uri, options)!!;
+	assert(edits.len == 1);
+	assert(edits[0].range.start.line == 4);
+	assert(edits[0].range.end.line == 5);
+	assert(edits[0].newText == "\treturn;\n");
 }
 
 fn void test_format_range_selective_lines()
