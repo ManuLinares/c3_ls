@@ -1951,7 +1951,22 @@ fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String
 			if (member && member.kind == VAR_DECL)
 			{
 				VarDecl* vd = member.as(VarDecl);
-				curr_type = vd.type ? cursor::raw_type_identifier(vd.type) ?? "" : "";
+				if (vd.type)
+				{
+					curr_type = cursor::raw_type_identifier(vd.type) ?? "";
+				}
+				else
+				{
+					Node* tnode = find_type_node_in_context(context, sf, curr_type);
+					if (tnode && tnode.kind == ENUM_DECL)
+					{
+						// Enum variant value retains enum type
+					}
+					else
+					{
+						curr_type = "";
+					}
+				}
 			}
 			else if (member && member.kind == STRUCT_DECL)
 			{

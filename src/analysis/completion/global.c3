@@ -108,6 +108,40 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
 
+					if (stmt.kind == FAULTDEF_DECL)
+					{
+						if (ctx.scope == TYPE_ASSIGNMENT && ctx.expected_type.len > 0 && ctx.expected_type != "fault") continue;
+						FaultdefDecl* fd = stmt.as(FaultdefDecl);
+						foreach (fault_node : fd.faults)
+						{
+							if (!fault_node || fault_node.kind != FAULT_DECL) continue;
+							FaultDecl* fdecl = fault_node.as(FaultDecl);
+							String fname = fdecl.name ? fdecl.name.text : "";
+							if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
+							{
+								if (seen_symbols.add(fname))
+								{
+									add_symbol_completion(ctx, items, fname, fault_node, mod_ident, ctx.prefix);
+								}
+							}
+						}
+						continue;
+					}
+					if (stmt.kind == FAULT_DECL)
+					{
+						if (ctx.scope == TYPE_ASSIGNMENT && ctx.expected_type.len > 0 && ctx.expected_type != "fault") continue;
+						FaultDecl* fdecl = stmt.as(FaultDecl);
+						String fname = fdecl.name ? fdecl.name.text : "";
+						if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
+						{
+							if (seen_symbols.add(fname))
+							{
+								add_symbol_completion(ctx, items, fname, stmt, mod_ident, ctx.prefix);
+							}
+						}
+						continue;
+					}
+
 					if (ctx.scope == TYPE_ASSIGNMENT && ctx.expected_type.len > 0)
 					{
 						if (stmt.kind == VAR_DECL)

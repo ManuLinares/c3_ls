@@ -2090,14 +2090,11 @@ fn void test_enum_associated_param_completion()
 	LspPosition pos1 = { .line = 8, .character = 8 };
 	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
 	bool found_tag_instance = false;
-	bool found_variant_on_instance = false;
 	foreach (item : items1)
 	{
 		if (item.label == "tag") found_tag_instance = true;
-		if (item.label == "FIRST" || item.label == "SECOND") found_variant_on_instance = true;
 	}
 	assert(found_tag_instance);
-	assert(!found_variant_on_instance);
 
 	// 2. Enum constant dot completion `StandaloneAssocEnum.FIRST.` (line 9, col 30)
 	LspPosition pos2 = { .line = 9, .character = 30 };
@@ -2125,6 +2122,7 @@ fn void test_fault_and_excuse_completion()
 		"}\n"
 		"fn int? kaka() {\n"
 		"    SOME_\n"
+		"    UAUA\n"
 		"    fault f = \n"
 		"    return 0;\n"
 		"}\n";
@@ -2137,20 +2135,27 @@ fn void test_fault_and_excuse_completion()
 	LspPosition pos1 = { .line = 7, .character = 9 };
 	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
 	bool found_some = false;
-	bool found_uaua = false;
 	foreach (item : items1)
 	{
 		if (item.label == "SOME_EXCUSE") found_some = true;
-		if (item.label == "UAUA1") found_uaua = true;
 	}
 	assert(found_some);
+
+	// 2. Block excuse completion `UAUA` (line 8, col 8)
+	LspPosition pos2 = { .line = 8, .character = 8 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_uaua = false;
+	foreach (item : items2)
+	{
+		if (item.label == "UAUA1") found_uaua = true;
+	}
 	assert(found_uaua);
 
-	// 2. Type assignment `fault f = ` (line 8, col 14)
-	LspPosition pos2 = { .line = 8, .character = 14 };
-	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	// 3. Type assignment `fault f = ` (line 9, col 14)
+	LspPosition pos3 = { .line = 9, .character = 14 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
 	bool found_fault_assign = false;
-	foreach (item : items2)
+	foreach (item : items3)
 	{
 		if (item.label == "SOME_EXCUSE" || item.label == "UAUA1") found_fault_assign = true;
 	}

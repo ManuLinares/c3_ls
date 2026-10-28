@@ -924,6 +924,49 @@ fn void provide_enum_variants(List{CompletionItem} * items, Node* enum_node, Str
 	}
 }
 
+fn void provide_enum_associated_params(List{CompletionItem} * items, Node* enum_node, String type_name, String prefix)
+{
+	if (!enum_node || enum_node.kind != ENUM_DECL) return;
+	EnumDecl* enum_decl = enum_node.as(EnumDecl);
+
+	foreach (param : enum_decl.assoc_params)
+	{
+		if (!param || param.kind != VAR_DECL) continue;
+		VarDecl* vd = param.as(VarDecl);
+		String pname = vd.name ? vd.name.text : "";
+		if (pname.len > 0 && fuzzy_match(pname, prefix))
+		{
+			String ptype = vd.type ? (cursor::raw_type_identifier(vd.type) ?? "") : "";
+			items.push(
+			{
+				.label = pname,
+				.kind = PROPERTY,
+				.detail = ptype.len > 0 ? string::tformat("%s", ptype) : string::tformat("associated property of %s", type_name),
+				.insertText = pname,
+				.filterText = pname,
+				.sortText = string::tformat("0001_%s", pname),
+				.data = string::tformat("enum_assoc:%s:%s", type_name, pname)
+			}
+			);
+		}
+	}
+
+	if (prefix.len == 0 || ((String)"ordinal").starts_with(prefix))
+	{
+		items.push(
+		{
+			.label = "ordinal",
+			.kind = PROPERTY,
+			.detail = "sz",
+			.insertText = "ordinal",
+			.filterText = "ordinal",
+			.sortText = "0002_ordinal",
+			.data = "property"
+		}
+		);
+	}
+}
+
 fn void collect_already_set_fields(String text, sz open_brace_idx, sz cursor_offset, sz prefix_len, HashSet{String}* out_set) @local
 {
 	int brace_depth = 0;
@@ -1209,6 +1252,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 
 				if (type_node && type_node.kind == ENUM_DECL)
 				{
+					provide_enum_associated_params(items, type_node, clean_type, ctx.prefix);
 					provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
 					provide_methods_for_type(ctx, items, clean_type, &seen_methods);
 					return true;

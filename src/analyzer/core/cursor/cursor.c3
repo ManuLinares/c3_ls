@@ -58,6 +58,13 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 				InterfaceDecl* id = node.as(InterfaceDecl);
 				return id.name ? id.name.text : "";
 			}
+		case FAULT_DECL:
+			{
+				FaultDecl* fd = node.as(FaultDecl);
+				return fd.name ? fd.name.text : "";
+			}
+		case FAULTDEF_DECL:
+			return "";
 		case TYPE_EXPR:
 			{
 				TypeExpr* type_data = node.as(TypeExpr);
@@ -493,6 +500,15 @@ fn Node* find_member_in_type(Node* node, String name)
 					if (vd.name && vd.name.text == name)
 					{
 						return variant;
+					}
+				}
+				foreach (param : decl.assoc_params)
+				{
+					if (!param || param.kind != VAR_DECL) continue;
+					VarDecl* vd = param.as(VarDecl);
+					if (vd.name && vd.name.text == name)
+					{
+						return param;
 					}
 				}
 				return null;
