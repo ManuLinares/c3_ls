@@ -148,3 +148,34 @@ fn void test_find_enclosing_project_root()
 
 	test::eq(found_root, (String)cwd);
 }
+
+fn void test_standalone_file_initializes_stdlib()
+{
+	if (server::std_path.len == 0)
+	{
+		server::setup_stdlib_path();
+	}
+	defer
+	{
+		if (server::is_std_path_alloc)
+		{
+			server::std_path.free(mem);
+			server::is_std_path_alloc = false;
+			server::std_path = "";
+		}
+	};
+
+	ProjectManager pm;
+	pm.init(mem);
+	defer pm.free();
+
+	assert(!pm.default_project.is_initialized);
+
+	pm.initial_process_all();
+	assert(pm.default_project.is_initialized);
+
+	LspProject* proj = pm.get_or_create_project_for_path("/virtual/standalone.c3");
+	assert(proj == &pm.default_project);
+	assert(proj.is_initialized);
+}
+

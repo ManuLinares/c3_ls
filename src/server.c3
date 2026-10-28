@@ -255,6 +255,9 @@ fn void start(CliArgs args)
 		compiler_path = args.compiler_path.len > 0 ? args.compiler_path : "c3c";
 		log_level = args.log_level;
 
+		logger::init();
+		defer logger::close();
+
 		log::info("LogPath = %s", log_path);
 		log::info("std_path = %s", std_path);
 		log::info("compiler_path = %s", compiler_path);
@@ -290,9 +293,6 @@ fn void start(CliArgs args)
 				compiler_path.free(mem);
 			}
 		};
-
-		logger::init();
-		defer logger::close();
 
 		loop();
 	};
@@ -822,58 +822,54 @@ fn void dispatch(LspMessage* message)
 
 fn void setup_stdlib_path() => @pool()
 {
-	Process? process = process::spawn(
-	{
-		compiler_path, "--version"
-	}
-	);
-	if (catch err = process)
-	{
-		log::error("failed to get compiler version: %s", err);
-		return;
-	}
+	char[4096] buf;
+	String comp = compiler_path.len > 0 ? compiler_path : "c3c";
 
-	const BUF_SIZE = 4096;
-	char[BUF_SIZE] stdout_buf;
-	char[BUF_SIZE] stderr_buf;
-
-	if (catch process.join())
+	// stdlib path from `c3c compile --build-env`
+	if (try out = process::run_capture_stdout(&buf, { comp, "compile", "--build-env" }))
 	{
-		log::error("Failed to join 'c3c_stdlib' process");
-		return;
-	}
-
-	String result;
-
-	if (try long len = process.read_stdout(&stdout_buf, BUF_SIZE))
-	{
-		result = (String)stdout_buf[:len];
+		foreach (line : out.trim().tsplit("\n"))
+		{
+			if (line.starts_with("Stdlib"))
+			{
+				if (try idx = (int)line.index_of(":"))
+				{
+					String raw_path = line[idx + 1..].trim().trim_right("/\\");
+					if (raw_path.len > 0)
+					{
+						is_std_path_alloc = true;
+						std_path = raw_path.copy(mem);
+						log::info("Set std-lib path: %s", std_path);
+						return;
+					}
+				}
+			}
+		}
 	}
 
-	if (try long len = process.read_stderr(&stderr_buf, BUF_SIZE))
+	// Fallback to `c3c --version`
+	if (try out = process::run_capture_stdout(&buf, { comp, "--version" }))
 	{
-		log::error((String)stderr_buf[:len]);
+		String[] split_lines = out.trim().tsplit("\n");
+		if (split_lines.len >= 2)
+		{
+			if (try idx = (int)split_lines[1].index_of(":"))
+			{
+				String raw_path = split_lines[1][idx + 1..].trim().trim_right("/\\");
+				is_std_path_alloc = true;
+				if (raw_path.ends_with("/lib") || raw_path.ends_with("/std"))
+				{
+					std_path = raw_path.copy(mem);
+				}
+				else
+				{
+					std_path = string::format(mem, "%s/lib", raw_path);
+				}
+				log::info("Set std-lib path: %s", std_path);
+				return;
+			}
+		}
 	}
 
-	String line = result.trim();
-	String[] split_lines = line.tsplit("\n");
-	if (split_lines.len < 2) return;
-
-	line = split_lines[1];
-	int? index = (int)line.index_of(":");
-	if (catch index) return;
-
-	String raw_path = line[index + 1..].trim().trim_right("/\\");
-	is_std_path_alloc = true;
-
-	if (raw_path.ends_with("/lib") || raw_path.ends_with("/std"))
-	{
-		std_path = raw_path.copy(mem);
-	}
-	else
-	{
-		std_path = string::format(mem, "%s/lib", raw_path);
-	}
-
-	log::info("Set std-lib path: %s", std_path);
+	log::error("Failed to detect standard library path from %s", comp);
 }

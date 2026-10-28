@@ -57,6 +57,7 @@ struct LspProject
 	HashMap{String, ManifestConfig} manifests;
 	Allocator allocator;
 	List{SourceGroup} source_groups;
+	bool is_initialized;
 }
 
 fn void LspProject.init(&self, Allocator allocator)
@@ -66,6 +67,7 @@ fn void LspProject.init(&self, Allocator allocator)
 	self.process_queue.init(allocator);
 	self.workspace.init(allocator);
 	self.source_groups.init(allocator);
+	self.is_initialized = false;
 }
 
 fn void LspProject.free(&self)
@@ -385,10 +387,12 @@ fn void LspProject.update(&self)
 
 fn void LspProject.initial_process(&self)
 {
+	if (self.is_initialized) return;
 	self.process_stdlib();
 	self.process_config();
 	self.process_libs();
 	self.update();
+	self.is_initialized = true;
 }
 
 fn void LspProject.process_stdlib(&self)

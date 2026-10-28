@@ -48,6 +48,7 @@ fn bool is_project_root_dir(Path dir)
 <*
  Walks up ancestor directories from file_path to find the nearest directory containing
  project.json or manifest.json.
+
 *>
 fn String find_enclosing_project_root(String file_path)
 {
@@ -135,10 +136,7 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 
 fn void ProjectManager.initial_process_all(&self)
 {
-	if (self.default_project.config.root_path.len > 0)
-	{
-		self.default_project.initial_process();
-	}
+	self.default_project.initial_process();
 	self.projects.@each(; root, proj)
 	{
 		proj.initial_process();
@@ -202,6 +200,7 @@ fn LspProject* ProjectManager.get_or_create_project_for_path(&self, String file_
 		return new_proj;
 	}
 
+	self.default_project.initial_process();
 	self.active_project = &self.default_project;
 	return &self.default_project;
 }
