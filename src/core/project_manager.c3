@@ -36,6 +36,16 @@ fn void ProjectManager.free(&self)
 }
 
 <*
+ Checks if a directory contains project.json or manifest.json.
+*>
+fn bool is_project_root_dir(Path dir)
+{
+	Path proj_json = dir.tappend(config::PROJECT_CONFIG_NAME) ?? (Path)"";
+	Path manifest_json = dir.tappend(config::MANIFEST_CONFIG_NAME) ?? (Path)"";
+	return path::exists(proj_json) || path::exists(manifest_json);
+}
+
+<*
  Walks up ancestor directories from file_path to find the nearest directory containing
  project.json or manifest.json.
 *>
@@ -54,10 +64,7 @@ fn String find_enclosing_project_root(String file_path)
 		Path? base_p = path::tnew(dir);
 		if (catch base_p) break;
 
-		Path proj_json = base_p.tappend(config::PROJECT_CONFIG_NAME) ?? (Path)"";
-		Path manifest_json = base_p.tappend(config::MANIFEST_CONFIG_NAME) ?? (Path)"";
-
-		if (path::exists(proj_json) || path::exists(manifest_json))
+		if (is_project_root_dir(base_p))
 		{
 			return dir.copy(tmem);
 		}
@@ -79,10 +86,7 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 	Path? root_p = path::tnew(root_str);
 	if (catch root_p) return;
 
-	Path proj_json = root_p.tappend(config::PROJECT_CONFIG_NAME) ?? (Path)"";
-	Path manifest_json = root_p.tappend(config::MANIFEST_CONFIG_NAME) ?? (Path)"";
-
-	if (path::exists(proj_json) || path::exists(manifest_json))
+	if (is_project_root_dir(root_p))
 	{
 		if (!self.projects.has_key(root_str))
 		{
@@ -107,10 +111,7 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 			if (catch sub_p) continue;
 			if (!path::is_dir(sub_p)) continue;
 
-			Path sub_proj = sub_p.tappend(config::PROJECT_CONFIG_NAME) ?? (Path)"";
-			Path sub_man = sub_p.tappend(config::MANIFEST_CONFIG_NAME) ?? (Path)"";
-
-			if (path::exists(sub_proj) || path::exists(sub_man))
+			if (is_project_root_dir(sub_p))
 			{
 				String sub_str = ((String)sub_p).copy(tmem);
 				if (!self.projects.has_key(sub_str))

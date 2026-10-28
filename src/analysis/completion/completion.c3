@@ -461,66 +461,6 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * i
 {
 	if (!ctx.ws || type_name.len == 0) return;
 
-	if (type_name == "fault" && ctx.ws && ctx.ws.ctx)
-	{
-		ctx.ws.ctx.files.@each(; file_path, sf)
-		{
-			if (sf)
-			{
-				String file_mod = query::get_source_file_module_name(sf);
-				String mod_ident = file_mod.len > 0 ? file_mod : "global";
-				foreach (stmt : sf.ast.statements)
-				{
-					if (!stmt) continue;
-					if (stmt.kind == FAULTDEF_DECL)
-					{
-						FaultdefDecl* fd = stmt.as(FaultdefDecl);
-						foreach (fault_node : fd.faults)
-						{
-							if (!fault_node || fault_node.kind != FAULT_DECL) continue;
-							FaultDecl* fdecl = fault_node.as(FaultDecl);
-							String fname = fdecl.name ? fdecl.name.text : "";
-							if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
-							{
-								items.push(
-								{
-									.label = fname,
-									.kind = CONSTANT,
-									.detail = "fault",
-									.insertText = fname,
-									.filterText = fname,
-									.sortText = string::tformat("0000_%s", fname),
-									.data = string::tformat("fault:%s:%s", mod_ident, fname)
-								}
-								);
-							}
-						}
-					}
-					else if (stmt.kind == FAULT_DECL)
-					{
-						FaultDecl* fdecl = stmt.as(FaultDecl);
-						String fname = fdecl.name ? fdecl.name.text : "";
-						if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
-						{
-							items.push(
-							{
-								.label = fname,
-								.kind = CONSTANT,
-								.detail = "fault",
-								.insertText = fname,
-								.filterText = fname,
-								.sortText = string::tformat("0000_%s", fname),
-								.data = string::tformat("fault:%s:%s", mod_ident, fname)
-							}
-							);
-						}
-					}
-				}
-			}
-		};
-		return;
-	}
-
 	Node* node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, type_name);
 	if (!node)
 	{

@@ -1253,13 +1253,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 				if (type_node && type_node.kind == ENUM_DECL)
 				{
 					bool is_type_access = false;
-					Node* base_type = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, base_id);
-					if (!base_type && ctx.ws)
-					{
-						List{SymbolEntry} bsyms = ctx.ws.find_symbol_by_name(base_id, ctx.sf);
-						if (bsyms.len() > 0 && bsyms.get(0).node) base_type = bsyms.get(0).node;
-					}
-					if (base_type && base_type.kind == ENUM_DECL)
+					if (base_id == clean_type || base_id.ends_with(string::tformat("::%s", clean_type)))
 					{
 						String dummy = "";
 						if (!query::find_local_decl_in_file(ctx.sf, base_id, &dummy, ctx.ws ? ctx.ws.ctx : null, loc))
