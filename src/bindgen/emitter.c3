@@ -199,6 +199,10 @@ fn CStruct* find_struct_by_name(CTranslationUnit* tu, String name) @local
 	{
 		if (td.c3_name == name)
 		{
+			if (td.is_func_ptr || td.underlying_c3.contains("*") || td.underlying_c3.contains("["))
+			{
+				return null;
+			}
 			String target = extract_base_type_ident(td.underlying_c3);
 			return find_struct_by_name(tu, target);
 		}
@@ -517,6 +521,97 @@ fn void cleanup_typedef_conflicts(CTranslationUnit* tu) @local
 	}
 }
 
+fn void emit_bitfield_members(DString* sb, List{CField}* fields, sz start_idx, sz end_idx, String indent) @local
+{
+	HashSet{String} seen;
+	seen.tinit();
+
+	for (sz j = start_idx; j < end_idx; j++)
+	{
+		CField* bf = fields.get_ref(j);
+		if (bf.c3_name.len == 0 || bf.bit_width <= 0)
+		{
+			continue;
+		}
+		String bfname = deduplicate_name(&seen, bf.c3_name, tmem);
+		int start_bit = bf.bit_offset;
+		int end_bit = bf.bit_offset + bf.bit_width - 1;
+		String btype = (bf.c3_type.len > 0 && bf.c3_type != "void*") ? bf.c3_type : "uint";
+		if (bf.bit_width > 8 && (btype == "char" || btype == "ichar" || btype == "bool"))
+		{
+			btype = (bf.bit_width > 16) ? "uint" : "ushort";
+		}
+		if (bf.bit_width > 16 && (btype == "ushort" || btype == "short"))
+		{
+			btype = "uint";
+		}
+		if (bf.bit_width > 32 && (btype == "uint" || btype == "int"))
+		{
+			btype = (btype == "int") ? "long" : "ulong";
+		}
+		if (bf.bit_width > 64 && (btype == "ulong" || btype == "long" || btype == "CLong" || btype == "CULong"))
+		{
+			btype = (btype == "long" || btype == "CLong") ? "int128" : "uint128";
+		}
+		sb.appendf("%s%s %s : %d..%d;\n", indent, btype, bfname, start_bit, end_bit);
+	}
+}
+
+fn bool bitfields_have_overlap(List{CField}* fields, sz start_idx, sz end_idx) @local
+{
+	int highest_end = 0;
+	for (sz j = start_idx; j < end_idx; j++)
+	{
+		CField* bf = fields.get_ref(j);
+		if (bf.bit_width <= 0)
+		{
+			continue;
+		}
+		if (bf.bit_offset < highest_end)
+		{
+			return true;
+		}
+		int end = bf.bit_offset + bf.bit_width;
+		if (end > highest_end)
+		{
+			highest_end = end;
+		}
+	}
+	return false;
+}
+
+fn String get_bitfields_backing_type(List{CField}* fields, sz start_idx, sz end_idx, bool is_pure_bitfield, bool is_packed) @local
+{
+	int max_bits = 0;
+	int max_cap = 0;
+	for (sz j = start_idx; j < end_idx; j++)
+	{
+		CField* bf = fields.get_ref(j);
+		if (bf.bit_width > 0)
+		{
+			int end = bf.bit_offset + bf.bit_width;
+			if (end > max_bits)
+			{
+				max_bits = end;
+			}
+		}
+		if (is_pure_bitfield && !is_packed)
+		{
+			int cap = type_bit_capacity(bf.c3_type);
+			if (cap > max_cap)
+			{
+				max_cap = cap;
+			}
+		}
+	}
+	if (max_bits > max_cap)
+	{
+		max_cap = max_bits;
+	}
+	return capacity_backing_type(max_cap);
+}
+
+
 <*
  Emits C structs and unions.
  Deduplicates field names and generates opaque declarations for missing types.
@@ -625,24 +720,94 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 			continue;
 		}
 
+		if (st.is_bitfield)
+		{
+			String backing_type = get_bitfields_backing_type(&st.fields, 0, st.fields.len(), true, st.is_packed);
+			bool overlap = bitfields_have_overlap(&st.fields, 0, st.fields.len());
+			sb.appendf("bitstruct %s : %s", st_name, backing_type);
+			if (overlap)
+			{
+				sb.append(" @overlap");
+			}
+			if (st.alignment > 0)
+			{
+				sb.appendf(" @align(%d)", st.alignment);
+			}
+			else if (st.is_packed)
+			{
+				sb.append(" @align(1)");
+			}
+			sb.append("\n{\n");
+			emit_bitfield_members(sb, &st.fields, 0, st.fields.len(), "\t");
+			sb.append("}\n\n");
+			continue;
+		}
+
 		String kind_kw = st.is_union ? "union" : "struct";
-		sb.appendf("%s %s\n{\n", kind_kw, st_name);
+		sb.appendf("%s %s", kind_kw, st_name);
+		if (st.is_packed)
+		{
+			sb.append(" @packed");
+		}
+		if (st.alignment > 0)
+		{
+			sb.appendf(" @align(%d)", st.alignment);
+		}
+		sb.append("\n{\n");
 
 		HashSet{String} seen_field_names;
 		seen_field_names.tinit();
 
-		foreach (&f : st.fields)
+		for (sz i = 0; i < st.fields.len(); i++)
 		{
-			String fname = deduplicate_name(&seen_field_names, f.c3_name, tmem);
-
-			// Break recursive self-containment by value
-			String ftype = f.c3_type;
-			if (ftype == st.c3_name)
+			CField* f = st.fields.get_ref(i);
+			if (f.bit_width < 0)
 			{
-				ftype = "void*";
+				String fname = deduplicate_name(&seen_field_names, f.c3_name, tmem);
+
+				// Break recursive self-containment by value (including arrays of self)
+				String ftype = f.c3_type;
+				String base = extract_base_type_ident(ftype);
+				if (base == st.c3_name)
+				{
+					if (try open_b = ftype.index_of_char('['))
+					{
+						ftype = string::format(tmem, "void*%s", ftype[open_b..]);
+					}
+					else
+					{
+						ftype = "void*";
+					}
+				}
+
+				// Flexible array members are not allowed in unions by C3
+				if (st.is_union && ftype.ends_with("[*]"))
+				{
+					ftype = string::format(tmem, "%s*", ftype[:ftype.len - 3]);
+				}
+
+				sb.appendf("\t%s %s;\n", ftype, fname);
+				continue;
 			}
 
-			sb.appendf("\t%s %s;\n", ftype, fname);
+			sz grp_end = i;
+			while (grp_end < st.fields.len() && st.fields.get(grp_end).bit_width >= 0)
+			{
+				grp_end++;
+			}
+
+			String grp_backing = get_bitfields_backing_type(&st.fields, i, grp_end, false, st.is_packed);
+			bool overlap = bitfields_have_overlap(&st.fields, i, grp_end);
+			String grp_name = deduplicate_name(&seen_field_names, "bits", tmem);
+			sb.appendf("\tbitstruct %s : %s", grp_name, grp_backing);
+			if (overlap)
+			{
+				sb.append(" @overlap");
+			}
+			sb.append("\n\t{\n");
+			emit_bitfield_members(sb, &st.fields, i, grp_end, "\t\t");
+			sb.append("\t}\n");
+			i = grp_end - 1;
 		}
 
 		sb.append("}\n\n");

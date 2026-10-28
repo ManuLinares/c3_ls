@@ -146,6 +146,22 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 		return null;
 	}
 
+	String[2] tag_keys = { "decl", "ownedTagDecl" };
+	foreach (key : tag_keys)
+	{
+		if (try child = node.get(key))
+		{
+			if ((child.get_string("kind") ?? "") == target_kind)
+			{
+				return child;
+			}
+			if (Object* found = find_descendant_by_kind(child, target_kind))
+			{
+				return found;
+			}
+		}
+	}
+
 	if (try inner_arr = node.get("inner"))
 	{
 		if (inner_arr.is_array())
@@ -173,6 +189,87 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 		}
 	}
 
+	return null;
+}
+
+<*
+ Resolves an incomplete AST record or enum declaration against its full definition in an anonymous decl map.
+*>
+fn Object* resolve_complete_decl(Object* node, HashMap{String, Object*}* anon_map) @local
+{
+	if (!node)
+	{
+		return null;
+	}
+	bool is_comp = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
+	if (is_comp)
+	{
+		return node;
+	}
+	if (try id = node.get_string("id"))
+	{
+		if (try full_def = anon_map.get(id))
+		{
+			return full_def;
+		}
+	}
+	return node;
+}
+
+<*
+ Returns true if a C tag name is anonymous or compiler-generated.
+*>
+fn bool is_anonymous_tag_name(String name) @local
+{
+	return name.len == 0 || name.contains("(unnamed") || name.contains("(anonymous");
+}
+
+<*
+ Indexes an external record or enum declaration and records its anonymous ID mapping.
+*>
+fn void index_tag_decl(
+	Allocator allocator,
+	String name,
+	Object* node,
+	HashMap{String, Object*}* external_map,
+	HashMap{String, Object*}* anon_map
+) @local
+{
+	if (!node) return;
+	Object* full = resolve_complete_decl(node, anon_map);
+	if (name.len > 0)
+	{
+		external_map.set(name.copy(allocator), full);
+	}
+	if (try id = full.get_string("id"))
+	{
+		anon_map.set(id, full);
+	}
+}
+
+<*
+ Looks up an external record or enum by name or underscore prefix, falling back to desugared typedef base names.
+*>
+fn Object* find_external_tag(
+	String name,
+	HashMap{String, Object*}* tag_map,
+	HashMap{String, String}* typedef_map
+) @local
+{
+	String underscore_name = string::tformat("_%s", name);
+	if (try node = tag_map.get(name)) return node;
+	if (try node = tag_map.get(underscore_name)) return node;
+
+	if (try desug = typedef_map.get(name))
+	{
+		if (!desug.contains("*") && !desug.contains("["))
+		{
+			String base_desug = extract_base_type_name(desug);
+			String underscore_desug = string::tformat("_%s", base_desug);
+			if (try node = tag_map.get(base_desug)) return node;
+			if (try node = tag_map.get(underscore_desug)) return node;
+		}
+	}
 	return null;
 }
 
@@ -819,6 +916,8 @@ fn bool parse_record_fields(
 		return true;
 	}
 
+	Object* last_anon_rec = null;
+
 	for (sz i = 0; i < inner_arr.len(); i++)
 	{
 		Object* child = inner_arr.get_at(i);
@@ -835,9 +934,13 @@ fn bool parse_record_fields(
 			{
 				parse_record_decl_with_name(allocator, tu, child, sub_c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
 			}
-			else if (try id = child.get_string("id"))
+			else
 			{
-				anon_records.set(id, child);
+				last_anon_rec = child;
+				if (try id = child.get_string("id"))
+				{
+					anon_records.set(id, child);
+				}
 			}
 			continue;
 		}
@@ -869,14 +972,40 @@ fn bool parse_record_fields(
 			return false;
 		}
 
-		String f_name = child.get_string("name") ?? "";
-		if (f_name.len == 0)
+		int bit_width = -1;
+		if (child.get_bool("isBitfield") ?? false)
+		{
+			if (Object* cexpr = find_descendant_by_kind(child, "ConstantExpr"))
+			{
+				if (try v_str = cexpr.get_string("value"))
+				{
+					if (try parsed = v_str.to_int())
+					{
+						bit_width = parsed;
+					}
+				}
+			}
+			else if (Object* ilit = find_descendant_by_kind(child, "IntegerLiteral"))
+			{
+				if (try v_str = ilit.get_string("value"))
+				{
+					if (try parsed = v_str.to_int())
+					{
+						bit_width = parsed;
+					}
+				}
+			}
+		}
+
+		String raw_f_name = child.get_string("name") ?? "";
+		String f_name = raw_f_name;
+		if (f_name.len == 0 && bit_width < 0)
 		{
 			f_name = string::format(allocator, "_field%d", (int)i);
 		}
 
 		String f_type_c3;
-		if (f_type_c.contains("(unnamed") || f_type_c.contains("(anonymous"))
+		if (is_anonymous_tag_name(f_type_c))
 		{
 			String synth_name = string::format(allocator, "%s_%s", c_name, f_name);
 			Object* anon_rec = null;
@@ -884,14 +1013,37 @@ fn bool parse_record_fields(
 			{
 				anon_rec = anon_records.get(f_tinfo.decl_id) ?? null;
 			}
+			if (!anon_rec)
+			{
+				anon_rec = last_anon_rec;
+			}
 			if (anon_rec)
 			{
 				parse_record_decl_with_name(allocator, tu, anon_rec, synth_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
 				f_type_c3 = sanitize_c3_type_name(allocator, synth_name, options.type_prefix);
+				if (try open_b = f_type_c.index_of_char('['))
+				{
+					f_type_c3 = string::format(allocator, "%s%s", f_type_c3, f_type_c[open_b..]);
+				}
+				else if (f_type_c.ends_with("*"))
+				{
+					f_type_c3 = string::format(allocator, "%s*", f_type_c3);
+				}
 			}
 			else
 			{
-				f_type_c3 = f_type_c.contains("[") ? "void*[]" : "void*";
+				if (f_type_c.contains("enum ") && !f_type_c.contains("*"))
+				{
+					f_type_c3 = "int";
+				}
+				else if (f_type_c.contains("enum ") && f_type_c.contains("*"))
+				{
+					f_type_c3 = "int*";
+				}
+				else
+				{
+					f_type_c3 = f_type_c.contains("[") ? "void*[]" : "void*";
+				}
 			}
 		}
 		else
@@ -900,20 +1052,117 @@ fn bool parse_record_fields(
 			f_type_c3 = map_c_type_to_c3(allocator, f_type_c, options.type_prefix, false, f_tinfo.desugared_type, is_field: true);
 		}
 
-		String f_name_c3 = to_snake_case(allocator, f_name);
+		String f_name_c3 = f_name.len > 0 ? to_snake_case(allocator, f_name) : "";
 
 		fields.push({
-			.c_name = f_name.copy(allocator),
+			.c_name = raw_f_name.copy(allocator),
 			.c3_name = f_name_c3,
 			.c_type = f_type_c.copy(allocator),
 			.c3_type = f_type_c3,
-			.bit_width = -1,
+			.bit_width = bit_width,
 			.bit_offset = 0,
 			.comment = ""
 		});
 	}
 
 	return true;
+}
+
+<*
+ Calculates bit offsets for bitfields and returns true if all fields are bitfields.
+*>
+fn bool compute_record_bitfields(List{CField}* fields) @local
+{
+	bool has_any_bitfield = false;
+	bool has_non_bitfield = false;
+	int current_container_cap = 64;
+	int current_bit_offset = 0;
+
+	for (sz i = 0; i < fields.len(); i++)
+	{
+		CField* f = fields.get_ref(i);
+		if (f.bit_width < 0)
+		{
+			has_non_bitfield = true;
+			current_bit_offset = 0;
+			continue;
+		}
+
+		has_any_bitfield = true;
+		int cap = type_bit_capacity(f.c3_type);
+		if (cap > current_container_cap)
+		{
+			current_container_cap = cap;
+		}
+
+		if (f.bit_width == 0)
+		{
+			current_bit_offset = 0;
+			continue;
+		}
+
+		if (current_bit_offset + f.bit_width > current_container_cap)
+		{
+			current_bit_offset = 0;
+		}
+
+		f.bit_offset = current_bit_offset;
+		current_bit_offset += f.bit_width;
+	}
+
+	return has_any_bitfield && !has_non_bitfield;
+}
+
+<*
+ Extracts packed and alignment attributes from a RecordDecl node.
+*>
+fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_alignment) @local
+{
+	if (try inner_arr = node.get("inner"))
+	{
+		if (inner_arr.is_array())
+		{
+			for (sz i = 0; i < inner_arr.len(); i++)
+			{
+				if (Object* child = inner_arr.get_at(i))
+				{
+					String k = child.get_string("kind") ?? "";
+					if (k == "PackedAttr" || k == "MaxFieldAlignmentAttr")
+					{
+						*out_is_packed = true;
+					}
+					else if (k == "AlignedAttr")
+					{
+						uint align_val = 16;
+						if (Object* cexpr = find_descendant_by_kind(child, "ConstantExpr"))
+						{
+							if (try v_str = cexpr.get_string("value"))
+							{
+								if (try parsed = v_str.to_uint())
+								{
+									align_val = parsed;
+								}
+							}
+						}
+						else if (Object* ilit = find_descendant_by_kind(child, "IntegerLiteral"))
+						{
+							if (try v_str = ilit.get_string("value"))
+							{
+								if (try parsed = v_str.to_uint())
+								{
+									align_val = parsed;
+								}
+							}
+						}
+						if (align_val > *out_alignment)
+						{
+							*out_alignment = align_val;
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 <*
@@ -946,6 +1195,10 @@ fn void parse_record_decl_with_name(
 	bool is_complete = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
 	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, c_name, options.type_prefix));
 
+	bool is_packed = false;
+	uint alignment = 0;
+	parse_record_attributes(node, &is_packed, &alignment);
+
 	CStruct* existing = null;
 	foreach (&st : tu.structs)
 	{
@@ -975,9 +1228,24 @@ fn void parse_record_decl_with_name(
 
 			is_complete = parse_record_fields(allocator, tu, node, c_name, &fields, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
 
+			bool is_all_bitfields = compute_record_bitfields(&fields);
+			if (!is_packed)
+			{
+				foreach (f : fields)
+				{
+					if (f.bit_width >= 0)
+					{
+						uint align_bytes = (uint)(type_bit_capacity(f.c3_type) / 8);
+						if (align_bytes > alignment) alignment = align_bytes;
+					}
+				}
+			}
+
 			existing.is_opaque = !is_complete;
 			existing.is_union = is_union;
-			existing.is_bitfield = false;
+			existing.is_bitfield = is_all_bitfields;
+			existing.is_packed = is_packed;
+			existing.alignment = alignment;
 			existing.fields = fields;
 		}
 		return;
@@ -994,12 +1262,27 @@ fn void parse_record_decl_with_name(
 		is_complete = parse_record_fields(allocator, tu, node, c_name, &fields, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
 	}
 
+	bool is_all_bitfields = compute_record_bitfields(&fields);
+	if (!is_packed)
+	{
+		foreach (f : fields)
+		{
+			if (f.bit_width >= 0)
+			{
+				uint align_bytes = (uint)(type_bit_capacity(f.c3_type) / 8);
+				if (align_bytes > alignment) alignment = align_bytes;
+			}
+		}
+	}
+
 	tu.structs.push({
 		.c_name = c_name.copy(allocator),
 		.c3_name = c3_name,
 		.is_union = is_union,
 		.is_opaque = !is_complete,
-		.is_bitfield = false,
+		.is_bitfield = is_all_bitfields,
+		.is_packed = is_packed,
+		.alignment = alignment,
 		.fields = fields,
 		.comment = ""
 	});
@@ -1217,70 +1500,36 @@ fn void parse_typedef_decl(
 			for (sz i = 0; i < inner_arr.len(); i++)
 			{
 				Object* child = inner_arr.get_at(i);
-				if (!child)
+				if (!child) continue;
+
+				String child_kind = child.get_string("kind") ?? "";
+				if (child_kind != "ElaboratedType" && child_kind != "RecordType" && child_kind != "EnumType")
 				{
 					continue;
 				}
 
-				String child_kind = child.get_string("kind") ?? "";
-
-				if (child_kind == "ElaboratedType")
+				if (Object* rec_child = find_descendant_by_kind(child, "RecordDecl"))
 				{
-					if (try owned_decl = child.get("ownedTagDecl"))
+					Object* full_rec = resolve_complete_decl(rec_child, anon_records);
+					String tag_name = full_rec.get_string("name") ?? "";
+					RawTypeInfo tinfo = extract_type_info(node);
+					bool is_ptr = tinfo.qual_type.contains("*") || tinfo.desugared_type.contains("*");
+					if (is_anonymous_tag_name(tag_name) || (tag_name.starts_with("_") && !is_ptr))
 					{
-						String tag_kind = owned_decl.get_string("kind") ?? "";
-						String tag_name = owned_decl.get_string("name") ?? "";
-						String tag_id = owned_decl.get_string("id") ?? "";
-
-						if (tag_id.len > 0 && (tag_name.len == 0 || tag_name.starts_with("(unnamed") || tag_name.starts_with("(anonymous")))
-						{
-							if (tag_kind == "RecordDecl")
-							{
-								if (try anon_rec = anon_records.get(tag_id))
-								{
-									parse_record_decl_with_name(allocator, tu, anon_rec, c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
-									return;
-								}
-							}
-							else if (tag_kind == "EnumDecl")
-							{
-								if (try anon_e = anon_enums.get(tag_id))
-								{
-									parse_enum_decl_with_name(allocator, tu, anon_e, c_name, options, seen_names, target_types);
-									return;
-								}
-							}
-						}
+						if (tag_name.len > 0) seen_names.add(tag_name);
+						parse_record_decl_with_name(allocator, tu, full_rec, c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
+						return;
 					}
 				}
-				else if (child_kind == "RecordType")
+				else if (Object* enum_child = find_descendant_by_kind(child, "EnumDecl"))
 				{
-					if (try decl_obj = child.get("decl"))
+					Object* full_enum = resolve_complete_decl(enum_child, anon_enums);
+					String tag_name = full_enum.get_string("name") ?? "";
+					if (is_anonymous_tag_name(tag_name) || tag_name.starts_with("_"))
 					{
-						String decl_id = decl_obj.get_string("id") ?? "";
-						if (decl_id.len > 0)
-						{
-							if (try anon_rec = anon_records.get(decl_id))
-							{
-								parse_record_decl_with_name(allocator, tu, anon_rec, c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
-								return;
-							}
-						}
-					}
-				}
-				else if (child_kind == "EnumType")
-				{
-					if (try decl_obj = child.get("decl"))
-					{
-						String decl_id = decl_obj.get_string("id") ?? "";
-						if (decl_id.len > 0)
-						{
-							if (try anon_e = anon_enums.get(decl_id))
-							{
-								parse_enum_decl_with_name(allocator, tu, anon_e, c_name, options, seen_names, target_types);
-								return;
-							}
-						}
+						if (tag_name.len > 0) seen_names.add(tag_name);
+						parse_enum_decl_with_name(allocator, tu, full_enum, c_name, options, seen_names, target_types);
+						return;
 					}
 				}
 			}
@@ -1435,35 +1684,30 @@ fn void parse_clang_ast_json(
 				{
 					external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
 				}
+				bool is_indirect = desugared.contains("*") || desugared.contains("[");
+				if (Object* rec_child = find_descendant_by_kind(node, "RecordDecl"))
+				{
+					String reg_name = is_indirect ? (rec_child.get_string("name") ?? "") : td_name;
+					index_tag_decl(allocator, reg_name, rec_child, &external_records, &anon_records);
+				}
+				else if (Object* enum_child = find_descendant_by_kind(node, "EnumDecl"))
+				{
+					String reg_name = is_indirect ? (enum_child.get_string("name") ?? "") : td_name;
+					index_tag_decl(allocator, reg_name, enum_child, &external_enums, &anon_enums);
+				}
 			}
 			continue;
 		}
 
 		if (kind == "RecordDecl")
 		{
-			String r_name = node.get_string("name") ?? "";
-			if (r_name.len > 0)
-			{
-				external_records.set(r_name.copy(allocator), node);
-			}
-			if (try id = node.get_string("id"))
-			{
-				anon_records.set(id, node);
-			}
+			index_tag_decl(allocator, node.get_string("name") ?? "", node, &external_records, &anon_records);
 			continue;
 		}
 
 		if (kind == "EnumDecl")
 		{
-			String e_name = node.get_string("name") ?? "";
-			if (e_name.len > 0)
-			{
-				external_enums.set(e_name.copy(allocator), node);
-			}
-			if (try id = node.get_string("id"))
-			{
-				anon_enums.set(id, node);
-			}
+			index_tag_decl(allocator, node.get_string("name") ?? "", node, &external_enums, &anon_enums);
 			continue;
 		}
 	}
@@ -1540,18 +1784,38 @@ fn void parse_clang_ast_json(
 	}
 
 	// Pass 3: Synthesize referenced external types
-	used_external_types.@each(; ext_name)
+	List{String} ext_worklist;
+	ext_worklist.init(allocator);
+	used_external_types.@each(; name)
 	{
-		String underscore_ext = string::tformat("_%s", ext_name);
-		Object* rec_node = external_records.get(ext_name) ?? external_records.get(underscore_ext) ?? null;
-		Object* enum_node = external_enums.get(ext_name) ?? external_enums.get(underscore_ext) ?? null;
+		ext_worklist.push(name);
+	};
+
+	for (sz w_i = 0; w_i < ext_worklist.len(); w_i++)
+	{
+		String ext_name = ext_worklist.get(w_i);
+		Object* rec_node = find_external_tag(ext_name, &external_records, &external_typedefs);
+		Object* enum_node = !rec_node ? find_external_tag(ext_name, &external_enums, &external_typedefs) : null;
 
 		if (rec_node)
 		{
+			rec_node = resolve_complete_decl(rec_node, &anon_records);
+			sz prev_count = used_external_types.count;
 			parse_record_decl_with_name(allocator, tu, rec_node, ext_name, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &anon_records, &used_external_types);
+			if (used_external_types.count > prev_count)
+			{
+				used_external_types.@each(; newly_added)
+				{
+					if (!ext_worklist.contains(newly_added))
+					{
+						ext_worklist.push(newly_added);
+					}
+				};
+			}
 		}
 		else if (enum_node)
 		{
+			enum_node = resolve_complete_decl(enum_node, &anon_enums);
 			parse_enum_decl_with_name(allocator, tu, enum_node, ext_name, options, &seen_names, &target_types);
 		}
 		else if (try desugared_c = external_typedefs.get(ext_name))

@@ -2576,3 +2576,298 @@ fn void test_umbrella_header_package_symbol_extraction() @test
 	assert(code.contains("extern fn void init() @cname(\"libportal_init\");"));
 	assert(!code.contains("g_object_ref"));
 }
+
+fn void test_nested_anonymous_struct_and_union_fields() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "Device",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "test.h" },
+				"inner": [
+					{
+						"kind": "RecordDecl",
+						"id": "0xrec_playback",
+						"tagUsed": "struct",
+						"completeDefinition": true,
+						"loc": { "file": "test.h" },
+						"inner": [
+							{ "kind": "FieldDecl", "name": "channels", "type": { "qualType": "int" } }
+						]
+					},
+					{
+						"kind": "FieldDecl",
+						"name": "playback",
+						"loc": { "file": "test.h" },
+						"type": { "qualType": "struct (unnamed at test.h:3:5)" }
+					},
+					{
+						"kind": "RecordDecl",
+						"id": "0xrec_buffer",
+						"tagUsed": "union",
+						"completeDefinition": true,
+						"loc": { "file": "test.h" },
+						"inner": [
+							{ "kind": "FieldDecl", "name": "f32", "type": { "qualType": "float *" } }
+						]
+					},
+					{
+						"kind": "FieldDecl",
+						"name": "buffer",
+						"loc": { "file": "test.h" },
+						"type": { "qualType": "union (unnamed at test.h:6:5)" }
+					}
+				]
+			},
+			{
+				"kind": "RecordDecl",
+				"name": "OpParams",
+				"tagUsed": "union",
+				"completeDefinition": true,
+				"loc": { "file": "test.h" },
+				"inner": [
+					{
+						"kind": "RecordDecl",
+						"id": "0xrec_init",
+						"tagUsed": "struct",
+						"completeDefinition": true,
+						"loc": { "file": "test.h" },
+						"inner": [
+							{ "kind": "FieldDecl", "name": "code", "type": { "qualType": "int" } }
+						]
+					},
+					{
+						"kind": "FieldDecl",
+						"name": "init",
+						"loc": { "file": "test.h" },
+						"type": { "qualType": "struct (unnamed at test.h:12:5)" }
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	// The nested anonymous struct and union should generate synthesized record types, not void*
+	assert(code.contains("struct DevicePlayback\n{\n\tint channels;\n}"));
+	assert(code.contains("DevicePlayback playback;"));
+	assert(!code.contains("void* playback;"));
+
+	assert(code.contains("union DeviceBuffer\n{\n\tfloat* f32;\n}"));
+	assert(code.contains("DeviceBuffer buffer;"));
+	assert(!code.contains("void* buffer;"));
+
+	assert(code.contains("struct OpparamsInit\n{\n\tint code;\n}"));
+	assert(code.contains("OpparamsInit init;"));
+	assert(!code.contains("void* init;"));
+}
+
+fn void test_external_system_record_embedded_by_value_size() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "TypedefDecl",
+				"name": "pthread_mutex_t",
+				"loc": { "file": "/usr/include/pthread.h" },
+				"type": {
+					"qualType": "union pthread_mutex_t"
+				},
+				"inner": [
+					{
+						"kind": "RecordType",
+						"decl": {
+							"id": "0xrec_mutex",
+							"kind": "RecordDecl",
+							"name": "",
+							"tagUsed": "union",
+							"completeDefinition": true,
+							"inner": [
+								{
+									"kind": "FieldDecl",
+									"name": "__size",
+									"type": { "qualType": "char[40]" }
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"kind": "TypedefDecl",
+				"name": "ma_pthread_mutex_t",
+				"loc": { "file": "miniaudio.h" },
+				"type": {
+					"qualType": "pthread_mutex_t"
+				}
+			},
+			{
+				"kind": "RecordDecl",
+				"name": "ma_event",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "miniaudio.h" },
+				"inner": [
+					{
+						"kind": "FieldDecl",
+						"name": "lock",
+						"type": { "qualType": "ma_pthread_mutex_t" }
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "miniaudio.h",
+		.module_name = "miniaudio"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	// External types embedded by value in structs must not degrade to an 8-byte dummy stub
+	assert(!code.contains("struct PthreadMutexT { void* _unused; }"));
+	assert(code.contains("char[40]"));
+}
+
+fn void test_packed_struct_attribute() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "PackedRecord",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "packed.h" },
+				"inner": [
+					{ "kind": "PackedAttr" },
+					{ "kind": "FieldDecl", "name": "a", "type": { "qualType": "char" } },
+					{ "kind": "FieldDecl", "name": "b", "type": { "qualType": "int" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+	BindgenOptions opts = { .header_path = "packed.h", .module_name = "packed" };
+	CTranslationUnit tu;
+	tu.init(tmem);
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("@packed"));
+}
+
+fn void test_aligned_struct_attribute() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "AlignedRecord",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "aligned.h" },
+				"inner": [
+					{
+						"kind": "AlignedAttr",
+						"inner": [
+							{ "kind": "ConstantExpr", "value": "16" }
+						]
+					},
+					{ "kind": "FieldDecl", "name": "x", "type": { "qualType": "long" } },
+					{ "kind": "FieldDecl", "name": "y", "type": { "qualType": "long" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+	BindgenOptions opts = { .header_path = "aligned.h", .module_name = "aligned" };
+	CTranslationUnit tu;
+	tu.init(tmem);
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("@align(16)"));
+}
+
+fn void test_bitfield_struct_emission() @test
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl",
+				"name": "BitfieldRecord",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "bitfield.h" },
+				"inner": [
+					{
+						"kind": "FieldDecl",
+						"name": "flag1",
+						"isBitfield": true,
+						"type": { "qualType": "unsigned int" },
+						"inner": [
+							{ "kind": "ConstantExpr", "value": "1" }
+						]
+					},
+					{
+						"kind": "FieldDecl",
+						"name": "flag2",
+						"isBitfield": true,
+						"type": { "qualType": "unsigned int" },
+						"inner": [
+							{ "kind": "ConstantExpr", "value": "3" }
+						]
+					}
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+	BindgenOptions opts = { .header_path = "bitfield.h", .module_name = "bitfield" };
+	CTranslationUnit tu;
+	tu.init(tmem);
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("bitstruct"));
+}

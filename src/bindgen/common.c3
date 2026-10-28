@@ -73,6 +73,8 @@ struct CStruct
 	bool is_union;
 	bool is_opaque;
 	bool is_bitfield;
+	bool is_packed;
+	uint alignment;
 	List{CField} fields;
 	String comment;
 }
@@ -481,6 +483,31 @@ fn bool is_c3_type(String s)
 		}
 	}
 	return false;
+}
+
+<*
+ Returns the bit capacity of a C3 scalar type.
+*>
+fn int type_bit_capacity(String c3_type)
+{
+	if (c3_type == "char" || c3_type == "ichar" || c3_type == "bool") return 8;
+	if (c3_type == "short" || c3_type == "ushort") return 16;
+	if (c3_type == "int" || c3_type == "uint") return 32;
+	if (c3_type == "long" || c3_type == "ulong" || c3_type == "CLong" || c3_type == "CULong") return 64;
+	if (c3_type == "uint128" || c3_type == "int128") return 128;
+	return 32;
+}
+
+<*
+ Returns the C3 integer backing type for a given bit capacity.
+*>
+fn String capacity_backing_type(int cap)
+{
+	if (cap <= 8) return "char";
+	if (cap <= 16) return "ushort";
+	if (cap <= 32) return "uint";
+	if (cap <= 64) return "ulong";
+	return "uint128";
 }
 
 <*
@@ -1219,16 +1246,30 @@ fn String map_c_type_to_c3(
 
 	int elem_pointer_depth = strip_pointer_depth(&s);
 
-	// 4. Extract C99 complex qualifier
+	// 4. Extract C99 complex qualifier (as standalone token)
 	bool is_complex = false;
-	const String[*] COMPLEX_QUALIFIERS = { "_Complex", "complex", "Complex" };
-	foreach (cq : COMPLEX_QUALIFIERS)
+	String[] raw_words = s.tsplit(" ");
+	DString s_cleaned;
+	s_cleaned.tinit();
+	foreach (w : raw_words)
 	{
-		if (s.contains(cq))
+		String tw = w.trim();
+		if (tw == "_Complex" || tw == "complex")
 		{
 			is_complex = true;
-			s = s.treplace(cq, "").trim();
 		}
+		else if (tw.len > 0)
+		{
+			if (s_cleaned.len() > 0)
+			{
+				s_cleaned.append_char(' ');
+			}
+			s_cleaned.append(tw);
+		}
+	}
+	if (is_complex)
+	{
+		s = s_cleaned.str_view().trim();
 	}
 
 	// 5. Clean out inline __attribute__((...))
