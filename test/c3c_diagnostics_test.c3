@@ -151,3 +151,23 @@ fn void test_c3c_target_and_command_selection()
 
 	test::eq(proj.get_c3c_target("/home/mb/project/src/app.c3"), "t2_target");
 }
+
+fn void test_c3c_diagnostics_pool_lifetime()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	@pool()
+	{
+		String sample_output = `> BEGINLSP
+> LSPERR|error|"/home/mb/project/src/foo.c3"|10|5|"error message"
+> ENDLSP-OK
+`;
+		ws.parse_c3c_lsp_output(sample_output, "/home/mb/project");
+	};
+
+	LspDiagnostic[] diags = ws.get_diagnostics("/home/mb/project/src/foo.c3");
+	test::eq(diags.len, 1);
+	test::eq(diags[0].message, "error message");
+}

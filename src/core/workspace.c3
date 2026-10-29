@@ -477,11 +477,19 @@ fn void LspWorkspace.clear_all_c3c_diagnostics(&self)
 
 fn void LspWorkspace.add_c3c_diagnostic(&self, String path, LspDiagnostic diag)
 {
-	if (path.len == 0) return;
+	if (path.len == 0)
+	{
+		diag.message.free(self.allocator);
+		return;
+	}
 
 	if (try List{LspDiagnostic}* existing_list = self.c3c_diagnostics.get_ref(path))
 	{
-		if (existing_list.len() >= MAX_DIAGNOSTICS_PER_FILE) return;
+		if (existing_list.len() >= MAX_DIAGNOSTICS_PER_FILE)
+		{
+			diag.message.free(self.allocator);
+			return;
+		}
 		existing_list.push(diag);
 	}
 	else

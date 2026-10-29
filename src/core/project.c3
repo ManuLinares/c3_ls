@@ -356,7 +356,7 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 	prev_c3c_files.tinit();
 	self.workspace.c3c_diagnostics.@each(; path, list)
 	{
-		prev_c3c_files.push(path);
+		prev_c3c_files.push(path.copy(tmem));
 	};
 
 	self.run_c3c_diagnostics(lookup_key);
@@ -485,22 +485,13 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 	cmd.push("--lsp");
 	cmd.push("--warn-builtin=no");
 
-	Process? proc = process::spawn(cmd.array_view());
+	Process? proc = process::spawn(cmd.array_view(), options: STDERR_TO_STDOUT);
 	if (catch proc) return;
 
 	DString output_buf;
 	output_buf.tinit();
 
 	char[4096] chunk;
-	while (true)
-	{
-		long? bytes_read = proc.read_stderr(&chunk, 4096);
-		if (catch bytes_read) break;
-		long n = bytes_read;
-		if (n <= 0) break;
-		output_buf.append((String)chunk[:n]);
-	}
-
 	while (true)
 	{
 		long? bytes_read = proc.read_stdout(&chunk, 4096);
