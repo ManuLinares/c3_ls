@@ -4,7 +4,6 @@ import std::io;
 import std::encoding::json;
 import std::collections::maybe;
 import std::collections::object;
-import std::core::string;
 import uri;
 
 import lsp;
@@ -58,6 +57,8 @@ fn void LspMessage.free(&self)
 			self.params.did_open.document.text.free(self.allocator);
 		case DID_CLOSE:
 			self.params.did_close.document.uri.free(self.allocator);
+		case DID_SAVE:
+			self.params.did_save.document.uri.free(self.allocator);
 		case DID_CHANGE:
 			self.params.did_change.document.uri.free(self.allocator);
 			if (self.params.did_change.content_changes.len > 0)
@@ -288,6 +289,17 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 						close_params.document.uri = uri_str.copy(allocator);
 					}
 					msg.params.did_close = close_params;
+				}
+
+			case DID_SAVE:
+				{
+					DidSaveParams save_params;
+					if (try td = params_obj.get("textDocument"))
+					{
+						String uri_str = td.get_string("uri") ?? "";
+						save_params.document.uri = uri_str.copy(allocator);
+					}
+					msg.params.did_save = save_params;
 				}
 
 			case DID_CHANGE:

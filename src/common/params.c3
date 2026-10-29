@@ -126,6 +126,11 @@ struct DidCloseParams
 	TextDocumentIdentifier document;
 }
 
+struct DidSaveParams
+{
+	TextDocumentIdentifier document;
+}
+
 struct HoverParams
 {
 	TextDocumentIdentifier document;
@@ -251,6 +256,7 @@ union MessageParams
 	DidOpenParams did_open;
 	DidChangeParams did_change;
 	DidCloseParams did_close;
+	DidSaveParams did_save;
 	HoverParams hover;
 	CompletionParams completion;
 	CompletionItemResolveParams completion_resolve;

@@ -211,35 +211,27 @@ struct PublishDiagnosticsResult
 	LspDiagnostic[] diagnostics;
 }
 
-fn void publish_diagnostics(FileInput[] processed_files, LspWorkspace* ws) => @pool()
+fn void publish_diagnostics_for_path(String file_path, LspWorkspace* ws) => @pool()
 {
-	if (!ws) return;
+	if (!ws || file_path.len == 0) return;
 
-	foreach (input_file : processed_files)
-	{
-		if (input_file.is_library) continue;
+	Uri file_uri = uri::from_file_path(tmem, file_path);
+	DocumentUri formatted_uri = (DocumentUri)file_uri.to_raw_string(tmem);
 
-		String file_path = input_file.path;
-		if (file_path.len == 0) file_path = input_file.uri;
+	LspDiagnostic[] diags = ws.get_diagnostics(file_path);
 
-		Uri file_uri = uri::from_file_path(tmem, file_path);
-		DocumentUri formatted_uri = (DocumentUri)file_uri.to_raw_string(tmem);
+	LspPublishDiagnosticsNotification notif = {
+		.jsonrpc = "2.0",
+		.method = "textDocument/publishDiagnostics",
+		.params = {
+			.uri = formatted_uri,
+			.diagnostics = diags,
+		}
+	};
 
-		LspDiagnostic[] diags = ws.get_diagnostics(file_path);
-
-		LspPublishDiagnosticsNotification notif = {
-			.jsonrpc = "2.0",
-			.method = "textDocument/publishDiagnostics",
-			.params = {
-				.uri = formatted_uri,
-				.diagnostics = diags,
-			}
-		};
-
-		String response_json = translator::encode(notif, tmem);
-		log::debug("Sending diagnostics for file: %s", response_json);
-		io_handler::write(response_json);
-	}
+	String response_json = translator::encode(notif, tmem);
+	log::debug("Sending diagnostics for file: %s", response_json);
+	io_handler::write(response_json);
 }
 
 fn void start(CliArgs args)
@@ -338,6 +330,7 @@ fn void dispatch(LspMessage* message)
 							.textDocumentSync = {
 								.openClose = true,
 								.change = FULL,
+								.save = { .includeText = false },
 							},
 							.completionProvider = {
 								.triggerCharacters = { ".", ":", "@", " " },
@@ -447,6 +440,12 @@ fn void dispatch(LspMessage* message)
 			{
 				LspProject* proj = get_project_for_raw_uri(message.params.did_close.document.uri);
 				proj.close_document(message.params.did_close.document.uri);
+			}
+
+		case DID_SAVE:
+			{
+				LspProject* proj = get_project_for_raw_uri(message.params.did_save.document.uri);
+				proj.save_file(message.params.did_save.document.uri);
 			}
 
 		case COMPLETION:

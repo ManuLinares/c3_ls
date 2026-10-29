@@ -25,6 +25,7 @@ struct LspWorkspace
 	AnalyzerContext* ctx;
 	Allocator allocator;
 	HashMap{String, List{LspDiagnostic}} diagnostics;
+	HashMap{String, List{LspDiagnostic}} c3c_diagnostics;
 }
 
 LspWorkspace* active_workspace @local = null;
@@ -87,6 +88,7 @@ fn void LspWorkspace.init(&self, Allocator allocator)
 	self.allocator = allocator;
 	self.ctx = context::create(allocator);
 	self.diagnostics.init(allocator);
+	self.c3c_diagnostics.init(allocator);
 }
 
 fn void LspWorkspace.free(&self)
@@ -100,6 +102,9 @@ fn void LspWorkspace.free(&self)
 		list.free();
 	};
 	self.diagnostics.free();
+
+	self.clear_all_c3c_diagnostics();
+	self.c3c_diagnostics.free();
 
 	if (self.ctx)
 	{
@@ -327,13 +332,87 @@ fn List{SymbolEntry} LspWorkspace.find_method(&self, String type_name, String me
 	return results;
 }
 
+fn bool positions_less_than(LspPosition p1, LspPosition p2) @local
+{
+	if (p1.line < p2.line) return true;
+	if (p1.line > p2.line) return false;
+	return p1.character < p2.character;
+}
+
+fn bool positions_less_than_or_equal(LspPosition p1, LspPosition p2) @local
+{
+	if (p1.line < p2.line) return true;
+	if (p1.line > p2.line) return false;
+	return p1.character <= p2.character;
+}
+
+fn bool ranges_overlap(LspRange a, LspRange b) @local
+{
+	if (a.start.line == b.start.line && a.start.character == b.start.character) return true;
+	if (a.start.line == a.end.line && a.start.character == a.end.character)
+	{
+		return positions_less_than_or_equal(b.start, a.start) && positions_less_than(a.start, b.end);
+	}
+	if (b.start.line == b.end.line && b.start.character == b.end.character)
+	{
+		return positions_less_than_or_equal(a.start, b.start) && positions_less_than(b.start, a.end);
+	}
+	return positions_less_than(a.start, b.end) && positions_less_than(b.start, a.end);
+}
+
 fn LspDiagnostic[] LspWorkspace.get_diagnostics(&self, String path)
 {
-	if (try list = self.diagnostics.get(path))
+	String norm_path = path;
+	if (norm_path.contains("\\"))
 	{
-		return list.array_view();
+		char[] p = norm_path.copy(tmem);
+		for (sz i = 0; i < p.len; i++)
+		{
+			if (p[i] == '\\') p[i] = '/';
+		}
+		norm_path = (String)p;
 	}
-	return {};
+
+	List{LspDiagnostic}* analyzer_list = self.diagnostics.get_ref(path) ?? (norm_path != path ? self.diagnostics.get_ref(norm_path) : null) ?? null;
+	List{LspDiagnostic}* c3c_list = self.c3c_diagnostics.get_ref(norm_path) ?? (norm_path != path ? self.c3c_diagnostics.get_ref(path) : null) ?? null;
+
+	if (!c3c_list || c3c_list.len() == 0)
+	{
+		if (analyzer_list) return analyzer_list.array_view();
+		return {};
+	}
+
+	if (!analyzer_list || analyzer_list.len() == 0)
+	{
+		return c3c_list.array_view();
+	}
+
+	List{LspDiagnostic} merged;
+	merged.tinit();
+
+	foreach (d : *analyzer_list)
+	{
+		merged.push(d);
+	}
+
+	foreach (cd : *c3c_list)
+	{
+		bool overlaps = false;
+		foreach (ad : *analyzer_list)
+		{
+			if (ranges_overlap(ad.range, cd.range))
+			{
+				overlaps = true;
+				break;
+			}
+		}
+		if (!overlaps)
+		{
+			merged.push(cd);
+		}
+	}
+
+	return merged.to_tarray();
 }
 
 fn void LspWorkspace.clear_diagnostics_for_path(&self, String path)
@@ -346,6 +425,182 @@ fn void LspWorkspace.clear_diagnostics_for_path(&self, String path)
 		}
 		list.free();
 		(void)self.diagnostics.remove(path);
+	}
+}
+
+fn void LspWorkspace.clear_c3c_diagnostics_for_path(&self, String path)
+{
+	String norm_path = path;
+	if (norm_path.contains("\\"))
+	{
+		char[] p = norm_path.copy(tmem);
+		for (sz i = 0; i < p.len; i++)
+		{
+			if (p[i] == '\\') p[i] = '/';
+		}
+		norm_path = (String)p;
+	}
+
+	if (try list = self.c3c_diagnostics.get_ref(norm_path))
+	{
+		foreach (d : *list)
+		{
+			d.message.free(self.allocator);
+		}
+		list.clear();
+	}
+	else if (norm_path != path)
+	{
+		if (try list = self.c3c_diagnostics.get_ref(path))
+		{
+			foreach (d : *list)
+			{
+				d.message.free(self.allocator);
+			}
+			list.clear();
+		}
+	}
+}
+
+fn void LspWorkspace.clear_all_c3c_diagnostics(&self)
+{
+	self.c3c_diagnostics.@each(; path, list)
+	{
+		foreach (d : list)
+		{
+			d.message.free(self.allocator);
+		}
+		list.free();
+	};
+	self.c3c_diagnostics.clear();
+}
+
+fn void LspWorkspace.add_c3c_diagnostic(&self, String path, LspDiagnostic diag)
+{
+	if (path.len == 0) return;
+
+	if (try List{LspDiagnostic}* existing_list = self.c3c_diagnostics.get_ref(path))
+	{
+		if (existing_list.len() >= MAX_DIAGNOSTICS_PER_FILE) return;
+		existing_list.push(diag);
+	}
+	else
+	{
+		List{LspDiagnostic} list;
+		list.init(self.allocator);
+		list.push(diag);
+		self.c3c_diagnostics.set(path, list);
+	}
+}
+
+fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path = "")
+{
+	self.clear_all_c3c_diagnostics();
+
+	String[] lines = output.tsplit("\n");
+	bool in_protocol = false;
+
+	foreach (line : lines)
+	{
+		String l = line.trim();
+		if (l.starts_with(">"))
+		{
+			l = l[1..].trim();
+		}
+
+		if (l == "BEGINLSP")
+		{
+			in_protocol = true;
+			continue;
+		}
+		if (l == "ENDLSP-OK" || l == "ENDLSP-ERROR")
+		{
+			in_protocol = false;
+			break;
+		}
+
+		if (!in_protocol) continue;
+		if (!l.starts_with("LSPERR|")) continue;
+
+		String rem = l["LSPERR|".len..];
+
+		sz? p1 = rem.index_of_char('|');
+		if (catch p1) continue;
+		String sev_str = rem[:p1].trim();
+		rem = rem[p1 + 1..];
+
+		sz? p2 = rem.index_of_char('|');
+		if (catch p2) continue;
+		String raw_file = rem[:p2].trim();
+		if (raw_file.starts_with("\"") && raw_file.ends_with("\"") && raw_file.len >= 2)
+		{
+			raw_file = raw_file[1 : ^2];
+		}
+		rem = rem[p2 + 1..];
+
+		sz? p3 = rem.index_of_char('|');
+		if (catch p3) continue;
+		String line_str = rem[:p3].trim();
+		rem = rem[p3 + 1..];
+
+		sz? p4 = rem.index_of_char('|');
+		if (catch p4) continue;
+		String col_str = rem[:p4].trim();
+		String raw_msg = rem[p4 + 1..].trim();
+		if (raw_msg.starts_with("\"") && raw_msg.ends_with("\"") && raw_msg.len >= 2)
+		{
+			raw_msg = raw_msg[1 : ^2];
+		}
+
+		uint l_num = line_str.to_uint() ?? 0;
+		uint c_num = col_str.to_uint() ?? 0;
+		if (l_num == 0 || c_num == 0) continue;
+		uint l_0 = l_num > 0 ? l_num - 1 : 0;
+		uint c_0 = c_num > 0 ? c_num - 1 : 0;
+
+		int severity = 1;
+		switch (sev_str)
+		{
+			case "error": severity = 1;
+			case "warn":  severity = 2;
+			case "note":  severity = 4;
+			default:      continue;
+		}
+
+		String norm_file = raw_file.copy(tmem);
+		for (sz i = 0; i < norm_file.len; i++)
+		{
+			if (norm_file[i] == '\\') norm_file[i] = '/';
+		}
+
+		$if env::WIN32:
+			if (norm_file.len >= 2 && norm_file[0].is_lower() && norm_file[1] == ':')
+			{
+				char[] p = norm_file.copy(tmem);
+				p[0] = p[0].to_upper();
+				norm_file = (String)p;
+			}
+		$endif
+
+		if (!norm_file.starts_with("/") && !(norm_file.len >= 2 && norm_file[1] == ':'))
+		{
+			if (root_path.len > 0)
+			{
+				norm_file = string::tformat("%s/%s", root_path, norm_file);
+			}
+		}
+
+		LspDiagnostic diag = {
+			.range = {
+				.start = { .line = l_0, .character = c_0 },
+				.end = { .line = l_0, .character = c_0 + 1 }
+			},
+			.severity = severity,
+			.message = raw_msg.copy(self.allocator),
+			.source = "c3c"
+		};
+
+		self.add_c3c_diagnostic(norm_file, diag);
 	}
 }
 

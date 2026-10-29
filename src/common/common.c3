@@ -59,10 +59,16 @@ struct MarkupContent
 	String value;
 }
 
+struct SaveOptions
+{
+	bool includeText;
+}
+
 struct TextDocumentSyncOptions
 {
 	bool openClose;
 	TextDocumentSyncKind change;
+	SaveOptions save;
 }
 
 struct CompletionContext

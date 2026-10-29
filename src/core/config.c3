@@ -26,6 +26,8 @@ struct TargetConfig
 	Maybe{String[]} sources_override;
 	Maybe{String[]} test_sources;
 	Maybe{String[]} test_sources_override;
+	Maybe{String[]} features;
+	Maybe{String[]} features_override;
 	Maybe{String[]} link_args;
 	Maybe{String[]} link_args_override;
 	Maybe{String[]} dependencies;
@@ -40,6 +42,8 @@ fn void TargetConfig.free(&self, Allocator allocator)
 	free_maybe_string_array(allocator, self.sources_override);
 	free_maybe_string_array(allocator, self.test_sources);
 	free_maybe_string_array(allocator, self.test_sources_override);
+	free_maybe_string_array(allocator, self.features);
+	free_maybe_string_array(allocator, self.features_override);
 	free_maybe_string_array(allocator, self.link_args);
 	free_maybe_string_array(allocator, self.link_args_override);
 	free_maybe_string_array(allocator, self.dependencies);
@@ -127,6 +131,8 @@ fn TargetConfig parse_target(Allocator alloc, Object* target_obj)
 	if (try s = parse_string_array(alloc, target_obj, "sources-override")) conf.sources_override = maybe::value(s);
 	if (try s = parse_string_array(alloc, target_obj, "test-sources")) conf.test_sources = maybe::value(s);
 	if (try s = parse_string_array(alloc, target_obj, "test-sources-override")) conf.test_sources_override = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "features")) conf.features = maybe::value(s);
+	if (try s = parse_string_array(alloc, target_obj, "features-override")) conf.features_override = maybe::value(s);
 	if (try s = parse_string_array(alloc, target_obj, "dependencies")) conf.dependencies = maybe::value(s);
 	if (try s = parse_string_array(alloc, target_obj, "dependencies-override")) conf.dependencies_override = maybe::value(s);
 	if (try s = parse_string_array(alloc, target_obj, "linked-libraries")) conf.linked_libraries = maybe::value(s);

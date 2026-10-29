@@ -3,10 +3,12 @@ module lsp::core;
 import std::io;
 import std::collections::map;
 import std::collections::list;
+import std::collections::set;
 import std::collections::object;
 import std::compression::zip;
 import std::encoding::json;
 import std::io::file;
+import std::os::process;
 
 import lsp::analysis;
 import lsp::server;
@@ -191,6 +193,8 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	LspFile* file = self.files.get(lookup_key) ?? null;
 	if (!file) return;
 
+	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
+
 	if (params.document.version <= file.version) return;
 	file.version = params.document.version;
 	log::info("Reindexing: version = %d", file.version);
@@ -299,6 +303,8 @@ fn void LspProject.close_file(&self, DocumentUri document)
 	LspFile* file = self.files.get(lookup_key) ?? null;
 	if (!file) return;
 
+	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
+
 	if (self.workspace.ctx)
 	{
 		SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
@@ -313,9 +319,204 @@ fn void LspProject.close_file(&self, DocumentUri document)
 	self.files.remove(lookup_key);
 }
 
+fn void LspProject.save_file(&self, DocumentUri document) => @pool()
+{
+	String raw_uri = document;
+	String lookup_key = raw_uri;
+	if (raw_uri.contains("://"))
+	{
+		Uri? query_uri = uri::parse(tmem, raw_uri);
+		if (catch query_uri) return;
+		lookup_key = query_uri.path;
+	}
+
+	LspFile* file = self.files.get(lookup_key) ?? null;
+	if (!file || file.is_library) return;
+
+	if (self.process_queue.len() > 0)
+	{
+		self.update();
+	}
+
+	if (self.config.root_path.len == 0 || lookup_key.starts_with("/virtual/")) return;
+
+	SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
+	if (sf)
+	{
+		if (try diags = self.workspace.diagnostics.get_ref(lookup_key))
+		{
+			foreach (d : *diags)
+			{
+				if (d.severity == 1) return;
+			}
+		}
+	}
+
+	List{String} prev_c3c_files;
+	prev_c3c_files.tinit();
+	self.workspace.c3c_diagnostics.@each(; path, list)
+	{
+		prev_c3c_files.push(path);
+	};
+
+	self.run_c3c_diagnostics(lookup_key);
+
+	HashSet{String} published_paths;
+	published_paths.tinit();
+
+	if (published_paths.add(lookup_key))
+	{
+		server::publish_diagnostics_for_path(lookup_key, &self.workspace);
+	}
+
+	foreach (p : prev_c3c_files)
+	{
+		if (published_paths.add(p))
+		{
+			server::publish_diagnostics_for_path(p, &self.workspace);
+		}
+	}
+
+	self.workspace.c3c_diagnostics.@each(; path, list)
+	{
+		if (published_paths.add(path))
+		{
+			server::publish_diagnostics_for_path(path, &self.workspace);
+		}
+	};
+}
+
+fn bool LspProject.is_test_source_file(&self, String file_path)
+{
+	if (try test_srcs = self.config.test_sources.get())
+	{
+		if (self.file_matches_patterns(file_path, test_srcs)) return true;
+	}
+
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			if (try test_srcs = target_conf.test_sources_override.get())
+			{
+				if (self.file_matches_patterns(file_path, test_srcs)) return true;
+			}
+			else if (try test_srcs = target_conf.test_sources.get())
+			{
+				if (self.file_matches_patterns(file_path, test_srcs)) return true;
+			}
+		};
+	}
+
+	return file_path.contains("/test/") || file_path.contains("\\test\\");
+}
+
+fn String LspProject.get_c3c_target(&self, String file_path)
+{
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			if (try feats = target_conf.features_override.get())
+			{
+				foreach (f : feats)
+				{
+					if (f == "LSP_TARGET") return target_name;
+				}
+			}
+			else if (try feats = target_conf.features.get())
+			{
+				foreach (f : feats)
+				{
+					if (f == "LSP_TARGET") return target_name;
+				}
+			}
+		};
+
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			if (try srcs = target_conf.sources_override.get())
+			{
+				if (self.file_matches_patterns(file_path, srcs)) return target_name;
+			}
+			else if (try srcs = target_conf.sources.get())
+			{
+				if (self.file_matches_patterns(file_path, srcs)) return target_name;
+			}
+			if (try test_srcs = target_conf.test_sources_override.get())
+			{
+				if (self.file_matches_patterns(file_path, test_srcs)) return target_name;
+			}
+			else if (try test_srcs = target_conf.test_sources.get())
+			{
+				if (self.file_matches_patterns(file_path, test_srcs)) return target_name;
+			}
+		};
+	}
+
+	return "";
+}
+
+fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
+{
+	if (self.config.root_path.len == 0 || user_file_path.len == 0) return;
+
+	List{String} cmd;
+	cmd.tinit();
+
+	String comp = server::compiler_path.len > 0 ? server::compiler_path : "c3c";
+	cmd.push(comp);
+
+	if (self.config.root_path.len > 0)
+	{
+		cmd.push("--path");
+		cmd.push(self.config.root_path);
+	}
+
+	bool is_test = self.is_test_source_file(user_file_path);
+	cmd.push(is_test ? "test" : "build");
+
+	String target = self.get_c3c_target(user_file_path);
+	if (target.len > 0)
+	{
+		cmd.push(target);
+	}
+
+	cmd.push("--lsp");
+	cmd.push("--warn-builtin=no");
+
+	Process? proc = process::spawn(cmd.array_view());
+	if (catch proc) return;
+
+	DString output_buf;
+	output_buf.tinit();
+
+	char[4096] chunk;
+	while (true)
+	{
+		long? bytes_read = proc.read_stderr(&chunk, 4096);
+		if (catch bytes_read) break;
+		long n = bytes_read;
+		if (n <= 0) break;
+		output_buf.append((String)chunk[:n]);
+	}
+
+	while (true)
+	{
+		long? bytes_read = proc.read_stdout(&chunk, 4096);
+		if (catch bytes_read) break;
+		long n = bytes_read;
+		if (n <= 0) break;
+		output_buf.append((String)chunk[:n]);
+	}
+
+	(void)proc.join();
+
+	self.workspace.parse_c3c_lsp_output(output_buf.str_view(), self.config.root_path);
+}
+
 fn void LspProject.update(&self)
 {
-	// Check if any disk-backed library files were deleted externally
 	List{String} dead_libs;
 	dead_libs.tinit();
 
@@ -334,7 +535,6 @@ fn void LspProject.update(&self)
 			self.close_file((DocumentUri)dead_p);
 		}
 
-		// Re-queue open user files so missing module diagnostics are recalculated
 		self.files.@each(; path_key, lsp_f)
 		{
 			if (lsp_f && !lsp_f.is_library)
@@ -354,6 +554,9 @@ fn void LspProject.update(&self)
 	FileInput[] files = self.process_queue.array_view();
 	defer self.process_queue.clear();
 
+	bool any_syntax_error = false;
+	String user_file_for_c3c = "";
+
 	// Pass 1: Parse and register all AST nodes across queued files into global workspace registry
 	foreach (f : files)
 	{
@@ -368,13 +571,19 @@ fn void LspProject.update(&self)
 		if (text.len > 0)
 		{
 			String target_path = f.path.len > 0 ? f.path : f.uri;
-			self.workspace.parse_and_register_file(target_path, text);
+			bool ok = self.workspace.parse_and_register_file(target_path, text);
+			if (!f.is_library)
+			{
+				user_file_for_c3c = target_path;
+				if (!ok)
+				{
+					any_syntax_error = true;
+				}
+			}
 		}
 	}
 
-	// Pass 2: Execute semantic analysis only on user files (not stdlib/library files).
-	// Library files are already registered in Pass 1; running the variable pass over
-	// their bodies is redundant since diagnostics for library files are discarded anyway.
+	// Pass 2: Execute semantic analysis only on user files
 	foreach (f : files)
 	{
 		if (f.is_library) continue;
@@ -382,7 +591,18 @@ fn void LspProject.update(&self)
 		self.workspace.analyze_file(target_path);
 	}
 
-	server::publish_diagnostics(files, &self.workspace);
+	HashSet{String} published_paths;
+	published_paths.tinit();
+
+	foreach (f : files)
+	{
+		if (f.is_library) continue;
+		String p = f.path.len > 0 ? f.path : f.uri;
+		if (published_paths.add(p))
+		{
+			server::publish_diagnostics_for_path(p, &self.workspace);
+		}
+	}
 }
 
 fn void LspProject.initial_process(&self)
