@@ -31,8 +31,8 @@ jobs:
       - name: Run Test Suite
         run: c3c test
 
-  build-linux-windows:
-    name: Build (Linux & Windows)
+  build:
+    name: Build (All Targets)
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -63,56 +63,57 @@ jobs:
           c3c build --target linux-aarch64 -O3 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR" -z "-s"
           tar -czvf dist/c3_ls-linux-aarch64.tar.gz -C build-linux-arm64 c3_ls
 
-      # 3. Windows x86_64 (Cross-compile with static CRT)
-      - name: Fetch Windows MSVC SDK
-        run: c3c fetch-sdk windows --accept-license
+      - name: Get current month
+        id: get-date
+        run: echo "month=$(/bin/date -u '+%Y-%m')" >> $GITHUB_OUTPUT
+        shell: bash
 
+      - name: Cache SDKs
+        id: cache-sdks
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/c3
+          key: c3-sdks-${{ runner.os }}-${{ steps.get-date.outputs.month }}
+          restore-keys: |
+            c3-sdks-${{ runner.os }}-
+
+      - name: Fetch SDKs
+        if: steps.cache-sdks.outputs.cache-hit != 'true'
+        run: |
+          c3c fetch-sdk windows --accept-license
+          c3c fetch-sdk macos --accept-license
+
+      # 3. Windows x86_64 (Cross-compile with static CRT)
       - name: Build Windows x86_64
         run: |
           c3c build --target windows-x64 -O3 --wincrt=static --build-dir build-win64 --output-dir build-win64
           zip -j dist/c3_ls-windows-x86_64.zip build-win64/c3_ls.exe
 
+      # 4. macOS aarch64 (Apple Silicon)
+      - name: Build macOS aarch64
+        run: |
+          c3c build --target macos-aarch64 -O3 --build-dir build-mac-arm64 --output-dir build-mac-arm64
+          chmod +x build-mac-arm64/c3_ls
+          tar -czvf dist/c3_ls-macos-aarch64.tar.gz -C build-mac-arm64 c3_ls
+
+      # 5. macOS x86_64 (Intel)
+      - name: Build macOS x86_64
+        run: |
+          c3c build --target macos-x64 -O3 --build-dir build-mac-x64 --output-dir build-mac-x64
+          chmod +x build-mac-x64/c3_ls
+          tar -czvf dist/c3_ls-macos-x86_64.tar.gz -C build-mac-x64 c3_ls
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: linux-windows-binaries
-          path: dist/*
-
-  build-macos:
-    name: Build (macOS)
-    needs: test
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: ManuLinares/setup-c3@main
-        with:
-          version: nightly
-
-      # 1. macOS aarch64 (Apple Silicon)
-      - name: Build macOS aarch64
-        run: |
-          c3c build -O3 -z "-s"
-          mkdir -p dist
-          tar -czvf dist/c3_ls-macos-aarch64.tar.gz -C build c3_ls
-
-      # 2. macOS x86_64 (Intel)
-      - name: Build macOS x86_64
-        run: |
-          c3c build --target macos-x64 -O3 --build-dir build-mac-x64 --output-dir build-mac-x64 -z "-s"
-          tar -czvf dist/c3_ls-macos-x86_64.tar.gz -C build-mac-x64 c3_ls
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: macos-binaries
+          name: binaries
           path: dist/*
 
   # Push rolling pre-release on main commits (for c3.nvim auto-installers)
   release-latest:
     name: Update Latest Pre-Release
     if: github.ref == 'refs/heads/main'
-    needs: [build-linux-windows, build-macos]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -134,7 +135,7 @@ jobs:
   release-tagged:
     name: Publish Tagged Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-linux-windows, build-macos]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
