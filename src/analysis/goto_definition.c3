@@ -54,6 +54,8 @@ fn bool node_to_location(LspProject* project, Uri fallback_uri, Node* node, LspL
 			if (node.as(InterfaceDecl).name) target_range = node.as(InterfaceDecl).name.range;
 		case FAULT_DECL:
 			if (node.as(FaultDecl).name) target_range = node.as(FaultDecl).name.range;
+		case ATTRDEF_DECL:
+			if (node.as(AttrdefDecl).name) target_range = node.as(AttrdefDecl).name.range;
 		case TRY_EXPR:
 			if (node.as(TryExpr).variable) target_range = node.as(TryExpr).variable.range;
 		case CATCH_EXPR:

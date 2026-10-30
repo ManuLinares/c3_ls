@@ -272,6 +272,62 @@ fn String format_node_signature(Node* node, String name)
 			{
 				buf.appendf("faultdef %s", name);
 			}
+		case ATTRIBUTE_DECL:
+			{
+				AttributeDecl* attr = node.as(AttributeDecl);
+				String aname = attr.name ? attr.name.text : name;
+				buf.appendf("attribute %s", aname);
+				if (attr.exprs.len > 0)
+				{
+					buf.append("(");
+					foreach (j, expr : attr.exprs)
+					{
+						if (j > 0) buf.append(", ");
+						String es = cursor::spelling(expr, tmem);
+						buf.append(es.len > 0 ? es : "...");
+					}
+					buf.append(")");
+				}
+			}
+		case ATTRDEF_DECL:
+			{
+				AttrdefDecl* ad = node.as(AttrdefDecl);
+				buf.appendf("attrmacro %s", name);
+				if (ad.params.len > 0)
+				{
+					buf.append("(");
+					foreach (i, param : ad.params)
+					{
+						if (i > 0) buf.append(", ");
+						buf.append(format_param_signature(param));
+					}
+					buf.append(")");
+				}
+				if (ad.defined_attributes.len > 0)
+				{
+					buf.append(" =");
+					foreach (i, attr : ad.defined_attributes)
+					{
+						if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
+						AttributeDecl* a = attr.as(AttributeDecl);
+						String aname = a.name ? a.name.text : "";
+						if (aname.len == 0) continue;
+						buf.appendf(" %s", aname);
+						if (a.exprs.len > 0)
+						{
+							buf.append("(");
+							foreach (j, expr : a.exprs)
+							{
+								if (j > 0) buf.append(", ");
+								String es = cursor::spelling(expr, tmem);
+								buf.append(es.len > 0 ? es : "...");
+							}
+							buf.append(")");
+						}
+						if (i < ad.defined_attributes.len - 1) buf.append(",");
+					}
+				}
+			}
 		default:
 			buf.append(name);
 	}
@@ -322,6 +378,11 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 
 	String signature = format_node_signature(decl_node, symbol_name);
 	String doc_comment = cursor::docs(decl_node) ?? "";
+	if (doc_comment.len == 0 && decl_node.kind == ATTRIBUTE_DECL)
+	{
+		AttributeDecl* ad = decl_node.as(AttributeDecl);
+		doc_comment = ad.attribute_kind.doc;
+	}
 
 	DString md_buf;
 	md_buf.tinit();

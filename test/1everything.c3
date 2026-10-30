@@ -45,10 +45,11 @@ extern fn void* malloc(sz size);
 extern fn void free(void* ptr);
 
 // User-defined attribute definition
-attrdef @HotInline = @inline, @nodiscard;
+attrmacro @HotInline = @inline, @nodiscard;
+attrmacro @TagFoo(value) = @tag("foo", value);
 
 // Fault definitions with @obfuscate attribute
-faultdef INVALID_ARG, OUT_OF_BOUNDS, CALC_FAILED, SUB_FAULT @obfuscate;
+excuse INVALID_ARG, OUT_OF_BOUNDS, CALC_FAILED, SUB_FAULT @obfuscate;
 
 // Decimal, hexadecimal, binary, and octal integer literals
 const int DEC_VAL = 1_000_000;
@@ -360,12 +361,12 @@ struct Vector2D
 	float y;
 }
 
-fn Vector2D Vector2D.add(self, Vector2D other) @operator(+)
+fn Vector2D Vector2D.add(self, Vector2D other) @operator(+) @HotInline
 {
 	return { self.x + other.x, self.y + other.y };
 }
 
-fn Vector2D Vector2D.add_assign(&self, Vector2D other) @operator(+=)
+fn Vector2D Vector2D.add_assign(&self, Vector2D other) @operator(+=) @TagFoo("the_value")
 {
 	self.x += other.x;
 	self.y += other.y;

@@ -715,6 +715,69 @@ fn Node* check_macro_list_for_macro(MacroInfo* head)
 	return null;
 }
 
+fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "")
+{
+	if (!context || !context.registry || name.len == 0) return null;
+
+	if (caller_mod.len > 0)
+	{
+		String local_qname = string::tformat("%s::%s", caller_mod, name);
+		if (try ai = context.registry.attrmacros.get(local_qname))
+		{
+			if (ai.node) return ai.node;
+		}
+	}
+
+	if (try ai = context.registry.attrmacros.get(name))
+	{
+		if (ai.node && (!sf || is_symbol_accessible_from_file(context, sf, ai.node, ai.mod)))
+		{
+			return ai.node;
+		}
+	}
+
+	if (sf)
+	{
+		List{String} imports = get_source_file_imported_modules(sf);
+		foreach (imp : imports)
+		{
+			String imp_qname = string::tformat("%s::%s", imp, name);
+			if (try ai = context.registry.attrmacros.get(imp_qname))
+			{
+				if (ai.node && is_symbol_accessible_from_file(context, sf, ai.node, ai.mod))
+				{
+					return ai.node;
+				}
+			}
+		}
+	}
+
+	Node* found = null;
+	context.modules.@each(; mod_name, mod)
+	{
+		if (!found && mod && (!sf || is_module_visible_to_file(context, sf, mod_name)))
+		{
+			foreach (node : mod.nodes)
+			{
+				if (node && node.kind == ATTRDEF_DECL)
+				{
+					AttrdefDecl* ad = node.as(AttrdefDecl);
+					if (ad.name && ad.name.text == name)
+					{
+						if (!sf || is_symbol_accessible_from_file(context, sf, node, mod_name))
+						{
+							found = node;
+							break;
+						}
+					}
+				}
+			}
+		}
+	};
+
+	return found;
+}
+
 fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String name)
 {
 	if (!context || !mod) return null;
@@ -1557,10 +1620,18 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 				if (ad.name && ad.name.range.contains(loc)) return target_node;
 			}
 		case INTERFACE_DECL:
-		case ATTRIBUTE_DECL:
 		case MODULE_DECL:
 		case FAULT_DECL:
 		case FAULTDEF_DECL:
+		case ATTRDEF_DECL:
+			return target_node;
+		case ATTRIBUTE_DECL:
+			if (target_node.as(AttributeDecl).name && context)
+			{
+				String caller_mod = get_module_name_at_location(sf, loc);
+				Node* def = find_attrmacro_in_scope(context, sf, target_node.as(AttributeDecl).name.text, caller_mod);
+				if (def) return def;
+			}
 			return target_node;
 		case VAR_DECL:
 			{

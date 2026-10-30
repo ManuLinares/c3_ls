@@ -13,6 +13,24 @@ enum ScopeKind
 	ATTRIBUTE
 }
 
+enum AttributeTargetKind : char
+{
+	NONE,
+	ANY,
+	FUNCTION,
+	TYPE,
+	VARIABLE,
+	FIELD,
+	ENUM,
+	ENUM_MEMBER,
+	MODULE,
+	IMPORT,
+	PARAMETER,
+	CALL,
+	ATTRDEF,
+	SWITCH
+}
+
 enum LspAccessKind
 {
 	NONE,

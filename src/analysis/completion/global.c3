@@ -105,6 +105,7 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 			{
 				if (stmt)
 				{
+					if (stmt.kind == ATTRDEF_DECL) continue;
 					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
 

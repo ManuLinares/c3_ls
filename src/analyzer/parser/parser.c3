@@ -347,17 +347,12 @@ fn void update_section_visibility(ParseContext* ctx, ModuleDecl* md)
 		if (attr && attr.kind == ATTRIBUTE_DECL)
 		{
 			AttributeDecl* ad = attr.as(AttributeDecl);
-			if (ad.attribute_kind == AttributeKind.PRIVATE)
+			switch (ad.attribute_kind)
 			{
-				sec_vis = Visibility.PRIVATE;
-			}
-			else if (ad.attribute_kind == AttributeKind.LOCAL)
-			{
-				sec_vis = Visibility.LOCAL;
-			}
-			else if (ad.attribute_kind == AttributeKind.PUBLIC)
-			{
-				sec_vis = Visibility.PUBLIC;
+				case PRIVATE: sec_vis = PRIVATE;
+				case LOCAL:   sec_vis = LOCAL;
+				case PUBLIC:  sec_vis = PUBLIC;
+				default:
 			}
 		}
 	}
@@ -412,14 +407,10 @@ fn void attach_leading_attributes(ParseContext* ctx, Node* node, List{Node*} * l
 		AttributeDecl* attr_decl = attr.as(AttributeDecl);
 		switch (attr_decl.attribute_kind)
 		{
-			case AttributeKind.PRIVATE:
-				node.visibility = Visibility.PRIVATE;
-			case AttributeKind.LOCAL:
-				node.visibility = Visibility.LOCAL;
-			case AttributeKind.PUBLIC:
-				node.visibility = Visibility.PUBLIC;
+			case PRIVATE: node.visibility = PRIVATE;
+			case LOCAL:   node.visibility = LOCAL;
+			case PUBLIC:  node.visibility = PUBLIC;
 			default:
-				break;
 		}
 	}
 

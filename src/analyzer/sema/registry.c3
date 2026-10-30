@@ -14,6 +14,7 @@ fn Registry* create(Allocator alloc)
 	registry.functions.init(&registry.arena);
 	registry.types.init(&registry.arena);
 	registry.macros.init(&registry.arena);
+	registry.attrmacros.init(&registry.arena);
 
 	return registry;
 }
@@ -25,6 +26,7 @@ fn void free(AnalyzerContext* context, Registry* reg)
 	reg.functions.free();
 	reg.types.free();
 	reg.macros.free();
+	reg.attrmacros.free();
 	reg.arena.free();
 
 	alloc::free(context.allocator, reg);
@@ -84,6 +86,8 @@ fn void register_and_dispatch(AnalyzerContext* context, Module* mod, Node* node)
 			register_function(context, mod, node);
 		case MACRO_DECL:
 			register_macro(context, mod, node);
+		case ATTRDEF_DECL:
+			register_attrdef(context, mod, node);
 		default:
 			break;
 	}
@@ -188,6 +192,34 @@ fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered macro: %s", qname);
 
 	context.registry.macros.set(qname, macros_info);
+}
+
+fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)
+{
+	AttrdefDecl* decl = node.as(AttrdefDecl);
+	if (!decl.name)
+	{
+		diagnostics::log_error("registry::register_attrdef - attrdef name is null");
+		return;
+	}
+
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
+
+	AttrdefInfo* attr_info = alloc::new(&context.registry.arena, AttrdefInfo);
+	attr_info.mod = mod.name;
+	attr_info.node = node;
+
+	AttrdefInfo* existing_head = context.registry.attrmacros.get(qname) ?? null;
+	attr_info.next = existing_head;
+
+	diagnostics::log_debug("[Registry]: registered attrdef: %s", qname);
+
+	context.registry.attrmacros.set(qname, attr_info);
+}
+
+fn AttrdefInfo* get_attrmacro(AnalyzerContext* context, String name)
+{
+	return context.registry.attrmacros.get(name) ?? null;
 }
 
 fn FunctionInfo* get_function(AnalyzerContext* context, String name)

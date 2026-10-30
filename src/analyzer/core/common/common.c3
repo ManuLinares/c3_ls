@@ -74,140 +74,92 @@ fn bool Location.eq(self, Location other) @operator(==)
 	return self.line == other.line && self.column == other.column;
 }
 
-enum AttributeKind : char
+bitstruct AttributeTargetMask : ushort
 {
-	ALIGN,
-	ALLOW_DEPRECATED,
-	BENCHMARK,
-	BIGENDIAN,
-	BUILTIN,
-	CALLCONV,
-	CNAME,
-	COMPACT,
-	CONST,
-	CONSTINIT,
-	DEPRECATED,
-	DYNAMIC,
-	EXPORT,
-	EXTERN,
-	FEAT,
-	FINALIZER,
-	FORMAT,
-	IF,
-	INLINE,
-	INIT,
-	JUMP,
-	LINK,
-	LITTLEENDIAN,
-	LOCAL,
-	MAYDISCARD,
-	NAKED,
-	NOALIAS,
-	NODISCARD,
-	NOINIT,
-	NOINLINE,
-	NOPADDING,
-	NORECURSE,
-	NORETURN,
-	NOSANITIZE,
-	NOSTRIP,
-	OBFUSCATE,
-	OPERATOR,
-	OPERATOR_R,
-	OPERATOR_S,
-	OPTIONAL,
-	OVERLAP,
-	PACKED,
-	PRIVATE,
-	PUBLIC,
-	PURE,
-	REFLECT,
-	SAFEINFER,
-	SAFEMACRO,
-	SIMD,
-	SECTION,
-	STRUCTLIKE,
-	TAG,
-	TEST,
-	UNUSED,
-	USED,
-	WASM,
-	WEAK,
-	WINMAIN,
-	NONE,
+	bool is_function;
+	bool is_type;
+	bool is_variable;
+	bool is_field;
+	bool is_enum;
+	bool is_enum_member;
+	bool is_module;
+	bool is_import;
+	bool is_parameter;
+	bool is_call;
+	bool is_switch;
+}
+
+enum AttributeKind : int (String str, AttributeTargetMask targets, String doc)
+{
+	ALIGN            { "@align",             { .is_type, .is_variable, .is_field, .is_function }, "Sets the minimum alignment in bytes." },
+	ALLOW_DEPRECATED { "@allow_deprecated",   { .is_function }, "Suppresses deprecation warnings in this function." },
+	ASMNAME          { "@asmname",            { .is_function, .is_variable }, "Sets external linkage name without platform decoration." },
+	BENCHMARK        { "@benchmark",          { .is_function }, "Marks the function as a benchmark." },
+	BIGENDIAN        { "@bigendian",          { .is_type }, "Lays out bitstruct fields in big-endian order." },
+	BUILTIN          { "@builtin",            { .is_function, .is_variable }, "Allows symbol to be accessed without module path prefix." },
+	CALLCONV         { "@callconv",           { .is_function }, "Sets calling convention ('cdecl', 'stdcall', 'veccall')." },
+	CNAME            { "@cname",              { .is_function, .is_variable, .is_type, .is_enum }, "Sets external C symbol linkage name." },
+	COMPACT          { "@compact",            { .is_type }, "Recursively removes all padding from struct or union." },
+	CONST            { "@const",              { .is_function }, "Ensures a macro is always compile-time folded to a constant." },
+	CONSTINIT        { "@constinit",          { .is_type, .is_enum, .is_variable }, "Allows typedef or constset initialization from literals without cast." },
+	DEPRECATED       { "@deprecated",         { .is_function, .is_type, .is_variable, .is_field, .is_enum, .is_enum_member }, "Marks declaration as deprecated." },
+	DYNAMIC          { "@dynamic",            { .is_function }, "Marks method for dynamic interface invocation." },
+	EXPORT           { "@export",             { .is_function, .is_variable, .is_type, .is_enum }, "Exports symbol with public visibility in library binary." },
+	EXTERN           { "@extern",             { .is_function, .is_variable }, "Declares external linkage." },
+	FEAT             { "@feat",               { .is_function, .is_type, .is_variable, .is_field, .is_enum, .is_module }, "Conditionally compiles declaration based on feature flags." },
+	FINALIZER        { "@finalizer",          { .is_function }, "Executes function on program shutdown." },
+	FORMAT           { "@format",             { .is_function }, "Enables compile-time format string validation." },
+	IF               { "@if",                 { .is_function, .is_type, .is_field, .is_enum_member }, "Conditionally includes declaration in generic context." },
+	INLINE           { "@inline",             { .is_function, .is_call }, "Forces function or call-site inlining." },
+	INIT             { "@init",               { .is_function }, "Executes function on program startup before main." },
+	JUMP             { "@jump",               { .is_switch }, "Guarantees switch statement compiles to a jump table." },
+	LINK             { "@link",               { .is_module, .is_function, .is_variable }, "Specifies library dependencies to link automatically." },
+	LITTLEENDIAN     { "@littleendian",       { .is_type }, "Lays out bitstruct fields in little-endian order." },
+	LOCAL            { "@local",              { .is_function, .is_type, .is_variable, .is_enum, .is_module }, "Restricts visibility to current module section." },
+	MAYDISCARD       { "@maydiscard",         { .is_function }, "Allows discarding return value even if Optional." },
+	MUSTINIT         { "@mustinit",           { .is_type }, "Disallows @noinit on variables of this type." },
+	NAKED            { "@naked",              { .is_function }, "Disables function prologue and epilogue generation." },
+	NOALIAS          { "@noalias",            { .is_parameter }, "Asserts pointer parameter does not alias any other pointer (C restrict)." },
+	NODISCARD        { "@nodiscard",          { .is_function }, "Emits warning if function return value is discarded." },
+	NOINIT           { "@noinit",             { .is_variable, .is_field }, "Disables zero-initialization for variable or field." },
+	NOINLINE         { "@noinline",           { .is_function, .is_call }, "Prevents inlining of function or call site." },
+	NOPADDING        { "@nopadding",          { .is_type }, "Ensures struct or union has zero padding bytes." },
+	NORECURSE        { "@norecurse",          { .is_import }, "Imports module without recursively importing its submodules." },
+	NOREDZONE        { "@noredzone",          { .is_function }, "Disables red zone usage for function." },
+	NORETURN         { "@noreturn",           { .is_function }, "Declares that the function never returns." },
+	NOSANITIZE       { "@nosanitize",         { .is_function }, "Disables sanitizers for function." },
+	NOSTACKPROBE     { "@nostackprobe",       { .is_function }, "Disables stack probing for function." },
+	NOSTACKPROTECTOR { "@nostackprotector",   { .is_function }, "Disables stack protector for function." },
+	NOSTRIP          { "@nostrip",            { .is_function, .is_type, .is_variable, .is_enum }, "Prevents linker from stripping symbol." },
+	OBFUSCATE        { "@obfuscate",          { .is_function, .is_type, .is_enum }, "Strips reflection strings and metadata." },
+	OPERATOR         { "@operator",           { .is_function }, "Overloads an operator (+, -, *, [], len, etc.)." },
+	OPERATOR_R       { "@operator_r",         { .is_function }, "Defines reverse operator overload." },
+	OPERATOR_S       { "@operator_s",         { .is_function }, "Defines symmetric operator overload." },
+	OPTIONAL         { "@optional",           { .is_function }, "Marks interface method as optional to implement." },
+	OVERLAP          { "@overlap",            { .is_type }, "Allows overlapping bit ranges in bitstruct." },
+	PACKED           { "@packed",             { .is_type }, "Sets struct/union member alignment to 1 byte." },
+	PRIVATE          { "@private",            { .is_function, .is_type, .is_variable, .is_enum, .is_module, .is_import }, "Restricts visibility to current module." },
+	PUBLIC           { "@public",             { .is_function, .is_type, .is_variable, .is_enum, .is_module, .is_import }, "Exports symbol with public visibility across modules." },
+	PURE             { "@pure",               { .is_function, .is_call }, "Asserts function does not read or write global state." },
+	REFLECT          { "@reflect",            { .is_function, .is_type, .is_variable, .is_enum }, "Enables extra reflection metadata." },
+	SAFEINFER        { "@safeinfer",          { .is_function }, "Enables safe inference for function or macro." },
+	SAFEMACRO        { "@safemacro",          { .is_function }, "Allows macro to drop leading @ prefix." },
+	SECTION          { "@section",            { .is_function, .is_variable }, "Places function or global in specific binary section." },
+	SIMD             { "@simd",               { .is_type }, "Conforms vector type to C SIMD ABI." },
+	STRUCTLIKE       { "@structlike",         { .is_type }, "Marks type as struct-like." },
+	TAG              { "@tag",                { .is_function, .is_type, .is_variable, .is_field, .is_parameter }, "Attaches a compile-time key-value tag." },
+	TEST             { "@test",               { .is_function, .is_module }, "Marks function or module section as a test." },
+	UNUSED           { "@unused",             { .is_function, .is_type, .is_variable, .is_field, .is_parameter, .is_enum_member }, "Suppresses unused warning." },
+	USED             { "@used",               { .is_function, .is_type, .is_variable, .is_field, .is_parameter, .is_enum_member }, "Requires parameter or variable to be used." },
+	WASM             { "@wasm",               { .is_function, .is_variable }, "WebAssembly export and import configuration." },
+	WEAK             { "@weak",               { .is_function, .is_variable, .is_module }, "Emits symbol with weak linkage." },
+	WINMAIN          { "@winmain",            { .is_function }, "Generates Windows WinMain entry point." },
+	NONE             { "",                    {}, "" }
 }
 
 fn AttributeKind get_attribute_from_string(String str)
 {
-	switch (str)
-	{
-		case "@align": return AttributeKind.ALIGN;
-		case "@allow_deprecated": return AttributeKind.ALLOW_DEPRECATED;
-		case "@benchmark": return AttributeKind.BENCHMARK;
-		case "@bigendian": return AttributeKind.BIGENDIAN;
-		case "@builtin": return AttributeKind.BUILTIN;
-		case "@callconv": return AttributeKind.CALLCONV;
-		case "@cname": return AttributeKind.CNAME;
-		case "@compact": return AttributeKind.COMPACT;
-		case "@const": return AttributeKind.CONST;
-		case "@constinit": return AttributeKind.CONSTINIT;
-
-		case "@deprecated": return AttributeKind.DEPRECATED;
-		case "@dynamic": return AttributeKind.DYNAMIC;
-		case "@export": return AttributeKind.EXPORT;
-		case "@extern": return AttributeKind.EXTERN;
-		case "@feat": return AttributeKind.FEAT;
-		case "@finalizer": return AttributeKind.FINALIZER;
-		case "@format": return AttributeKind.FORMAT;
-
-		case "@if": return AttributeKind.IF;
-		case "@inline": return AttributeKind.INLINE;
-		case "@init": return AttributeKind.INIT;
-		case "@jump": return AttributeKind.JUMP;
-		case "@link": return AttributeKind.LINK;
-		case "@littleendian": return AttributeKind.LITTLEENDIAN;
-		case "@local": return AttributeKind.LOCAL;
-
-		case "@maydiscard": return AttributeKind.MAYDISCARD;
-		case "@naked": return AttributeKind.NAKED;
-		case "@noalias": return AttributeKind.NOALIAS;
-		case "@nodiscard": return AttributeKind.NODISCARD;
-		case "@noinit": return AttributeKind.NOINIT;
-		case "@noinline": return AttributeKind.NOINLINE;
-		case "@nopadding": return AttributeKind.NOPADDING;
-		case "@norecurse": return AttributeKind.NORECURSE;
-		case "@noreturn": return AttributeKind.NORETURN;
-		case "@nosanitize": return AttributeKind.NOSANITIZE;
-		case "@nostrip": return AttributeKind.NOSTRIP;
-
-		case "@obfuscate": return AttributeKind.OBFUSCATE;
-		case "@operator": return AttributeKind.OPERATOR;
-		case "@operator_r": return AttributeKind.OPERATOR_R;
-		case "@operator_s": return AttributeKind.OPERATOR_S;
-		case "@optional": return AttributeKind.OPTIONAL;
-		case "@overlap": return AttributeKind.OVERLAP;
-		case "@packed": return AttributeKind.PACKED;
-		case "@private": return AttributeKind.PRIVATE;
-		case "@public": return AttributeKind.PUBLIC;
-		case "@pure": return AttributeKind.PURE;
-
-		case "@reflect": return AttributeKind.REFLECT;
-		case "@safeinfer": return AttributeKind.SAFEINFER;
-		case "@safemacro": return AttributeKind.SAFEMACRO;
-		case "@section": return AttributeKind.SECTION;
-		case "@simd": return AttributeKind.SIMD;
-		case "@structlike": return AttributeKind.STRUCTLIKE;
-
-		case "@tag": return AttributeKind.TAG;
-		case "@test": return AttributeKind.TEST;
-		case "@unused": return AttributeKind.UNUSED;
-		case "@used": return AttributeKind.USED;
-		case "@wasm": return AttributeKind.WASM;
-		case "@weak": return AttributeKind.WEAK;
-		case "@winmain": return AttributeKind.WINMAIN;
-
-		default: return AttributeKind.NONE;
-	}
+	return AttributeKind::lookup_field(str, str) ?? AttributeKind.NONE;
 }
 
 bitstruct TypeFlags : uint

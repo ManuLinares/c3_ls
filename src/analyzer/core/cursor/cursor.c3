@@ -63,6 +63,11 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 				FaultDecl* fd = node.as(FaultDecl);
 				return fd.name ? fd.name.text : "";
 			}
+		case ATTRDEF_DECL:
+			{
+				AttrdefDecl* ad = node.as(AttrdefDecl);
+				return ad.name ? ad.name.text : "";
+			}
 		case TYPE_EXPR:
 			{
 				TypeExpr* type_data = node.as(TypeExpr);

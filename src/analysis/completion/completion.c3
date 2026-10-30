@@ -26,6 +26,7 @@ struct Context
 	Allocator allocator;
 	String prefix;
 	ScopeKind scope;
+	AttributeTargetKind attr_target;
 	LspAccessKind access;
 	String base_identifier;
 	String expected_type;
@@ -334,9 +335,197 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	};
 }
 
+fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind* out_target)
+{
+	if (!ctx || !ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return false;
+
+	bool has_at_prefix = ctx.prefix.starts_with("@");
+	bool has_at_char = !has_at_prefix && ctx.prefix.len == 0 && ctx.offset > 0 && ctx.sf.content[ctx.offset - 1] == '@';
+	if (!has_at_prefix && !has_at_char) return false;
+
+	sz at_pos = has_at_prefix ? (ctx.offset - ctx.prefix.len) : (ctx.offset - 1);
+
+	sz stmt_start = at_pos;
+	while (stmt_start > 0 && ctx.sf.content[stmt_start - 1] != '\n' && ctx.sf.content[stmt_start - 1] != ';' && ctx.sf.content[stmt_start - 1] != '{' && ctx.sf.content[stmt_start - 1] != '}')
+	{
+		stmt_start--;
+	}
+
+	String before_at = ctx.sf.content[stmt_start : at_pos - stmt_start].trim();
+
+	if (try first_at = before_at.index_of_char('@'))
+	{
+		before_at = before_at[:first_at].trim();
+	}
+
+	if (before_at.starts_with("import ") || before_at.starts_with("import\t") || before_at == "import")
+	{
+		*out_target = IMPORT;
+		return true;
+	}
+	if (before_at.starts_with("module ") || before_at.starts_with("module\t") || before_at == "module")
+	{
+		*out_target = MODULE;
+		return true;
+	}
+	if (before_at.starts_with("attrmacro") || before_at.starts_with("attrdef") || before_at.starts_with("attrgroup"))
+	{
+		*out_target = ATTRDEF;
+		return true;
+	}
+	if (before_at.starts_with("switch"))
+	{
+		*out_target = SWITCH;
+		return true;
+	}
+	if (before_at.starts_with("fn ") || before_at.starts_with("fn\t") ||
+	    before_at.starts_with("macro ") || before_at.starts_with("macro\t") ||
+	    before_at.starts_with("extern fn"))
+	{
+		*out_target = FUNCTION;
+		return true;
+	}
+	if (before_at.starts_with("struct ") || before_at.starts_with("struct\t") ||
+	    before_at.starts_with("union ") || before_at.starts_with("union\t") ||
+	    before_at.starts_with("bitstruct ") || before_at.starts_with("bitstruct\t") ||
+	    before_at.starts_with("typedef ") || before_at.starts_with("typedef\t") ||
+	    before_at.starts_with("alias ") || before_at.starts_with("alias\t") ||
+	    before_at.starts_with("distinct ") || before_at.starts_with("distinct\t") ||
+	    before_at.starts_with("interface ") || before_at.starts_with("interface\t"))
+	{
+		*out_target = TYPE;
+		return true;
+	}
+	if (before_at.starts_with("enum ") || before_at.starts_with("enum\t") ||
+	    before_at.starts_with("constdef ") || before_at.starts_with("constdef\t") ||
+	    before_at.starts_with("constset ") || before_at.starts_with("constset\t") ||
+	    before_at.starts_with("cenum ") || before_at.starts_with("cenum\t"))
+	{
+		*out_target = ENUM;
+		return true;
+	}
+
+	if (before_at.ends_with(")"))
+	{
+		int pdepth = 1;
+		sz p = before_at.len - 1;
+		while (p > 0 && pdepth > 0)
+		{
+			p--;
+			if (before_at[p] == ')')
+			{
+				pdepth++;
+			}
+			else if (before_at[p] == '(')
+			{
+				pdepth--;
+			}
+		}
+		if (pdepth == 0)
+		{
+			sz callee_end = p;
+			while (callee_end > 0 && (before_at[callee_end - 1] == ' ' || before_at[callee_end - 1] == '\t')) callee_end--;
+			sz callee_start = callee_end;
+			while (callee_start > 0 && (before_at[callee_start - 1].is_alnum() || before_at[callee_start - 1] == '_' || before_at[callee_start - 1] == ':')) callee_start--;
+			String kw = before_at[callee_start : callee_end - callee_start].trim();
+			if (kw != "if" && kw != "while" && kw != "for" && kw != "foreach" && kw != "switch" && kw != "catch")
+			{
+				*out_target = CALL;
+				return true;
+			}
+		}
+	}
+
+	if (loc.line >= 0)
+	{
+		foreach (stmt : ctx.sf.ast.statements)
+		{
+			if (stmt && stmt.range.contains(loc))
+			{
+				switch (stmt.kind)
+				{
+					case STRUCT_DECL:
+						*out_target = FIELD;
+						return true;
+					case ENUM_DECL:
+						*out_target = ENUM_MEMBER;
+						return true;
+					case FN_DECL:
+					case MACRO_DECL:
+						{
+							Node* body = (stmt.kind == FN_DECL) ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
+							if (!body || !body.range.contains(loc))
+							{
+								*out_target = FUNCTION;
+								return true;
+							}
+
+							if (before_at.len > 0 && !before_at.ends_with("=") && !before_at.ends_with("{") && !before_at.ends_with(";"))
+							{
+								String[] words = before_at.tsplit(" ");
+								if (words.len >= 2 || before_at.starts_with("var ") || before_at.starts_with("const ") || before_at.starts_with("tlocal ") || before_at.starts_with("static "))
+								{
+									*out_target = VARIABLE;
+									return true;
+								}
+							}
+							return false;
+						}
+					default:
+						break;
+				}
+			}
+		}
+	}
+
+	if (before_at.len > 0 && !before_at.ends_with("=") && !before_at.ends_with("{"))
+	{
+		*out_target = VARIABLE;
+		return true;
+	}
+
+	if (before_at.len == 0)
+	{
+		bool inside_fn = false;
+		if (loc.line >= 0)
+		{
+			foreach (stmt : ctx.sf.ast.statements)
+			{
+				if (stmt && stmt.range.contains(loc))
+				{
+					if (stmt.kind == FN_DECL && stmt.as(FnDecl).body && stmt.as(FnDecl).body.range.contains(loc))
+					{
+						inside_fn = true;
+						break;
+					}
+					if (stmt.kind == MACRO_DECL && stmt.as(MacroDecl).body && stmt.as(MacroDecl).body.range.contains(loc))
+					{
+						inside_fn = true;
+						break;
+					}
+				}
+			}
+		}
+		if (!inside_fn)
+		{
+			*out_target = ANY;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Location loc = { -1, -1 })
 {
 	if (!ctx || !ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return EXECUTION;
+
+	AttributeTargetKind attr_target = NONE;
+	if (detect_attribute_context(ctx, loc, &attr_target))
+	{
+		ctx.attr_target = attr_target;
+		return ATTRIBUTE;
+	}
 
 	sz line_start = ctx.offset;
 	while (line_start > 0 && ctx.sf.content[line_start - 1] != '\n')
@@ -528,6 +717,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.sf = sf,
 		.allocator = tmem,
 		.scope = EXECUTION,
+		.attr_target = NONE,
 		.offset = offset,
 		.expected_type = "",
 		.caller_mod = caller_mod,
@@ -544,8 +734,17 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	ctx.expected_type = expected_type;
 
 	detect_access_context(&ctx, sf);
+	log::debug("completion: prefix=%s scope=%s access=%s", ctx.prefix, scope, ctx.access);
 
-	if (ctx.scope == IMPORT)
+	if (ctx.scope == ATTRIBUTE)
+	{
+		provide_builtin_attributes_for_target(&ctx, &items, ctx.attr_target);
+		if (ctx.attr_target != IMPORT && ctx.attr_target != CALL && ctx.attr_target != SWITCH)
+		{
+			provide_attrmacros(&ctx, &items);
+		}
+	}
+	else if (ctx.scope == IMPORT)
 	{
 		provide_module_paths(&ctx, &items, sf, offset);
 	}

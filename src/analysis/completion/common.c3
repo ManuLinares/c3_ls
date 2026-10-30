@@ -64,21 +64,16 @@ fn bool is_symbol_accessible(SourceFile* caller_sf, String caller_mod, Node* tar
 			case ALIAS_DECL: attrs = target_node.as(AliasDecl).attributes;
 			default: break;
 		}
-		foreach (attr : attrs)
+		foreach ATTR_LOOP: (attr : attrs)
 		{
 			if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
 			AttributeDecl* ad = attr.as(AttributeDecl);
-			if (ad.attribute_kind == AttributeKind.LOCAL)
+			switch (ad.attribute_kind)
 			{
-				vis = LOCAL; break;
-			}
-			if (ad.attribute_kind == AttributeKind.PRIVATE)
-			{
-				vis = PRIVATE; break;
-			}
-			if (ad.attribute_kind == AttributeKind.PUBLIC)
-			{
-				vis = PUBLIC; break;
+				case LOCAL:   vis = LOCAL;   break ATTR_LOOP;
+				case PRIVATE: vis = PRIVATE; break ATTR_LOOP;
+				case PUBLIC:  vis = PUBLIC;  break ATTR_LOOP;
+				default:      break;
 			}
 		}
 	}
@@ -435,4 +430,109 @@ fn void provide_builtin_types(Context* ctx, List{CompletionItem} * items)
 		}
 		);
 	}
+}
+
+
+fn bool is_matching_target(AttributeTargetMask mask, AttributeTargetKind target)
+{
+	switch (target)
+	{
+		case ANY:
+		case ATTRDEF:
+			return true;
+		case FUNCTION:
+			return mask.is_function;
+		case TYPE:
+			return mask.is_type;
+		case VARIABLE:
+			return mask.is_variable;
+		case FIELD:
+			return mask.is_field;
+		case ENUM:
+			return mask.is_enum;
+		case ENUM_MEMBER:
+			return mask.is_enum_member;
+		case MODULE:
+			return mask.is_module;
+		case IMPORT:
+			return mask.is_import;
+		case PARAMETER:
+			return mask.is_parameter;
+		case CALL:
+			return mask.is_call;
+		case SWITCH:
+			return mask.is_switch;
+		default:
+			return false;
+	}
+}
+
+fn void provide_builtin_attributes_for_target(Context* ctx, List{CompletionItem}* items, AttributeTargetKind target)
+{
+	String sort_prefix = "0001";
+
+	foreach (attr : AttributeKind::values)
+	{
+		if (attr == AttributeKind.NONE) continue;
+		if (!is_matching_target(attr.targets, target)) continue;
+		if (!fuzzy_match(attr.str, ctx.prefix)) continue;
+
+		String bare = attr.str[1..];
+		String ins = ctx.prefix.starts_with("@") ? bare : attr.str;
+		items.push(
+		{
+			.label = attr.str,
+			.kind = KEYWORD,
+			.detail = "built-in attribute",
+			.documentation = {
+				.kind = MARKDOWN,
+				.value = attr.doc
+			},
+			.insertText = ins,
+			.filterText = bare,
+			.sortText = string::tformat("%s_%s", sort_prefix, attr.str),
+			.data = "property"
+		}
+		);
+	}
+}
+
+fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
+{
+	if (!ctx.ws || !ctx.ws.ctx || !ctx.ws.ctx.registry) return;
+
+	String sort_prefix = "0002";
+
+	ctx.ws.ctx.registry.attrmacros.@each(; qname, attr_info)
+	{
+		if (!attr_info || !attr_info.node) return;
+		AttrdefDecl* ad = attr_info.node.as(AttrdefDecl);
+		String aname = ad.name ? ad.name.text : "";
+		if (aname.len == 0) return;
+
+		if (is_symbol_accessible(ctx.sf, ctx.caller_mod, attr_info.node, attr_info.mod))
+		{
+			if (fuzzy_match(aname, ctx.prefix))
+			{
+				String bare = aname.strip_prefix("@");
+				String ins = ctx.prefix.starts_with("@") ? bare : aname;
+				String doc_comment = cursor::docs(attr_info.node) ?? "";
+				items.push(
+				{
+					.label = aname,
+					.kind = KEYWORD,
+					.detail = string::tformat("attrmacro via %s", attr_info.mod),
+					.documentation = {
+						.kind = MARKDOWN,
+						.value = doc_comment.len > 0 ? doc_comment.trim().treplace("\"", "") : ""
+					},
+					.insertText = ins,
+					.filterText = bare,
+					.sortText = string::tformat("%s_%s", sort_prefix, aname),
+					.data = string::tformat("symbol:%s:%s", attr_info.mod, aname)
+				}
+				);
+			}
+		}
+	};
 }

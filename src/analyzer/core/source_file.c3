@@ -150,6 +150,44 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 		{
 			(void)reg.macros.remove(k);
 		}
+
+		List{String} empty_attrmacros;
+		empty_attrmacros.tinit();
+		reg.attrmacros.@each(; qname, head)
+		{
+			AttrdefInfo* prev = null;
+			AttrdefInfo* curr = head;
+			while (curr != null)
+			{
+				switch (sf.contains_node(curr.node))
+				{
+					case true:
+						curr = curr.next;
+						switch (prev != null)
+						{
+							case true:
+								prev.next = curr;
+							case false:
+								if (try head_ptr = reg.attrmacros.get_ref(qname))
+								{
+									*head_ptr = curr;
+								}
+						}
+					case false:
+						prev = curr;
+						curr = curr.next;
+				}
+			}
+			AttrdefInfo* final_head = reg.attrmacros.get(qname) ?? null;
+			if (!final_head)
+			{
+				empty_attrmacros.push(qname);
+			}
+		};
+		foreach (k : empty_attrmacros)
+		{
+			(void)reg.attrmacros.remove(k);
+		}
 	}
 
 	context.modules.@each(; mod_name, mod)

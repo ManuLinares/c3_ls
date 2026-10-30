@@ -119,12 +119,20 @@ struct VariableInfo
 	Node* node;
 }
 
+struct AttrdefInfo
+{
+	AttrdefInfo* next;
+	String mod;
+	Node* node;
+}
+
 struct Registry
 {
 	DynamicArenaAllocator arena;
 	HashMap{String, TypeInfo*} types;
 	HashMap{String, FunctionInfo*} functions;
 	HashMap{String, MacroInfo*} macros;
+	HashMap{String, AttrdefInfo*} attrmacros;
 }
 
 struct Scope

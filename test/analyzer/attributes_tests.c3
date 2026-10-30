@@ -5,6 +5,12 @@ import parser_tests;
 import analyzer::parser;
 import analyzer::core;
 import analyzer::sema;
+import lsp::analysis::goto_definition;
+import lsp::analysis::hover;
+import lsp::analysis::completion;
+import lsp;
+import lsp::core;
+import uri;
 import std::io;
 import std::collections::list;
 import std::io::file;
@@ -245,4 +251,292 @@ fn void op_overloads()
 		}
 	}
 	test::eq(fn_decl_count, 8);
+}
+
+// attrmacro @HotInline defined on line 0 (0-indexed), col 10
+// used on line 2 (0-indexed), col 30 (@operator(+) is 14 chars, space, then @HotInline)
+fn void attrmacro_goto_definition()
+{
+	String code = `module attrtest;
+attrmacro @HotInline = @inline, @nodiscard;
+struct Vec { float x; float y; }
+fn Vec Vec.add(self, Vec other) @operator(+) @HotInline { return { self.x + other.x, self.y + other.y }; }
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attrtest.c3", code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attrtest.c3");
+	defer doc_uri.free();
+
+	// cursor on @HotInline at line 3, col 45
+	LspPosition use_pos = { .line = 3, .character = 45 };
+	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, use_pos)!!;
+	test::eq(locs.len, 1);
+	// should resolve to the attrmacro declaration on line 1
+	test::eq(locs[0].range.start.line, 1u);
+}
+
+fn void attrmacro_hover()
+{
+	String code = `module attrtest2;
+attrmacro @HotInline = @inline, @nodiscard;
+struct Vec { float x; float y; }
+fn Vec Vec.add(self, Vec other) @operator(+) @HotInline { return { self.x + other.x, self.y + other.y }; }
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attrtest2.c3", code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attrtest2.c3");
+	defer doc_uri.free();
+
+	// hover on @HotInline use site (line 3, col 45)
+	LspPosition use_pos = { .line = 3, .character = 45 };
+	String hover_res = hover::hover(&proj, doc_uri, use_pos)!!;
+	assert(hover_res.contains("attrmacro"));
+	assert(hover_res.contains("@HotInline"));
+	assert(hover_res.contains("@inline"));
+	assert(hover_res.contains("@nodiscard"));
+}
+
+fn void attrmacro_completion()
+{
+	String code = `module attrtest3;
+attrmacro @HotInline = @inline, @nodiscard;
+struct Vec { float x; float y; }
+fn Vec Vec.add(self, Vec other) @operator(+) @Hot
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attrtest3.c3", code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attrtest3.c3");
+	defer doc_uri.free();
+
+	// cursor after "@Hot" on line 3, col 49
+	LspPosition pos = { .line = 3, .character = 49 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found = false;
+	foreach (item : items)
+	{
+		if (item.label == "@HotInline") { found = true; break; }
+	}
+	assert(found);
+}
+
+fn void builtin_attr_completion()
+{
+	// typing "@" on a function declaration — should offer built-in attributes
+	String code = `module attrtest4;
+fn void foo() @
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attrtest4.c3", code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attrtest4.c3");
+	defer doc_uri.free();
+
+	// cursor after "@" on line 1, col 15
+	LspPosition pos = { .line = 1, .character = 15 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_inline = false;
+	bool found_nodiscard = false;
+	bool found_inline_label = false;
+	foreach (item : items)
+	{
+		if (item.label == "@inline")    { found_inline = true; }
+		if (item.label == "@nodiscard") { found_nodiscard = true; }
+	}
+	assert(found_inline);
+	assert(found_nodiscard);
+}
+
+fn void attrmacro_parameterized_hover()
+{
+	String code = `module attrtest5;
+attrmacro @TagFoo(value) = @tag("foo", value);
+fn void foo() @TagFoo("bar") {}
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attrtest5.c3", code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attrtest5.c3");
+	defer doc_uri.free();
+
+	LspPosition use_pos = { .line = 2, .character = 15 };
+	String hover_res = hover::hover(&proj, doc_uri, use_pos)!!;
+	assert(hover_res.contains("attrmacro"));
+	assert(hover_res.contains("@TagFoo"));
+	assert(hover_res.contains("value"));
+	assert(hover_res.contains("@tag"));
+	assert(hover_res.contains("\"foo\""));
+}
+
+fn void test_attribute_scope_excludes_callable_macros() @test
+{
+	String code = `module attrtest_scope;
+attrmacro @HotInline = @inline, @nodiscard;
+macro void @swap_values(#a, #b) {}
+
+fn void foo() @
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attr_scope.c3", code);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attr_scope.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 4, .character = 15 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_hot_inline = false;
+	bool found_inline = false;
+	bool found_swap_macro = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "@HotInline")   found_hot_inline = true;
+		if (item.label == "@inline")      found_inline = true;
+		if (item.label == "@swap_values") found_swap_macro = true;
+	}
+
+	assert(found_hot_inline);
+	assert(found_inline);
+	assert(!found_swap_macro);
+}
+
+fn void test_execution_scope_excludes_declaration_attributes() @test
+{
+	String code = `module attrtest_exec;
+attrmacro @HotInline = @inline;
+macro void @swap_values(#a, #b) {}
+
+fn void run() {
+    @
+}
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attr_exec.c3", code);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attr_exec.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 5, .character = 5 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_swap = false;
+	bool found_packed = false;
+	bool found_export = false;
+	bool found_hot_inline = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "@swap_values") found_swap = true;
+		if (item.label == "@packed")      found_packed = true;
+		if (item.label == "@export")      found_export = true;
+		if (item.label == "@HotInline")   found_hot_inline = true;
+	}
+
+	assert(found_swap);
+	assert(!found_packed);
+	assert(!found_export);
+	assert(!found_hot_inline);
+}
+
+fn void test_target_aware_attribute_filtering() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String code = `module attrtest_targets;
+import std::io @
+struct MyData @
+`;
+
+	proj.workspace.process_file("/virtual/attr_targets.c3", code);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attr_targets.c3");
+	defer doc_uri.free();
+
+	LspPosition imp_pos = { .line = 1, .character = 16 };
+	CompletionItem[] imp_items = completion::resolve(&proj, doc_uri, imp_pos)!!;
+
+	bool found_norecurse = false;
+	bool found_packed_on_import = false;
+	foreach (item : imp_items)
+	{
+		if (item.label == "@norecurse") found_norecurse = true;
+		if (item.label == "@packed")    found_packed_on_import = true;
+	}
+	assert(found_norecurse);
+	assert(!found_packed_on_import);
+
+	LspPosition struct_pos = { .line = 2, .character = 15 };
+	CompletionItem[] struct_items = completion::resolve(&proj, doc_uri, struct_pos)!!;
+
+	bool found_packed = false;
+	bool found_nodiscard = false;
+	foreach (item : struct_items)
+	{
+		if (item.label == "@packed")    found_packed = true;
+		if (item.label == "@nodiscard") found_nodiscard = true;
+	}
+	assert(found_packed);
+	assert(!found_nodiscard);
+}
+
+fn void test_builtin_attribute_hover() @test
+{
+	String code = `module attrtest_hover;
+struct Packet @packed {
+    int id;
+}
+fn void run() @inline {}
+`;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/attr_hover.c3", code);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attr_hover.c3");
+	defer doc_uri.free();
+
+	// 1. Hover on @packed (line 1, col 16)
+	LspPosition packed_pos = { .line = 1, .character = 16 };
+	String h_packed = hover::hover(&proj, doc_uri, packed_pos)!!;
+	assert(h_packed.contains("attribute @packed"));
+	assert(h_packed.contains("Sets struct/union member alignment to 1 byte."));
+
+	// 2. Hover on @inline (line 4, col 16)
+	LspPosition inline_pos = { .line = 4, .character = 16 };
+	String h_inline = hover::hover(&proj, doc_uri, inline_pos)!!;
+	assert(h_inline.contains("attribute @inline"));
+	assert(h_inline.contains("Forces function or call-site inlining."));
 }
