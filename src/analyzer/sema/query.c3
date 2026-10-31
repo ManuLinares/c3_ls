@@ -631,7 +631,88 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 	return null;
 }
 
-fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name, String type_suffix)
+fn bool module_paths_match(String p1, String p2) @local
+{
+	if (p1 == p2) return true;
+	if (p1.len > p2.len)
+	{
+		sz diff = p1.len - p2.len;
+		if (diff >= 2 && p1.ends_with(p2) && p1[diff - 2] == ':' && p1[diff - 1] == ':') return true;
+	}
+	else if (p2.len > p1.len)
+	{
+		sz diff = p2.len - p1.len;
+		if (diff >= 2 && p2.ends_with(p1) && p2[diff - 2] == ':' && p2[diff - 1] == ':') return true;
+	}
+	return false;
+}
+
+fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, String type_name = "")
+{
+	if (!assoc_type_node) return false;
+
+	String target_clean = clean_type.trim_right("*&? \t");
+	if (try b_idx = target_clean.index_of_char('{'))
+	{
+		target_clean = target_clean[:b_idx].trim();
+	}
+	target_clean = target_clean.trim_right("*&? \t");
+
+	String target_path = "";
+	String target_base = target_clean;
+	if (try sc_idx = target_clean.rindex_of("::"))
+	{
+		target_path = target_clean[:sc_idx];
+		target_base = target_clean[sc_idx + 2..];
+	}
+
+	String assoc_raw = "";
+	String assoc_path = "";
+
+	if (assoc_type_node.kind == TYPE_EXPR)
+	{
+		TypeExpr* te = assoc_type_node.as(TypeExpr);
+		if (te.type_kind == TYPE_IDENTIFIER)
+		{
+			assoc_raw = te.unresolved.name ? te.unresolved.name.text : "";
+			if (te.unresolved.path && te.unresolved.path.kind == PATH_EXPR)
+			{
+				PathExpr* pe = te.unresolved.path.as(PathExpr);
+				if (pe.path)
+				{
+					assoc_path = pe.path.text.strip_suffix("::");
+				}
+			}
+		}
+	}
+
+	if (assoc_raw.len == 0)
+	{
+		assoc_raw = cursor::raw_type_identifier(assoc_type_node) ?? "";
+		assoc_raw = assoc_raw.trim_right("*&? \t");
+	}
+
+	if (assoc_raw.len > 0 && target_base.len > 0 && assoc_raw == target_base)
+	{
+		if (assoc_path.len == 0 || target_path.len == 0) return true;
+		return module_paths_match(assoc_path, target_path);
+	}
+
+	if (type_name.len > 0 && type_name != clean_type)
+	{
+		if (is_matching_associated_type(assoc_type_node, type_name)) return true;
+	}
+
+	if (is_vector_type(target_clean))
+	{
+		String assoc_spell = cursor::spelling(assoc_type_node, tmem).trim_right("*&? \t");
+		if (is_vector_type(assoc_spell) || is_vector_type(assoc_raw)) return true;
+	}
+
+	return false;
+}
+
+fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name)
 {
 	FunctionInfo* curr = head;
 	while (curr != null)
@@ -639,15 +720,9 @@ fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name, String t
 		if (curr.node && curr.node.kind == FN_DECL)
 		{
 			FnDecl* fd = curr.node.as(FnDecl);
-			if (fd.associated_type)
+			if (fd.associated_type && is_matching_associated_type(fd.associated_type, type_name))
 			{
-				String assoc = cursor::raw_type_identifier(fd.associated_type) ?? cursor::spelling(fd.associated_type, tmem);
-				assoc = assoc.trim_right("*&? \t");
-				String target_clean = type_name.trim_right("*&? \t");
-				if (assoc == target_clean || assoc.ends_with(type_suffix) || (is_vector_type(type_name) && is_vector_type(assoc)))
-				{
-					return curr.node;
-				}
+				return curr.node;
 			}
 		}
 		curr = curr.next;
@@ -655,7 +730,7 @@ fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name, String t
 	return null;
 }
 
-fn Node* check_macro_list_for_method(MacroInfo* head, String type_name, String type_suffix)
+fn Node* check_macro_list_for_method(MacroInfo* head, String type_name)
 {
 	MacroInfo* curr = head;
 	while (curr != null)
@@ -665,10 +740,7 @@ fn Node* check_macro_list_for_method(MacroInfo* head, String type_name, String t
 			MacroDecl* md = curr.node.as(MacroDecl);
 			if (try assoc_node = md.associated_type.get())
 			{
-				String assoc = cursor::raw_type_identifier(assoc_node) ?? cursor::spelling(assoc_node, tmem);
-				assoc = assoc.trim_right("*&? \t");
-				String target_clean = type_name.trim_right("*&? \t");
-				if (assoc == target_clean || assoc.ends_with(type_suffix) || (is_vector_type(type_name) && is_vector_type(assoc)))
+				if (is_matching_associated_type(assoc_node, type_name))
 				{
 					return curr.node;
 				}
@@ -977,7 +1049,6 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 
 	String clean_mname = method_name.strip_prefix("@");
 	String at_mname = string::tformat("@%s", clean_mname);
-	String type_suffix = string::tformat("::%s", clean_type);
 
 	if (context.registry)
 	{
@@ -987,16 +1058,16 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 			String qname1 = string::tformat("%s::%s", caller_mod, clean_mname);
 			if (try fn_info = context.registry.functions.get(qname1))
 			{
-				if (Node* m = check_fn_list_for_method(fn_info, clean_type, type_suffix)) return m;
+				if (Node* m = check_fn_list_for_method(fn_info, clean_type)) return m;
 			}
 			if (try mac_info = context.registry.macros.get(qname1))
 			{
-				if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+				if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
 			}
 			String qname2 = string::tformat("%s::%s", caller_mod, at_mname);
 			if (try mac_info = context.registry.macros.get(qname2))
 			{
-				if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+				if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
 			}
 		}
 
@@ -1008,16 +1079,16 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 				String qname1 = string::tformat("%s::%s", imp, clean_mname);
 				if (try fn_info = context.registry.functions.get(qname1))
 				{
-					if (Node* m = check_fn_list_for_method(fn_info, clean_type, type_suffix)) return m;
+					if (Node* m = check_fn_list_for_method(fn_info, clean_type)) return m;
 				}
 				if (try mac_info = context.registry.macros.get(qname1))
 				{
-					if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+					if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
 				}
 				String qname2 = string::tformat("%s::%s", imp, at_mname);
 				if (try mac_info = context.registry.macros.get(qname2))
 				{
-					if (Node* m = check_macro_list_for_method(mac_info, clean_type, type_suffix)) return m;
+					if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
 				}
 			}
 		}
@@ -1032,7 +1103,7 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 			{
 				if (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod))
 				{
-					found_m = check_fn_list_for_method(fn_info, clean_type, type_suffix);
+					found_m = check_fn_list_for_method(fn_info, clean_type);
 				}
 			}
 		};
@@ -1044,7 +1115,7 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 			{
 				if (!sf || is_symbol_accessible_from_file(context, sf, mac_info.node, mac_info.mod))
 				{
-					found_m = check_macro_list_for_method(mac_info, clean_type, type_suffix);
+					found_m = check_macro_list_for_method(mac_info, clean_type);
 				}
 			}
 		};

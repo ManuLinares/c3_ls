@@ -909,3 +909,46 @@ fn void test_core_substruct_hierarchical_fields_and_lookup() @test
 	test::eq(sub_mem.kind, NodeKind.VAR_DECL);
 	test::eq(sub_mem.as(VarDecl).name.text, "inner_field");
 }
+
+fn void path_prefixed_method_declarations() @test
+{
+	String source_code = `
+		module lala;
+
+		struct GfxSurface { int id; }
+
+		fn GfxSurface std::gfx::GfxSurface.do_something1(self) => self;
+		fn GfxSurface gfx::GfxSurface.do_something2(self) => self;
+		fn GfxSurface GfxSurface.do_something3(self) => self;
+		macro GfxSurface std::gfx::GfxSurface.do_macro(self) => self;
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_prefixed_methods.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("lala")!!;
+	test::eq(parser_tests::count_kind(mod, FN_DECL), 3);
+	test::eq(parser_tests::count_kind(mod, MACRO_DECL), 1);
+
+	FnDecl* fn1 = mod.nodes[2].as(FnDecl);
+	test::eq(fn1.name.text, "do_something1");
+	test::ne(fn1.associated_type, null);
+	test::eq(cursor::spelling(fn1.associated_type, tmem), "std::gfx::GfxSurface");
+	test::eq(cursor::raw_type_identifier(fn1.associated_type)!!, "GfxSurface");
+
+	FnDecl* fn2 = mod.nodes[3].as(FnDecl);
+	test::eq(fn2.name.text, "do_something2");
+	test::ne(fn2.associated_type, null);
+	test::eq(cursor::spelling(fn2.associated_type, tmem), "gfx::GfxSurface");
+	test::eq(cursor::raw_type_identifier(fn2.associated_type)!!, "GfxSurface");
+
+	FnDecl* fn3 = mod.nodes[4].as(FnDecl);
+	test::eq(fn3.name.text, "do_something3");
+	test::ne(fn3.associated_type, null);
+	test::eq(cursor::spelling(fn3.associated_type, tmem), "GfxSurface");
+
+	MacroDecl* mac = mod.nodes[5].as(MacroDecl);
+	test::eq(mac.name.text, "do_macro");
+	assert(@ok(mac.associated_type.get()));
+	test::eq(cursor::spelling(mac.associated_type.get()!!, tmem), "std::gfx::GfxSurface");
+}

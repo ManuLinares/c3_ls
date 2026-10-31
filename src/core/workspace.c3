@@ -292,8 +292,7 @@ fn List{SymbolEntry} LspWorkspace.find_method(&self, String type_name, String me
 							FnDecl* fn_decl = stmt.as(FnDecl);
 							if (fn_decl.name && fn_decl.name.text == method_name && fn_decl.associated_type)
 							{
-								String assoc = cursor::raw_type_identifier(fn_decl.associated_type) ?? "";
-								if (assoc == type_name)
+								if (query::is_matching_associated_type(fn_decl.associated_type, type_name))
 								{
 									results.push(
 									{
@@ -310,8 +309,7 @@ fn List{SymbolEntry} LspWorkspace.find_method(&self, String type_name, String me
 							{
 								if (try assoc_node = mac_decl.associated_type.get())
 								{
-									String assoc = cursor::raw_type_identifier(assoc_node) ?? "";
-									if (assoc == type_name)
+									if (query::is_matching_associated_type(assoc_node, type_name))
 									{
 										results.push(
 										{

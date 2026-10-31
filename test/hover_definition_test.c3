@@ -791,3 +791,70 @@ fn void test_global_variable_member_definition()
 	test::eq(locs[0].uri, "file:///virtual/def.c3");
 	test::eq((int)locs[0].range.start.line, 2);
 }
+
+fn void test_path_prefixed_method_hover_and_definition() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module lala;
+
+struct GfxSurface { int id; }
+
+fn GfxSurface std::gfx::GfxSurface.do_something1(self) => self;
+fn GfxSurface gfx::GfxSurface.do_something2(self) => self;
+fn GfxSurface GfxSurface.do_something3(self) => self;
+
+fn void main()
+{
+	GfxSurface mysurface;
+	mysurface = mysurface.do_something1();
+	mysurface = mysurface.do_something2();
+	mysurface = mysurface.do_something3();
+}
+`;
+
+	proj.workspace.process_file("/virtual/path_prefixed_test.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/path_prefixed_test.c3");
+	defer doc_uri.free();
+
+	LspDiagnostic[] diags = proj.workspace.get_diagnostics("/virtual/path_prefixed_test.c3");
+	test::eq(diags.len, 0);
+
+	// 1. Hover on do_something1 (line 11, col 25)
+	LspPosition pos1 = { .line = 11, .character = 25 };
+	String h1 = hover::hover(&proj, doc_uri, pos1)!!;
+	assert(h1.contains("std::gfx::GfxSurface.do_something1"));
+
+	// 2. Goto definition on do_something1 -> line 4
+	LspLocation[] locs1 = goto_definition::goto_definition(&proj, doc_uri, pos1)!!;
+	assert(locs1.len > 0);
+	test::eq((int)locs1[0].range.start.line, 4);
+
+	// 3. Hover on do_something2 (line 12, col 25)
+	LspPosition pos2 = { .line = 12, .character = 25 };
+	String h2 = hover::hover(&proj, doc_uri, pos2)!!;
+	assert(h2.contains("gfx::GfxSurface.do_something2"));
+
+	// 4. Goto definition on do_something2 -> line 5
+	LspLocation[] locs2 = goto_definition::goto_definition(&proj, doc_uri, pos2)!!;
+	assert(locs2.len > 0);
+	test::eq((int)locs2[0].range.start.line, 5);
+
+	// 5. Completion on `mysurface.` suggests do_something1, do_something2, do_something3
+	LspPosition comp_pos = { .line = 11, .character = 23 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, comp_pos)!!;
+	bool found1 = false;
+	bool found2 = false;
+	bool found3 = false;
+	foreach (item : items)
+	{
+		if (item.label == "do_something1") found1 = true;
+		if (item.label == "do_something2") found2 = true;
+		if (item.label == "do_something3") found3 = true;
+	}
+	assert(found1);
+	assert(found2);
+	assert(found3);
+}

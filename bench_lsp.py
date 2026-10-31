@@ -3,7 +3,7 @@
 c3_ls Performance, Latency & Reliability Benchmarking Harness.
 
 Profiles end-to-end response distributions, throughput, memory stability (RSS),
-and SLA compliance across project files.
+and SLA compliance across all implemented server capabilities.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -34,7 +35,7 @@ def encode_lsp(obj: dict[str, Any]) -> bytes:
 
 
 class LspSession:
-    """Manages an active LSP server process and its JSON-RPC communication."""
+    """Manages an active LSP server process, requests, and incoming notifications."""
 
     def __init__(self, binary_path: str, workspace_root: str):
         if not os.path.isfile(binary_path):
@@ -44,9 +45,10 @@ class LspSession:
             [binary_path, "--log-level", "error"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,  # Prevent server debug chatter from polluting bench output
+            stderr=subprocess.DEVNULL,
         )
         self.response_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.notification_queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self.msg_id = 0
         self.running = True
 
@@ -89,6 +91,8 @@ class LspSession:
                 msg = json.loads(body.decode("utf-8"))
                 if "id" in msg and msg["id"] is not None:
                     self.response_queue.put(msg)
+                elif "method" in msg:
+                    self.notification_queue.put(msg)
             except Exception:
                 pass
 
@@ -132,6 +136,23 @@ class LspSession:
         lat_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
         return None, lat_ms, False
 
+    def wait_for_notification(self, method: str, target_uri: str | None = None, timeout: float = 5.0) -> tuple[dict[str, Any] | None, float, bool]:
+        """Awaits an asynchronous server notification (e.g. textDocument/publishDiagnostics)."""
+        t0 = time.perf_counter_ns()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                msg = self.notification_queue.get(timeout=0.05)
+                if msg.get("method") == method:
+                    if target_uri is None or msg.get("params", {}).get("uri") == target_uri:
+                        lat_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
+                        return msg, lat_ms, True
+                self.notification_queue.put(msg)
+            except queue.Empty:
+                pass
+        lat_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
+        return None, lat_ms, False
+
     def open_document(self, uri: str, content: str, language_id: str = "c3", version: int = 1):
         self.notify("textDocument/didOpen", {
             "textDocument": {
@@ -148,6 +169,11 @@ class LspSession:
             "contentChanges": [{"text": content}],
         })
 
+    def save_document(self, uri: str):
+        self.notify("textDocument/didSave", {
+            "textDocument": {"uri": uri}
+        })
+
     def close_document(self, uri: str):
         self.notify("textDocument/didClose", {
             "textDocument": {"uri": uri}
@@ -155,7 +181,6 @@ class LspSession:
 
     def get_rss_kb(self) -> int:
         pid = self.proc.pid
-        # Linux
         try:
             with open(f"/proc/{pid}/status") as f:
                 for line in f:
@@ -164,7 +189,6 @@ class LspSession:
         except Exception:
             pass
 
-        # macOS / BSD
         try:
             out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)])
             return int(out.strip())
@@ -194,6 +218,9 @@ class SourceTarget:
     content: str
     line_count: int
     char_count: int
+    ident_pos: tuple[int, int]
+    call_pos: tuple[int, int]
+    member_pos: tuple[int, int]
 
 
 @dataclass
@@ -203,6 +230,48 @@ class EndpointDef:
     make_params: Callable[[SourceTarget], dict[str, Any]]
 
 
+def scan_source_positions(content: str) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+    """Scans for valid identifier, call, and member-access positions."""
+    lines = content.splitlines()
+    ident_pos = (max(0, len(lines) // 2), 4)
+    call_pos = (max(0, len(lines) // 2), 10)
+    member_pos = (max(0, len(lines) // 2), 4)
+
+    ident_found = False
+    call_found = False
+    member_found = False
+
+    ident_pattern = re.compile(r"\b(fn|macro|struct|enum|typedef|alias|var)\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("<*"):
+            continue
+
+        if not ident_found:
+            m = ident_pattern.search(line)
+            if m:
+                ident_pos = (idx, m.start(2) + 1)
+                ident_found = True
+
+        if not call_found and "(" in line and ")" in line:
+            p_idx = line.find("(")
+            if p_idx > 0 and (line[p_idx - 1].isalnum() or line[p_idx - 1] == "_"):
+                call_pos = (idx, p_idx + 1)
+                call_found = True
+
+        if not member_found and "." in line:
+            dot_idx = line.find(".")
+            if dot_idx > 0 and dot_idx + 1 < len(line) and line[dot_idx + 1].isalpha():
+                member_pos = (idx, dot_idx + 2)
+                member_found = True
+
+        if ident_found and call_found and member_found:
+            break
+
+    return ident_pos, call_pos, member_pos
+
+
 def build_endpoints() -> list[EndpointDef]:
     return [
         EndpointDef(
@@ -210,7 +279,7 @@ def build_endpoints() -> list[EndpointDef]:
             method="textDocument/completion",
             make_params=lambda f: {
                 "textDocument": {"uri": f.uri},
-                "position": {"line": max(1, f.line_count // 2), "character": 4},
+                "position": {"line": f.member_pos[0], "character": f.member_pos[1]},
             },
         ),
         EndpointDef(
@@ -218,7 +287,7 @@ def build_endpoints() -> list[EndpointDef]:
             method="textDocument/hover",
             make_params=lambda f: {
                 "textDocument": {"uri": f.uri},
-                "position": {"line": max(1, f.line_count // 2), "character": 5},
+                "position": {"line": f.ident_pos[0], "character": f.ident_pos[1]},
             },
         ),
         EndpointDef(
@@ -226,7 +295,7 @@ def build_endpoints() -> list[EndpointDef]:
             method="textDocument/definition",
             make_params=lambda f: {
                 "textDocument": {"uri": f.uri},
-                "position": {"line": max(1, f.line_count // 2), "character": 5},
+                "position": {"line": f.ident_pos[0], "character": f.ident_pos[1]},
             },
         ),
         EndpointDef(
@@ -234,7 +303,7 @@ def build_endpoints() -> list[EndpointDef]:
             method="textDocument/signatureHelp",
             make_params=lambda f: {
                 "textDocument": {"uri": f.uri},
-                "position": {"line": max(1, f.line_count // 2), "character": 10},
+                "position": {"line": f.call_pos[0], "character": f.call_pos[1]},
             },
         ),
         EndpointDef(
@@ -242,8 +311,37 @@ def build_endpoints() -> list[EndpointDef]:
             method="textDocument/references",
             make_params=lambda f: {
                 "textDocument": {"uri": f.uri},
-                "position": {"line": max(1, f.line_count // 2), "character": 5},
+                "position": {"line": f.ident_pos[0], "character": f.ident_pos[1]},
                 "context": {"includeDeclaration": True},
+            },
+        ),
+        EndpointDef(
+            name="prepareRename",
+            method="textDocument/prepareRename",
+            make_params=lambda f: {
+                "textDocument": {"uri": f.uri},
+                "position": {"line": f.ident_pos[0], "character": f.ident_pos[1]},
+            },
+        ),
+        EndpointDef(
+            name="rename",
+            method="textDocument/rename",
+            make_params=lambda f: {
+                "textDocument": {"uri": f.uri},
+                "position": {"line": f.ident_pos[0], "character": f.ident_pos[1]},
+                "newName": "bench_symbol_rename",
+            },
+        ),
+        EndpointDef(
+            name="codeAction",
+            method="textDocument/codeAction",
+            make_params=lambda f: {
+                "textDocument": {"uri": f.uri},
+                "range": {
+                    "start": {"line": f.ident_pos[0], "character": 0},
+                    "end": {"line": f.ident_pos[0], "character": 10},
+                },
+                "context": {"diagnostics": []},
             },
         ),
         EndpointDef(
@@ -325,6 +423,7 @@ def load_project_files(root: str) -> list[SourceTarget]:
             content = p.read_text(encoding="utf-8", errors="ignore")
             lines = content.splitlines()
             if lines:
+                ident_pos, call_pos, member_pos = scan_source_positions(content)
                 targets.append(SourceTarget(
                     path=str(p),
                     rel_path=str(p.relative_to(root)),
@@ -332,6 +431,9 @@ def load_project_files(root: str) -> list[SourceTarget]:
                     content=content,
                     line_count=len(lines),
                     char_count=len(content),
+                    ident_pos=ident_pos,
+                    call_pos=call_pos,
+                    member_pos=member_pos,
                 ))
         except Exception:
             pass
@@ -391,9 +493,10 @@ def main():
     parser.add_argument("--rounds", type=int, default=5, help="Rounds per file in latency benchmark (default: 5)")
     parser.add_argument("--cycles", type=int, default=1000, help="Cycles in endurance stress run (default: 1000)")
     parser.add_argument("--sla", type=float, default=50.0, help="p95 SLA threshold in ms to flag (default: 50.0)")
-    parser.add_argument("--timeout", type=float, default=2.0, help="Timeout threshold in seconds for hangs (default: 2.0)")
-    parser.add_argument("--skip-endurance", action="store_true", help="Skip the 1,000-cycle memory endurance test")
-    parser.add_argument("--json", metavar="FILE", help="Save complete telemetry report to JSON for regression tracking")
+    parser.add_argument("--timeout", type=float, default=3.0, help="Timeout threshold in seconds for hangs (default: 3.0)")
+    parser.add_argument("--skip-endurance", action="store_true", help="Skip the memory endurance test")
+    parser.add_argument("--bench-save", action="store_true", help="Include didSave + c3c compiler diagnostics roundtrip")
+    parser.add_argument("--json", metavar="FILE", help="Save complete telemetry report to JSON")
 
     args = parser.parse_args()
 
@@ -406,7 +509,6 @@ def main():
     total_bytes = sum(f.char_count for f in files)
     endpoints = build_endpoints()
 
-    # Unified Suite Header
     print("=" * 105)
     print("                              c3_ls Benchmark & Profiling Suite")
     print("=" * 105)
@@ -423,7 +525,7 @@ def main():
     # ------------------------------------------------------------------------
     # Phase 1: Real-Codebase Latency, Tail Percentiles & SLA Validation
     # ------------------------------------------------------------------------
-    print(f"\n[Phase 1/2] Latency & Throughput ({len(files)} files × {args.rounds} rounds = {len(files) * (len(endpoints) + 1) * args.rounds:,} ops)...")
+    print(f"\n[Phase 1/2] Latency & Throughput across {len(files)} files...")
 
     session = LspSession(args.bin, args.root)
     for f in files:
@@ -431,14 +533,17 @@ def main():
     time.sleep(0.3)
 
     measurements: dict[str, list[float]] = {ep.name: [] for ep in endpoints}
+    measurements["completionItem/resolve"] = []
     measurements["didChange (reparse)"] = []
+    if args.bench_save:
+        measurements["didSave (c3c roundtrip)"] = []
     anomalies: list[str] = []
 
     for round_idx in range(1, args.rounds + 1):
         for f in files:
             for ep in endpoints:
                 params = ep.make_params(f)
-                _, lat_ms, ok = session.request(ep.method, params, timeout=args.timeout)
+                resp, lat_ms, ok = session.request(ep.method, params, timeout=args.timeout)
                 total_ops_counter += 1
 
                 if not ok:
@@ -446,6 +551,14 @@ def main():
                     anomalies.append(f"HANG: {ep.name} on {f.rel_path} (>{args.timeout:.1f}s)")
                 else:
                     measurements[ep.name].append(lat_ms)
+
+                if ep.name == "completion" and ok and resp:
+                    items = (resp.get("result") or {}).get("items", [])
+                    if items:
+                        _, res_lat, res_ok = session.request("completionItem/resolve", items[0], timeout=args.timeout)
+                        total_ops_counter += 1
+                        if res_ok:
+                            measurements["completionItem/resolve"].append(res_lat)
 
             # Edit + Reparse Roundtrip
             t0 = time.perf_counter_ns()
@@ -460,9 +573,17 @@ def main():
             else:
                 measurements["didChange (reparse)"].append((t1 - t0) / 1_000_000.0)
 
+            # Optional: didSave + compiler diagnostic roundtrip
+            if args.bench_save:
+                session.save_document(f.uri)
+                _, save_lat, save_ok = session.wait_for_notification("textDocument/publishDiagnostics", f.uri, timeout=args.timeout)
+                total_ops_counter += 1
+                if save_ok:
+                    measurements["didSave (c3c roundtrip)"].append(save_lat)
+
     # Output Results Table
     print("\n" + "-" * 105)
-    print(f"{'Endpoint':<22} {'Calls':>6} {'Min':>9} {'Mean':>9} {'p50':>9} {'p90':>9} {'p95':>9} {'p99':>9} {'Max':>9}  {'SLA':>4}")
+    print(f"{'Endpoint':<26} {'Calls':>6} {'Min':>9} {'Mean':>9} {'p50':>9} {'p90':>9} {'p95':>9} {'p99':>9} {'Max':>9}  {'SLA':>4}")
     print("-" * 105)
 
     stats_summary = {}
@@ -476,7 +597,7 @@ def main():
         sla_mark = "\033[92mPASS\033[0m" if sla_met else "\033[93mWARN\033[0m"
 
         print(
-            f"{name:<22} {dist['count']:>6} "
+            f"{name:<26} {dist['count']:>6} "
             f"{dist['min']:>7.2f}ms "
             f"{dist['mean']:>7.2f}ms "
             f"{dist['p50']:>7.2f}ms "
@@ -495,7 +616,6 @@ def main():
         if len(anomalies) > 10:
             print(f"    ... and {len(anomalies) - 10} more.")
 
-    # Largest files formatting speed
     sorted_files = sorted(files, key=lambda x: x.char_count, reverse=True)[:4]
     print("\n[Top Files Formatting Throughput]")
     for sf in sorted_files:
@@ -522,11 +642,10 @@ def main():
         main_uri = Path(args.root).joinpath("virtual_bench_target.c3").as_uri()
         churn_session.open_document(main_uri, make_churn_source(0))
 
-        # Warmup
         for _ in range(20):
             churn_session.request("textDocument/completion", {
                 "textDocument": {"uri": main_uri},
-                "position": {"line": 23, "character": 5},
+                "position": {"line": 15, "character": 5},
             })
 
         initial_rss = churn_session.get_rss_kb()
@@ -541,7 +660,7 @@ def main():
             churn_session.request("textDocument/formatting", {"textDocument": {"uri": main_uri}, "options": {"tabSize": 4, "insertSpaces": False}})
             churn_session.request("textDocument/rangeFormatting", {
                 "textDocument": {"uri": main_uri},
-                "range": {"start": {"line": 8, "character": 0}, "end": {"line": 10, "character": 1}},
+                "range": {"start": {"line": 4, "character": 0}, "end": {"line": 6, "character": 1}},
                 "options": {"tabSize": 4, "insertSpaces": False},
             })
             churn_session.request("textDocument/semanticTokens/full", {"textDocument": {"uri": main_uri}})
@@ -549,16 +668,16 @@ def main():
             churn_session.request("workspace/symbol", {"query": "Vector2"})
             churn_session.request("textDocument/inlayHint", {
                 "textDocument": {"uri": main_uri},
-                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 30, "character": 0}},
+                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 25, "character": 0}},
             })
             churn_session.request("textDocument/foldingRange", {"textDocument": {"uri": main_uri}})
             churn_session.request("textDocument/hover", {"textDocument": {"uri": main_uri}, "position": {"line": 3, "character": 8}})
-            churn_session.request("textDocument/definition", {"textDocument": {"uri": main_uri}, "position": {"line": 23, "character": 6}})
-            churn_session.request("textDocument/signatureHelp", {"textDocument": {"uri": main_uri}, "position": {"line": 22, "character": 21}})
+            churn_session.request("textDocument/definition", {"textDocument": {"uri": main_uri}, "position": {"line": 16, "character": 15}})
+            churn_session.request("textDocument/signatureHelp", {"textDocument": {"uri": main_uri}, "position": {"line": 16, "character": 21}})
 
             comp_resp, _, _ = churn_session.request("textDocument/completion", {
                 "textDocument": {"uri": main_uri},
-                "position": {"line": 23, "character": 5},
+                "position": {"line": 17, "character": 5},
             })
             endurance_ops += 11
 
@@ -576,15 +695,27 @@ def main():
                 "textDocument": {"uri": main_uri},
                 "position": {"line": 3, "character": 8},
             })
-            endurance_ops += 2
+            churn_session.request("textDocument/rename", {
+                "textDocument": {"uri": main_uri},
+                "position": {"line": 3, "character": 8},
+                "newName": f"Vector2_{i}",
+            })
+            churn_session.request("textDocument/codeAction", {
+                "textDocument": {"uri": main_uri},
+                "range": {"start": {"line": 3, "character": 0}, "end": {"line": 3, "character": 10}},
+                "context": {"diagnostics": []},
+            })
+            endurance_ops += 4
 
-            # Document churn every 50 cycles
             if i % 50 == 0:
                 c_uri = Path(args.root).joinpath(f"virtual_temp_{i}.c3").as_uri()
                 churn_session.open_document(c_uri, f"module temp_{i};\nfn void temp_func() {{}}\n")
                 churn_session.request("textDocument/documentSymbol", {"textDocument": {"uri": c_uri}})
                 churn_session.close_document(c_uri)
-                endurance_ops += 1
+                churn_session.notify("workspace/didChangeWatchedFiles", {
+                    "changes": [{"uri": c_uri, "type": 3}]
+                })
+                endurance_ops += 2
 
             if i % 250 == 0:
                 cur_rss = churn_session.get_rss_kb()

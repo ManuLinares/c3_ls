@@ -521,6 +521,13 @@ fn void BaseEntity.translate(&self, float dx, float dy)
 	self.y += dy;
 }
 
+// Type methods with value and pointer self, long form
+fn void all_features::BaseEntity.another_translate(&self, float dx, float dy)
+{
+	self.x += dx;
+	self.y += dy;
+}
+
 fn float BaseEntity.magnitude_sq(self) => self.x * self.x + self.y * self.y;
 
 // Error handling with Optionals and fault returns

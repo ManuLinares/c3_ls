@@ -490,7 +490,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 		break;
 	}
 
-	if (is_type(ctx) || (ctx.is(IDENT) && ctx.peek(1).kind == SCOPE))
+	if (is_type(ctx))
 	{
 		node = parse_var_decl(scope, null);
 		attach_leading_attributes(ctx, node, &leading_attributes);

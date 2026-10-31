@@ -40,6 +40,16 @@ fn bool is_type(ParseContext* ctx)
 	if (is_type_primitive(kind)) return true;
 	if (kind == TYPE_IDENT) return true;
 
+	if (kind == IDENT && ctx.peek(1).kind == SCOPE)
+	{
+		int i = 2;
+		while (ctx.peek(i).kind == IDENT && ctx.peek(i + 1).kind == SCOPE)
+		{
+			i += 2;
+		}
+		if (ctx.peek(i).kind == TYPE_IDENT) return true;
+	}
+
 	return false;
 }
 
@@ -295,20 +305,7 @@ fn bool check_if_typed_parameter(ParseContext* ctx)
 		return true;
 	}
 
-	if (is_type(ctx) || first == FN)
-	{
-		return true;
-	}
-
-	if (first == IDENT)
-	{
-		if (ctx.peek(1).kind == SCOPE)
-		{
-			return true;
-		}
-	}
-
-	return false;
+	return is_type(ctx) || first == FN;
 }
 
 fn Node* alloc_any_type_expr(ParseContext* ctx)

@@ -718,26 +718,6 @@ fn void inject_vector_swizzles(List{CompletionItem} * items, String prefix)
 	}
 }
 
-fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, String type_name)
-{
-	if (!assoc_type_node) return false;
-	String assoc_raw = cursor::raw_type_identifier(assoc_type_node) ?? "";
-	String assoc_spell = cursor::spelling(assoc_type_node, tmem);
-
-	String target_clean = clean_type.trim_right("*& \t");
-	String target_raw = type_name.trim_right("*& \t");
-
-	if (assoc_raw.len > 0 && (assoc_raw == target_clean || assoc_raw == target_raw)) return true;
-	if (assoc_spell.len > 0 && (assoc_spell == target_clean || assoc_spell == target_raw)) return true;
-
-	if (query::is_vector_type(clean_type))
-	{
-		if (query::is_vector_type(assoc_spell) || query::is_vector_type(assoc_raw)) return true;
-	}
-
-	return false;
-}
-
 fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, String type_name, HashSet{String} * seen_methods)
 {
 	if (!ctx.ws || !ctx.ws.ctx || type_name.len == 0) return;
@@ -760,7 +740,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, Str
 				if (curr.node && curr.node.kind == FN_DECL)
 				{
 					FnDecl* fndecl = curr.node.as(FnDecl);
-					if (fndecl.associated_type && is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
+					if (fndecl.associated_type && query::is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
 					{
 						if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
 						{
@@ -789,7 +769,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem} * items, Str
 					MacroDecl* mac = curr.node.as(MacroDecl);
 					if (try assoc_node = mac.associated_type.get())
 					{
-						if (is_matching_associated_type(assoc_node, clean_type, type_name))
+						if (query::is_matching_associated_type(assoc_node, clean_type, type_name))
 						{
 							if (is_symbol_accessible(ctx.sf, ctx.caller_mod, curr.node, curr.mod))
 							{
