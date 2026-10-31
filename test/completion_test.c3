@@ -2164,3 +2164,287 @@ fn void test_fault_and_excuse_completion()
 	}
 	assert(found_fault_assign);
 }
+
+fn void test_enum_completion_in_comparison_and_switch_case() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module test_enum;
+
+enum Color
+{
+	RED,
+	GREEN,
+	BLUE,
+	YELLOW
+}
+
+fn void test_completions(Color c)
+{
+	Color chosen = 
+
+	if (c == ) {}
+
+	switch (c)
+	{
+		case :
+			break;
+		default:
+			break;
+	}
+}
+`;
+
+	proj.workspace.process_file("/virtual/test_enum.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/test_enum.c3");
+	defer doc_uri.free();
+
+	// 1. Completion after `Color chosen = ` (line 12, col 16)
+	LspPosition pos1 = { .line = 12, .character = 16 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_red1 = false;
+	bool found_green1 = false;
+	bool found_c1 = false;
+	bool found_chosen1 = false;
+	bool found_color_type1 = false;
+	foreach (item : items1)
+	{
+		if (item.label == "RED") found_red1 = true;
+		if (item.label == "GREEN") found_green1 = true;
+		if (item.label == "c") found_c1 = true;
+		if (item.label == "chosen") found_chosen1 = true;
+		if (item.label == "Color") found_color_type1 = true;
+	}
+	assert(found_red1);
+	assert(found_green1);
+	assert(found_c1);
+	assert(found_chosen1);
+	assert(found_color_type1);
+
+	// 2. Completion after `if (c == )` (line 14, col 10)
+	LspPosition pos2 = { .line = 14, .character = 10 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_red2 = false;
+	bool found_green2 = false;
+	bool found_c2 = false;
+	bool found_chosen2 = false;
+	bool found_color_type2 = false;
+	foreach (item : items2)
+	{
+		if (item.label == "RED") found_red2 = true;
+		if (item.label == "GREEN") found_green2 = true;
+		if (item.label == "c") found_c2 = true;
+		if (item.label == "chosen") found_chosen2 = true;
+		if (item.label == "Color") found_color_type2 = true;
+	}
+	assert(found_red2);
+	assert(found_green2);
+	assert(found_c2);
+	assert(found_chosen2);
+	assert(found_color_type2);
+
+	// 3. Completion at `case :` inside `switch (c)` (line 18, col 7)
+	LspPosition pos3 = { .line = 18, .character = 7 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_red3 = false;
+	bool found_green3 = false;
+	bool found_c3 = false;
+	bool found_chosen3 = false;
+	bool found_color_type3 = false;
+	foreach (item : items3)
+	{
+		if (item.label == "RED") found_red3 = true;
+		if (item.label == "GREEN") found_green3 = true;
+		if (item.label == "c") found_c3 = true;
+		if (item.label == "chosen") found_chosen3 = true;
+		if (item.label == "Color") found_color_type3 = true;
+	}
+	assert(found_red3);
+	assert(found_green3);
+	assert(found_c3);
+	assert(found_chosen3);
+	assert(found_color_type3);
+}
+
+fn void test_switch_case_excludes_already_handled_variants() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module test_enum;
+
+enum Color
+{
+	RED,
+	GREEN,
+	BLUE,
+	YELLOW
+}
+
+fn void test_completions(Color c)
+{
+	switch (c)
+	{
+		case RED:
+			break;
+		case :
+			break;
+		default:
+			break;
+	}
+}
+`;
+
+	proj.workspace.process_file("/virtual/test_switch_filter.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/test_switch_filter.c3");
+	defer doc_uri.free();
+
+	// Line 16, col 7: cursor at `case :`
+	LspPosition pos = { .line = 16, .character = 7 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_red = false;
+	bool found_green = false;
+	bool found_blue = false;
+	bool found_yellow = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "RED") found_red = true;
+		if (item.label == "GREEN") found_green = true;
+		if (item.label == "BLUE") found_blue = true;
+		if (item.label == "YELLOW") found_yellow = true;
+	}
+
+	assert(!found_red);
+	assert(found_green);
+	assert(found_blue);
+	assert(found_yellow);
+}
+
+fn void test_switch_case_suppress_completion_after_completed_label_colon() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module test_enum;
+
+enum Color
+{
+	RED,
+	GREEN,
+	BLUE,
+	YELLOW
+}
+
+fn Color give_me_color() => BLUE;
+
+fn void test_completions(Color c)
+{
+	switch (c)
+	{
+		case RED:
+			break;
+		case GREEN:
+		case give_me_color():
+		default:
+			break;
+	}
+}
+`;
+
+	proj.workspace.process_file("/virtual/test_switch_suppress.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/test_switch_suppress.c3");
+	defer doc_uri.free();
+
+	// 1. Immediately after colon in `case GREEN:` (line 18, col 13) -> 0 items
+	LspPosition pos_green = { .line = 18, .character = 13 };
+	CompletionItem[] items_green = completion::resolve(&proj, doc_uri, pos_green)!!;
+	test::eq(items_green.len, 0);
+
+	// 2. Immediately after colon in `case give_me_color():` (line 19, col 23) -> 0 items
+	LspPosition pos_call = { .line = 19, .character = 23 };
+	CompletionItem[] items_call = completion::resolve(&proj, doc_uri, pos_call)!!;
+	test::eq(items_call.len, 0);
+
+	// 3. Immediately after colon in `default:` (line 20, col 10) -> 0 items
+	LspPosition pos_def = { .line = 20, .character = 10 };
+	CompletionItem[] items_def = completion::resolve(&proj, doc_uri, pos_def)!!;
+	test::eq(items_def.len, 0);
+}
+
+fn void test_ternary_colon_does_not_suggest_static_alignment() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void run() {
+	int a = (true) ? 1 : 
+}
+`;
+
+	proj.workspace.process_file("/virtual/ternary_colon.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/ternary_colon.c3");
+	defer doc_uri.free();
+
+	// Line 2, character 22: right after `1 : `
+	LspPosition pos = { .line = 2, .character = 22 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_alignment = false;
+	foreach (item : items)
+	{
+		if (item.label == "alignment" || item.insertText.contains(":alignment"))
+		{
+			found_alignment = true;
+			break;
+		}
+	}
+	assert(!found_alignment);
+}
+
+fn void test_case_double_colon_offers_static_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+enum Color { RED, GREEN, BLUE, YELLOW }
+
+fn void run(Color c) {
+	switch (c)
+	{
+		case Color::
+			break;
+	}
+}
+`;
+
+	proj.workspace.process_file("/virtual/case_double_colon.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/case_double_colon.c3");
+	defer doc_uri.free();
+
+	// Line 6, character 14: right after `case Color::`
+	LspPosition pos = { .line = 6, .character = 14 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_red = false;
+	bool found_green = false;
+	bool found_values = false;
+	foreach (item : items)
+	{
+		if (item.label == "RED") found_red = true;
+		if (item.label == "GREEN") found_green = true;
+		if (item.label == "values") found_values = true;
+	}
+	assert(found_red);
+	assert(found_green);
+	assert(found_values);
+}

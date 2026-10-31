@@ -420,7 +420,7 @@ fn sz skip_brackets_backward(String text, sz p) @local
 	return p;
 }
 
-fn sz find_enclosing_open_brace(String text, sz idx) @local
+fn sz find_enclosing_open_brace(String text, sz idx)
 {
 	int brace_depth = 0;
 	int paren_depth = 0;
@@ -637,6 +637,34 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	}
 	else if (text_before.ends_with(":"))
 	{
+		// Whitespace after colon indicates a delimiter (ternary, case, slice, type), not incomplete '::'
+		if (cursor_idx < text.len && (text[cursor_idx] == ' ' || text[cursor_idx] == '\t'))
+		{
+			ctx.access = NONE;
+			return;
+		}
+
+		// Whitespace immediately before colon (e.g. " ? 1 :") is not valid static access syntax
+		if (cursor_idx >= 2 && (text[cursor_idx - 2] == ' ' || text[cursor_idx - 2] == '\t'))
+		{
+			ctx.access = NONE;
+			return;
+		}
+
+		sz line_start = cursor_idx;
+		while (line_start > 0 && text[line_start - 1] != '\n') line_start--;
+		String line_prefix = text[line_start : cursor_idx - line_start];
+		String line_trim = line_prefix.trim_left();
+
+		if (line_trim.starts_with("case") || line_trim.starts_with("$case") ||
+		    line_trim.starts_with("default") || line_trim.starts_with("$default") ||
+		    line_prefix.contains("?") ||
+		    (cursor_idx >= 2 && text[cursor_idx - 2] == ')'))
+		{
+			ctx.access = NONE;
+			return;
+		}
+
 		ctx.access = STATIC;
 		ctx.missing_second_colon = true;
 		cursor_idx -= 1;
@@ -1196,7 +1224,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 					return true;
 				}
 
-				if (constants::is_primitive(clean_type))
+				if (constants::is_primitive(base_id))
 				{
 					analysis::inject_type_properties(items, NodeKind.VAR_DECL, type_name, ctx.missing_second_colon);
 					return true;

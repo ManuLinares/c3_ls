@@ -34,6 +34,7 @@ struct Context
 	bool missing_second_colon;
 	bool is_designated_initializer;
 	bool designated_has_dot;
+	sz switch_open_brace;
 }
 
 fn void resolve_item(LspProject* project, CompletionItem* item)
@@ -516,6 +517,193 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 	return false;
 }
 
+fn void collect_already_handled_cases(String text, sz open_brace_idx, sz cursor_offset, sz prefix_len, HashSet{String}* out_set) @local
+{
+	int brace_depth = 0;
+	int paren_depth = 0;
+	int bracket_depth = 0;
+	bool in_str = false;
+	bool in_char = false;
+	bool in_raw = false;
+
+	sz cursor_start = cursor_offset > prefix_len ? cursor_offset - prefix_len : cursor_offset;
+
+	for (sz i = open_brace_idx + 1; i < text.len; i++)
+	{
+		char c = text[i];
+		if (c == '`') { in_raw = !in_raw; continue; }
+		if (in_raw) continue;
+		if (c == '"' && (i == 0 || text[i - 1] != '\\')) { in_str = !in_str; continue; }
+		if (in_str) continue;
+		if (c == '\'' && (i == 0 || text[i - 1] != '\\')) { in_char = !in_char; continue; }
+		if (in_char) continue;
+
+		switch (c)
+		{
+			case '{': brace_depth++;
+			case '}':
+				if (brace_depth > 0)
+				{
+					brace_depth--;
+				}
+				else
+				{
+					return;
+				}
+			case '(': paren_depth++;
+			case ')': if (paren_depth > 0) paren_depth--;
+			case '[': bracket_depth++;
+			case ']': if (bracket_depth > 0) bracket_depth--;
+			default:
+				if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0)
+				{
+					bool is_case = false;
+					sz kw_len = 0;
+					if (i + 4 <= text.len && text[i : 4] == "case")
+					{
+						bool left = (i == 0 || (!text[i - 1].is_alnum() && text[i - 1] != '_' && text[i - 1] != '$'));
+						bool right = (i + 4 == text.len || text[i + 4].is_space() || text[i + 4] == ':');
+						if (left && right)
+						{
+							is_case = true;
+							kw_len = 4;
+						}
+					}
+					else if (i + 5 <= text.len && text[i : 5] == "$case")
+					{
+						bool left = (i == 0 || (!text[i - 1].is_alnum() && text[i - 1] != '_'));
+						bool right = (i + 5 == text.len || text[i + 5].is_space() || text[i + 5] == ':');
+						if (left && right)
+						{
+							is_case = true;
+							kw_len = 5;
+						}
+					}
+
+					if (is_case)
+					{
+						sz case_kw_pos = i;
+						sz p = i + kw_len;
+						while (p < text.len && text[p].is_space() && text[p] != '\n') p++;
+
+						sz val_start = p;
+						while (p < text.len && text[p] != ':' && text[p] != '\n' && text[p] != ';' && text[p] != '{') p++;
+						sz val_end = p;
+
+						if (cursor_start >= case_kw_pos && cursor_offset <= (val_end + 1))
+						{
+							i = val_end;
+							continue;
+						}
+
+						String val_expr = text[val_start : val_end - val_start].trim();
+						if (val_expr.len > 0)
+						{
+							if (try dot_idx = val_expr.rindex_of_char('.'))
+							{
+								val_expr = val_expr[dot_idx + 1..].trim();
+							}
+							else if (try sc_idx = val_expr.rindex_of("::"))
+							{
+								val_expr = val_expr[sc_idx + 2..].trim();
+							}
+
+							sz ident_end = 0;
+							while (ident_end < val_expr.len && (val_expr[ident_end].is_alnum() || val_expr[ident_end] == '_')) ident_end++;
+							String ident = val_expr[:ident_end];
+							if (ident.len > 0)
+							{
+								out_set.add(ident);
+							}
+						}
+
+						i = val_end;
+					}
+				}
+				break;
+		}
+	}
+}
+
+fn String find_enclosing_switch_type(Context* ctx, SourceFile* sf, Location loc, sz offset, sz* out_open_brace) @local
+{
+	if (!sf || offset == 0 || offset > sf.content.len) return "";
+
+	sz idx = offset;
+	while (idx > 0)
+	{
+		sz open_brace = find_enclosing_open_brace(sf.content, idx);
+		if (open_brace == (sz)-1 || open_brace == 0) break;
+
+		sz bp = open_brace;
+		while (bp > 0 && sf.content[bp - 1].is_space()) bp--;
+		if (bp > 0 && sf.content[bp - 1] == ')')
+		{
+			int pdepth = 1;
+			sz p = bp - 1;
+			while (p > 0 && pdepth > 0)
+			{
+				p--;
+				if (sf.content[p] == ')')
+				{
+					pdepth++;
+				}
+				else if (sf.content[p] == '(')
+				{
+					pdepth--;
+				}
+			}
+			if (pdepth == 0)
+			{
+				sz cond_start = p + 1;
+				sz cond_end = bp - 1;
+				String cond_str = sf.content[cond_start : cond_end - cond_start].trim();
+
+				sz kw_end = p;
+				while (kw_end > 0 && sf.content[kw_end - 1].is_space()) kw_end--;
+				sz kw_start = kw_end;
+				while (kw_start > 0 && (sf.content[kw_start - 1].is_alnum() || sf.content[kw_start - 1] == '$' || sf.content[kw_start - 1] == '_')) kw_start--;
+				String kw = sf.content[kw_start : kw_end - kw_start];
+
+				sz label_scan = kw_start;
+				while (label_scan > 0 && (sf.content[label_scan - 1].is_space() || sf.content[label_scan - 1] == ':')) label_scan--;
+				sz kw2_end = label_scan;
+				while (label_scan > 0 && (sf.content[label_scan - 1].is_alnum() || sf.content[label_scan - 1] == '$' || sf.content[label_scan - 1] == '_')) label_scan--;
+				String kw2 = sf.content[label_scan : kw2_end - label_scan];
+
+				if (kw == "switch" || kw == "$switch" || kw2 == "switch" || kw2 == "$switch")
+				{
+					if (cond_str.len > 0)
+					{
+						if (try comma_idx = cond_str.rindex_of_char(','))
+						{
+							cond_str = cond_str[comma_idx + 1..].trim();
+						}
+						String resolved = "";
+						if (ctx.ws && ctx.ws.ctx)
+						{
+							resolved = query::resolve_type_of_chain(ctx.ws.ctx, sf, cond_str, loc);
+						}
+						if (resolved.len == 0)
+						{
+							query::find_local_decl_in_file(sf, cond_str, &resolved, ctx.ws ? ctx.ws.ctx : null, loc);
+						}
+						if (resolved.len > 0)
+						{
+							if (out_open_brace) *out_open_brace = open_brace;
+							return resolved;
+						}
+					}
+					return "";
+				}
+			}
+		}
+		idx = open_brace;
+	}
+
+	return "";
+}
+
 fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Location loc = { -1, -1 })
 {
 	if (!ctx || !ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return EXECUTION;
@@ -538,6 +726,55 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 	if (line_prefix == "import" || line_prefix.starts_with("import ") || line_prefix.starts_with("import\t"))
 	{
 		return IMPORT;
+	}
+
+	String text_before_case = line_prefix[:line_prefix.len - ctx.prefix.len].trim();
+	if (text_before_case.starts_with("case") || text_before_case.starts_with("$case"))
+	{
+		String rem = text_before_case.strip_prefix("$case").strip_prefix("case").trim();
+		if (rem.len == 0 || rem == ":" || rem.starts_with(".."))
+		{
+			sz switch_open_brace = -1;
+			String switch_type = find_enclosing_switch_type(ctx, ctx.sf, loc, ctx.offset, &switch_open_brace);
+			if (switch_type.len > 0)
+			{
+				if (out_expected_type) *out_expected_type = switch_type;
+				ctx.switch_open_brace = switch_open_brace;
+				return TYPE_ASSIGNMENT;
+			}
+		}
+		// Completed case label with colon (e.g. "case GREEN:") suppresses completion
+		if (rem.ends_with(":") && !rem.ends_with("::")) return NONE;
+	}
+
+	if (text_before_case == "default:" || text_before_case == "$default:") return NONE;
+
+	String text_before_cmp = line_prefix[:line_prefix.len - ctx.prefix.len].trim_right();
+	if (text_before_cmp.ends_with("==") || text_before_cmp.ends_with("!="))
+	{
+		String lhs_part = text_before_cmp[:text_before_cmp.len - 2].trim_right();
+		sz expr_start = scan_base_expression_start(lhs_part, lhs_part.len);
+		if (lhs_part.len > expr_start)
+		{
+			String lhs_expr = lhs_part[expr_start..].trim();
+			if (lhs_expr.len > 0)
+			{
+				String resolved_type = "";
+				if (ctx.ws && ctx.ws.ctx)
+				{
+					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, lhs_expr, loc);
+				}
+				if (resolved_type.len == 0)
+				{
+					query::find_local_decl_in_file(ctx.sf, lhs_expr, &resolved_type, ctx.ws ? ctx.ws.ctx : null, loc);
+				}
+				if (resolved_type.len > 0)
+				{
+					if (out_expected_type) *out_expected_type = resolved_type;
+					return TYPE_ASSIGNMENT;
+				}
+			}
+		}
 	}
 
 	if (try eq_idx = line_prefix.rindex_of_char('='))
@@ -646,7 +883,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 	return EXECUTION;
 }
 
-fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * items, String type_name)
+fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * items, String type_name, HashSet{String}* excluded_names = null)
 {
 	if (!ctx.ws || type_name.len == 0) return;
 
@@ -668,6 +905,7 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem} * i
 			if (!variant || variant.kind != VAR_DECL) continue;
 			VarDecl* vd = variant.as(VarDecl);
 			String vname = vd.name ? vd.name.text : "";
+			if (excluded_names && excluded_names.contains(vname)) continue;
 			if (vname.len > 0 && fuzzy_match(vname, ctx.prefix))
 			{
 				items.push(
@@ -724,6 +962,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		.missing_second_colon = false,
 		.is_designated_initializer = false,
 		.designated_has_dot = false,
+		.switch_open_brace = -1,
 	};
 
 	ctx.prefix = analysis::extract_prefix(sf.content, ctx.offset);
@@ -736,7 +975,11 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	detect_access_context(&ctx, sf);
 	log::debug("completion: prefix=%s scope=%s access=%s", ctx.prefix, scope, ctx.access);
 
-	if (ctx.scope == ATTRIBUTE)
+	if (ctx.scope == NONE)
+	{
+		return items.array_view();
+	}
+	else if (ctx.scope == ATTRIBUTE)
 	{
 		provide_builtin_attributes_for_target(&ctx, &items, ctx.attr_target);
 		if (ctx.attr_target != IMPORT && ctx.attr_target != CALL && ctx.attr_target != SWITCH)
@@ -771,7 +1014,14 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 
 		if (is_enum_expected)
 		{
-			provide_expected_type_completions(&ctx, &items, expected_type);
+			bool in_switch = ctx.switch_open_brace != (sz)-1;
+			HashSet{String} seen_cases;
+			seen_cases.tinit();
+			if (in_switch && ctx.sf)
+			{
+				collect_already_handled_cases(ctx.sf.content, ctx.switch_open_brace, ctx.offset, ctx.prefix.len, &seen_cases);
+			}
+			provide_expected_type_completions(&ctx, &items, expected_type, in_switch ? &seen_cases : null);
 			provide_locals(&ctx, &items);
 			provide_global(&ctx, &items);
 		}
