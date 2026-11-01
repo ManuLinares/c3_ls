@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 jobs:
-  test:
-    name: Test
+  build:
+    name: Build & Test (All Targets)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -28,40 +28,13 @@ jobs:
         with:
           version: nightly
 
-      - name: Run Test Suite
+      - name: Run Linux Test Suite
         run: c3c test
 
-  build:
-    name: Build (All Targets)
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: ManuLinares/setup-c3@main
-        with:
-          version: nightly
-
-      # 1. Linux x86_64 (musl static & stripped)
-      - name: Install musl toolchain
-        run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
-
-      - name: Build Linux x86_64 (Static musl)
+      - name: Install Toolchains & Wine
         run: |
-          MUSL_PATH=$(find /usr/lib -maxdepth 3 -name 'crt1.o' -path '*musl*' | head -1 | xargs dirname)
-          c3c build -O3 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" -z "-static" -z "-s"
-          mkdir -p dist
-          tar -czvf dist/c3_ls-linux-x86_64.tar.gz -C build c3_ls
-
-      # 2. Linux aarch64 (ARM64 Cross-compile)
-      - name: Install aarch64 toolchain
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Build Linux aarch64
-        run: |
-          CRTBEGIN_DIR=$(dirname $(aarch64-linux-gnu-gcc -print-file-name=crtbegin.o))
-          c3c build --target linux-aarch64 -O3 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR" -z "-s"
-          tar -czvf dist/c3_ls-linux-aarch64.tar.gz -C build-linux-arm64 c3_ls
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev gcc-aarch64-linux-gnu wine
 
       - name: Get current month
         id: get-date
@@ -82,6 +55,26 @@ jobs:
         run: |
           c3c fetch-sdk windows --accept-license
           c3c fetch-sdk macos --accept-license
+
+      - name: Run Windows Test Suite (Wine)
+        run: |
+          c3c test --target windows-x64 --suppress-run
+          wine ./build/testrun.exe
+
+      # 1. Linux x86_64 (musl static & stripped)
+      - name: Build Linux x86_64 (Static musl)
+        run: |
+          MUSL_PATH=$(find /usr/lib -maxdepth 3 -name 'crt1.o' -path '*musl*' | head -1 | xargs dirname)
+          c3c build -O3 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" -z "-static" -z "-s"
+          mkdir -p dist
+          tar -czvf dist/c3_ls-linux-x86_64.tar.gz -C build c3_ls
+
+      # 2. Linux aarch64 (ARM64 Cross-compile)
+      - name: Build Linux aarch64
+        run: |
+          CRTBEGIN_DIR=$(dirname $(aarch64-linux-gnu-gcc -print-file-name=crtbegin.o))
+          c3c build --target linux-aarch64 -O3 --build-dir build-linux-arm64 --output-dir build-linux-arm64 --linux-crt /usr/aarch64-linux-gnu/lib --linux-crtbegin "$CRTBEGIN_DIR" -z "-s"
+          tar -czvf dist/c3_ls-linux-aarch64.tar.gz -C build-linux-arm64 c3_ls
 
       # 3. Windows x86_64 (Cross-compile with static CRT)
       - name: Build Windows x86_64
