@@ -218,4 +218,45 @@ fn void test_load_c3i_files_in_source_group()
 	test::eq(proj.workspace.get_diagnostics((String)main_path).len, 0);
 }
 
+fn void test_target_sources_lazy_loaded_on_file_open()
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
 
+	Path test_dir = tmp_dir.tappend("c3_ls_target_lazy_load_test")!!;
+	Path src_common = test_dir.tappend("src")!!.tappend("common")!!;
+	Path src_server = test_dir.tappend("src")!!.tappend("server")!!;
+	(void)path::mkdir(src_common, recursive: true);
+	(void)path::mkdir(src_server, recursive: true);
+	defer (void)path::rmtree(test_dir);
+
+	Path common_file = src_common.tappend("simulation.c3")!!;
+	file::save(common_file, "module common;\nfn void tick() {}\n")!!;
+
+	Path main_file = src_server.tappend("main.c3")!!;
+	String main_src = "module server_app;\nimport common;\nfn void main() { common::tick(); }\n";
+	file::save(main_file, main_src)!!;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.config.root_path = ((String)test_dir).copy(mem);
+	proj.config.targets.init(mem);
+
+	TargetConfig server_target = {};
+	String[] s_sources = alloc::alloc_array(mem, String, 2);
+	s_sources[0] = "src/common/**".copy(mem);
+	s_sources[1] = "src/server/**".copy(mem);
+	server_target.sources = maybe::value(s_sources);
+	proj.config.targets["server"] = server_target;
+
+	proj.setup_source_groups();
+
+	Uri main_uri = uri::from_file_path(tmem, (String)main_file);
+	proj.open_file({ .uri = (DocumentUri)main_uri.to_raw_string(tmem), .text = main_src }, from_disk: false);
+	proj.update();
+
+	assert(proj.workspace.ctx.modules.has_key("common"));
+	test::eq(proj.workspace.get_diagnostics((String)main_file).len, 0);
+}

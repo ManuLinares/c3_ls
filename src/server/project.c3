@@ -667,7 +667,11 @@ fn void LspProject.setup_source_groups(&self)
 
 fn bool LspProject.file_matches_patterns(&self, String file_path, String[] patterns)
 {
-	if (self.config.root_path.len == 0) return false;
+	if (self.config.root_path.len == 0 || file_path.len == 0) return false;
+
+	Path? norm_file = path::tnew(file_path);
+	if (catch norm_file) return false;
+
 	Path? base_path = path::tnew(self.config.root_path);
 	if (catch base_path) return false;
 
@@ -686,7 +690,16 @@ fn bool LspProject.file_matches_patterns(&self, String file_path, String[] patte
 		Path? entry_path = base_path.tappend(entry_str);
 		if (catch entry_path) continue;
 
-		if (file_path.starts_with((String)entry_path))
+		$if env::WIN32:
+			String f_str = ((String)norm_file).to_lower_tcopy();
+			String e_str = ((String)entry_path).to_lower_tcopy();
+		$else
+			String f_str = (String)norm_file;
+			String e_str = (String)entry_path;
+		$endif
+
+		String prefix = string::tformat("%s%c", e_str, (char)path::PREFERRED_SEPARATOR);
+		if (f_str == e_str || f_str.starts_with(prefix))
 		{
 			return true;
 		}
