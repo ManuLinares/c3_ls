@@ -148,6 +148,7 @@ enum Keywords : int (String name, String docs)
 	CASE      { "case", "" },
 	CATCH     { "catch", "" },
 	CONSTDEF  { "constdef", "" },
+	CONSTSET  { "constset", "" },
 	CONST     { "const", "" },
 	CONTINUE  { "continue", "" },
 	DEFAULT   { "default", "" },
@@ -196,6 +197,7 @@ fn bool Keywords.is_top_level(self)
 		case ATTRDEF:
 		case BITSTRUCT:
 		case CONSTDEF:
+		case CONSTSET:
 		case STRUCT:
 		case CONST:
 		case ENUM:

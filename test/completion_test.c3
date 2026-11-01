@@ -2488,3 +2488,186 @@ fn void test_fn() {
 	assert(found_open);
 	assert(found_load_temp);
 }
+
+fn void test_module_completion_only_suggests_modules() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module ";
+	proj.workspace.process_file("/virtual/mod_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/mod_comp.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 0, .character = 7 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	foreach (item : items)
+	{
+		test::eq(item.kind, CompletionItemKind.MODULE);
+		assert(item.label != "fn" && item.label != "int" && item.label != "while");
+	}
+}
+
+fn void test_constset_keyword_in_completions() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module app;\nconst";
+	proj.workspace.process_file("/virtual/constset_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/constset_comp.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 1, .character = 5 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_const = false;
+	bool found_constdef = false;
+	bool found_constset = false;
+	foreach (item : items)
+	{
+		if (item.label == "const") found_const = true;
+		if (item.label == "constdef") found_constdef = true;
+		if (item.label == "constset") found_constset = true;
+	}
+
+	assert(found_const);
+	assert(found_constdef);
+	assert(found_constset);
+}
+
+fn void test_type_position_excludes_functions_and_variables() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+struct MyConfig { int id; }
+fn void run_engine() {}
+int global_counter = 0;
+
+fn void main() {
+    int local_var = 10;
+    const 
+}
+`;
+
+	proj.workspace.process_file("/virtual/type_filter.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_filter.c3");
+	defer doc_uri.free();
+
+	// Line 8: `    const ` (char 10)
+	LspPosition pos = { .line = 8, .character = 10 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_my_config = false;
+	bool found_int = false;
+	bool found_run_engine = false;
+	bool found_global_counter = false;
+	bool found_local_var = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "MyConfig") found_my_config = true;
+		if (item.label == "int") found_int = true;
+		if (item.label == "run_engine") found_run_engine = true;
+		if (item.label == "global_counter") found_global_counter = true;
+		if (item.label == "local_var") found_local_var = true;
+	}
+
+	assert(found_my_config);
+	assert(found_int);
+	assert(!found_run_engine);
+	assert(!found_global_counter);
+	assert(!found_local_var);
+}
+
+fn void test_type_declaration_name_suppresses_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module app;\nconstset \nstruct ";
+	proj.workspace.process_file("/virtual/type_name_comp.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_name_comp.c3");
+	defer doc_uri.free();
+
+	// Line 1, col 9: after `constset `
+	LspPosition pos1 = { .line = 1, .character = 9 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	test::eq(items1.len, 0);
+
+	// Line 2, col 7: after `struct `
+	LspPosition pos2 = { .line = 2, .character = 7 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	test::eq(items2.len, 0);
+}
+
+fn void test_constset_backing_type_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void helper_func() {}
+int global_val = 0;
+struct CustomType { int x; }
+
+constset KeyCode : 
+constset Flags : inline 
+`;
+	proj.workspace.process_file("/virtual/constset_type.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/constset_type.c3");
+	defer doc_uri.free();
+
+	// Line 5, col 19: after `constset KeyCode : `
+	LspPosition pos1 = { .line = 5, .character = 19 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+
+	bool found_inline1 = false;
+	bool found_uint1 = false;
+	bool found_custom_type1 = false;
+	bool found_helper_func1 = false;
+	bool found_global_val1 = false;
+
+	foreach (item : items1)
+	{
+		if (item.label == "inline") found_inline1 = true;
+		if (item.label == "uint") found_uint1 = true;
+		if (item.label == "CustomType") found_custom_type1 = true;
+		if (item.label == "helper_func") found_helper_func1 = true;
+		if (item.label == "global_val") found_global_val1 = true;
+	}
+
+	assert(found_inline1);
+	assert(found_uint1);
+	assert(found_custom_type1);
+	assert(!found_helper_func1);
+	assert(!found_global_val1);
+
+	// Line 6, col 24: after `constset Flags : inline `
+	LspPosition pos2 = { .line = 6, .character = 24 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+
+	bool found_uint2 = false;
+	bool found_custom_type2 = false;
+	bool found_helper_func2 = false;
+
+	foreach (item : items2)
+	{
+		if (item.label == "uint") found_uint2 = true;
+		if (item.label == "CustomType") found_custom_type2 = true;
+		if (item.label == "helper_func") found_helper_func2 = true;
+	}
+
+	assert(found_uint2);
+	assert(found_custom_type2);
+	assert(!found_helper_func2);
+}

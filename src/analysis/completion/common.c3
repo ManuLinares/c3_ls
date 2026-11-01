@@ -325,7 +325,7 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem} * items, String
 	);
 }
 
-fn bool is_type_position(Context* ctx) @local
+fn bool is_type_position(Context* ctx)
 {
 	if (ctx.scope == CONTAINER) return true;
 	if (!ctx.sf || ctx.offset == 0 || ctx.offset > ctx.sf.content.len) return false;
@@ -339,8 +339,18 @@ fn bool is_type_position(Context* ctx) @local
 
 	char prev_char = ctx.sf.content[p - 1];
 
-	// Generics e.g. List{...}, param separation e.g. (int a, ...)
-	if (prev_char == '{' || prev_char == ',' || prev_char == '<') return true;
+	// Generics e.g. List{...}
+	if (prev_char == '{')
+	{
+		sz bp = p - 1;
+		while (bp > 0 && (ctx.sf.content[bp - 1] == ' ' || ctx.sf.content[bp - 1] == '\t')) bp--;
+		sz word_end = bp;
+		while (bp > 0 && (ctx.sf.content[bp - 1].is_alnum() || ctx.sf.content[bp - 1] == '_')) bp--;
+		if (word_end > bp && ctx.sf.content[bp] >= 'A' && ctx.sf.content[bp] <= 'Z') return true;
+		return false;
+	}
+
+	if (prev_char == '<') return true;
 
 	if (prev_char == '=')
 	{
@@ -366,24 +376,50 @@ fn bool is_type_position(Context* ctx) @local
 	String prev_word = ctx.sf.content[p : word_end - p].trim();
 
 	// Function return type or short body
-	if (prev_word == "fn" || prev_word == "macro" || prev_word == "=>") return true;
+	if (prev_word == "fn" || prev_word == "macro") return true;
 
 	// Variable / const qualifiers
-	if (prev_word == "const" || prev_word == "static" || prev_word == "tlocal" || prev_word == "extern") return true;
+	if (prev_word == "const" || prev_word == "static" || prev_word == "tlocal" || prev_word == "extern" || prev_word == "inline") return true;
 
-	// Cast or parameter: (int) or fn foo(int x)
-	if (prev_char == '(')
+	// Type header colon (e.g. constset Foo : uint, enum Bar : int)
+	if (prev_char == ':')
 	{
-		sz before_paren = word_end - 1;
-		while (before_paren > 0 && (ctx.sf.content[before_paren - 1] == ' ' || ctx.sf.content[before_paren - 1] == '\t')) before_paren--;
-		sz kw_end = before_paren;
-		while (before_paren > 0 && ctx.sf.content[before_paren - 1].is_alnum()) before_paren--;
-		String kw = ctx.sf.content[before_paren : kw_end - before_paren].trim();
+		sz line_start = p - 1;
+		while (line_start > 0 && ctx.sf.content[line_start - 1] != '\n') line_start--;
+		String line_prefix = ctx.sf.content[line_start : p - 1 - line_start].trim_left();
+		if (line_prefix.starts_with("constset") || line_prefix.starts_with("constdef") ||
+		    line_prefix.starts_with("enum") || line_prefix.starts_with("bitstruct") ||
+		    line_prefix.starts_with("interface"))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	// Cast or parameter: (int) or fn foo(int x, int y)
+	if (prev_char == '(' || prev_char == ',')
+	{
+		sz scan = p - 1;
+		while (scan > 0 && (ctx.sf.content[scan - 1] == ' ' || ctx.sf.content[scan - 1] == '\t')) scan--;
+		sz kw_end = scan;
+		while (scan > 0 && ctx.sf.content[scan - 1].is_alnum()) scan--;
+		String kw = ctx.sf.content[scan : kw_end - scan].trim();
 		if (kw == "if" || kw == "while" || kw == "for" || kw == "foreach" || kw == "switch" || kw == "catch")
 		{
 			return false;
 		}
-		return true;
+		// If inside a function parameter list
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+		foreach (stmt : ctx.sf.ast.statements)
+		{
+			if (stmt && stmt.range.contains(loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
+			{
+				Node* body = (stmt.kind == FN_DECL) ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
+				if (!body || !body.range.contains(loc)) return true;
+			}
+		}
+		if (prev_char == '(') return true; // Cast
+		return false;
 	}
 
 	return false;

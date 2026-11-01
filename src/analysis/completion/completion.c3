@@ -723,12 +723,21 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 
 	String line_prefix = ctx.sf.content[line_start : ctx.offset - line_start].trim_left();
 
-	if (line_prefix == "import" || line_prefix.starts_with("import ") || line_prefix.starts_with("import\t"))
+	if (line_prefix == "import" || line_prefix.starts_with("import ") || line_prefix.starts_with("import\t") ||
+	    line_prefix == "module" || line_prefix.starts_with("module ") || line_prefix.starts_with("module\t"))
 	{
 		return IMPORT;
 	}
 
-	String text_before_case = line_prefix[:line_prefix.len - ctx.prefix.len].trim();
+	String text_before = line_prefix[:line_prefix.len - ctx.prefix.len].trim();
+	if (text_before == "constset" || text_before == "constdef" || text_before == "enum" ||
+	    text_before == "struct" || text_before == "union" || text_before == "bitstruct" ||
+	    text_before == "interface" || text_before == "typedef" || text_before == "alias")
+	{
+		return NONE;
+	}
+
+	String text_before_case = text_before;
 	if (text_before_case.starts_with("case") || text_before_case.starts_with("$case"))
 	{
 		String rem = text_before_case.strip_prefix("$case").strip_prefix("case").trim();
@@ -1027,15 +1036,43 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 		}
 		else
 		{
-			provide_named_args(&ctx, &items);
-			if (expected_type.len > 0)
+			bool in_type_pos = is_type_position(&ctx);
+			if (in_type_pos)
 			{
-				provide_expected_type_completions(&ctx, &items, expected_type);
+				provide_builtin_types(&ctx, &items);
+				provide_global_types_only(&ctx, &items);
+
+				sz p = ctx.offset - ctx.prefix.len;
+				while (p > 0 && (ctx.sf.content[p - 1] == ' ' || ctx.sf.content[p - 1] == '\t')) p--;
+				if (p > 0 && ctx.sf.content[p - 1] == ':')
+				{
+					if (fuzzy_match("inline", ctx.prefix))
+					{
+						items.push(
+						{
+							.label = "inline",
+							.kind = KEYWORD,
+							.detail = "Keyword",
+							.insertText = "inline",
+							.filterText = "inline",
+							.sortText = "0000_inline"
+						}
+						);
+					}
+				}
 			}
-			provide_locals(&ctx, &items);
-			provide_global(&ctx, &items);
-			provide_builtin_types(&ctx, &items);
-			provide_keywords(&ctx, &items);
+			else
+			{
+				provide_named_args(&ctx, &items);
+				if (expected_type.len > 0)
+				{
+					provide_expected_type_completions(&ctx, &items, expected_type);
+				}
+				provide_locals(&ctx, &items);
+				provide_global(&ctx, &items);
+				provide_builtin_types(&ctx, &items);
+				provide_keywords(&ctx, &items);
+			}
 		}
 	}
 

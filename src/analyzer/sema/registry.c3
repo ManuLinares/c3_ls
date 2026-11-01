@@ -81,6 +81,7 @@ fn void register_and_dispatch(AnalyzerContext* context, Module* mod, Node* node)
 		case ENUM_DECL:
 		case TYPEDEF_DECL:
 		case ALIAS_DECL:
+		case INTERFACE_DECL:
 			register_type(context, mod, node);
 		case FN_DECL:
 			register_function(context, mod, node);
@@ -116,6 +117,11 @@ fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 		case ALIAS_DECL:
 			{
 				AliasDecl* decl = node.as(AliasDecl);
+				name = decl.name;
+			}
+		case INTERFACE_DECL:
+			{
+				InterfaceDecl* decl = node.as(InterfaceDecl);
 				name = decl.name;
 			}
 		case VAR_DECL:

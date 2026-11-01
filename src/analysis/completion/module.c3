@@ -29,31 +29,37 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem} * items, SourceF
 		}
 
 		String line_prefix = sf.content[line_start : offset - line_start].trim_left();
-		if (line_prefix.starts_with("import"))
+		bool is_import = line_prefix.starts_with("import");
+		bool is_module = line_prefix.starts_with("module");
+
+		if (is_import || is_module)
 		{
-			String import_text = line_prefix.strip_prefix("import").trim_left();
-			if (try comma_idx = import_text.rindex_of_char(','))
+			String mod_text = is_module ? line_prefix.strip_prefix("module").trim_left() : line_prefix.strip_prefix("import").trim_left();
+			if (is_import)
 			{
-				import_text = import_text[comma_idx + 1..].trim_left();
+				if (try comma_idx = mod_text.rindex_of_char(','))
+				{
+					mod_text = mod_text[comma_idx + 1..].trim_left();
+				}
 			}
 
-			if (import_text.ends_with("::"))
+			if (mod_text.ends_with("::"))
 			{
-				base_path = import_text[:^ 2].trim();
+				base_path = mod_text[:^ 2].trim();
 			}
-			else if (import_text.ends_with(":"))
+			else if (mod_text.ends_with(":"))
 			{
-				base_path = import_text[:^ 1].trim();
+				base_path = mod_text[:^ 1].trim();
 				missing_second_colon = true;
 			}
-			else if (try scope_idx = import_text.rindex_of("::"))
+			else if (try scope_idx = mod_text.rindex_of("::"))
 			{
-				base_path = import_text[:scope_idx].trim();
-				filter_prefix = import_text[scope_idx + 2..].trim();
+				base_path = mod_text[:scope_idx].trim();
+				filter_prefix = mod_text[scope_idx + 2..].trim();
 			}
 			else
 			{
-				filter_prefix = import_text.trim();
+				filter_prefix = mod_text.trim();
 			}
 		}
 	}

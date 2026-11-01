@@ -181,3 +181,70 @@ fn void provide_global(Context* ctx, List{CompletionItem} * items)
 		}
 	};
 }
+
+fn void provide_global_types_only(Context* ctx, List{CompletionItem} * items)
+{
+	if (ctx.access != NONE || !ctx.ws || !ctx.ws.ctx) return;
+
+	HashSet{String} seen_symbols;
+	seen_symbols.tinit();
+
+	foreach (item : *items)
+	{
+		seen_symbols.add(item.label);
+	}
+
+	if (ctx.ws.ctx.registry)
+	{
+		Registry* reg = ctx.ws.ctx.registry;
+		reg.types.@each(; qname, ty_info)
+		{
+			if (ty_info && ty_info.node)
+			{
+				String tname = cursor::spelling(ty_info.node, tmem);
+				if (tname.len > 0 && fuzzy_match(tname, ctx.prefix))
+				{
+					if (seen_symbols.add(tname))
+					{
+						add_symbol_completion(ctx, items, tname, ty_info.node, ty_info.mod, ctx.prefix);
+					}
+				}
+			}
+		};
+	}
+
+	ctx.ws.ctx.files.@each(; file_path, sf)
+	{
+		if (sf)
+		{
+			String file_mod = query::get_source_file_module_name(sf);
+			String mod_ident = file_mod.len > 0 ? file_mod : "global";
+			foreach (stmt : sf.ast.statements)
+			{
+				if (stmt)
+				{
+					switch (stmt.kind)
+					{
+						case STRUCT_DECL:
+						case ENUM_DECL:
+						case TYPEDEF_DECL:
+						case ALIAS_DECL:
+						case INTERFACE_DECL:
+							{
+								String sname = cursor::spelling(stmt, tmem);
+								if (sname.len > 0 && fuzzy_match(sname, ctx.prefix))
+								{
+									if (seen_symbols.add(sname))
+									{
+										add_symbol_completion(ctx, items, sname, stmt, mod_ident, ctx.prefix);
+									}
+								}
+							}
+						default:
+							break;
+					}
+				}
+			}
+		}
+	};
+}
