@@ -2,6 +2,7 @@ module analyzer::sema::registry;
 
 import analyzer::core;
 import analyzer::sema::lookup;
+import analyzer::sema::query;
 import std::collections;
 import std::io;
 
@@ -58,13 +59,9 @@ fn void register(AnalyzerContext* context, SourceFile* sf) => @pool()
 
 		if (current_mod == null)
 		{
-			Path? path = path::tnew(sf.path);
-			if (catch err = path)
-			{
-				diagnostics::log_error("Failed to infer module name: %s", err);
-				return;
-			}
-			current_mod = mod::create(context, path.basename());
+			String mod_name = query::file_stem_from_path(sf.path);
+			if (mod_name.len == 0) mod_name = "default";
+			current_mod = mod::create(context, mod_name);
 		}
 
 		register_and_dispatch(context, current_mod, statement);

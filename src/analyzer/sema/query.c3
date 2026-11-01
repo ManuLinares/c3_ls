@@ -197,11 +197,8 @@ fn String get_source_file_module_name(SourceFile* sf)
 	}
 	if (sf.path.len > 0)
 	{
-		Path? p = path::tnew(sf.path);
-		if (try p_val = p)
-		{
-			return p_val.basename();
-		}
+		String stem = file_stem_from_path(sf.path);
+		if (stem.len > 0) return stem;
 	}
 	return "";
 }
@@ -2212,4 +2209,18 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 	}
 
 	return find_callable_in_scope(context, sf, callee_name, caller_mod);
+}
+
+fn String file_stem_from_path(String p)
+{
+	sz s1 = p.rindex_of_char('/') ?? 0;
+	sz s2 = p.rindex_of_char('\\') ?? 0;
+	sz last_slash = s1 > s2 ? s1 : s2;
+	bool has_slash = (last_slash > 0) || (p.len > 0 && (p[0] == '/' || p[0] == '\\'));
+	String filename = has_slash ? p[last_slash + 1..] : p;
+	if (try dot = filename.rindex_of_char('.'))
+	{
+		return filename[:dot];
+	}
+	return filename;
 }

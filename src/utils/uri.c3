@@ -23,11 +23,11 @@ fn void Uri.free(&self)
 
 fn sz? Uri.to_format(&self, Formatter* formatter) @dynamic
 {
-	$if env::WIN32:
-		return formatter.printf("%s:///%s", self.scheme, self.path);
-	$else
+	if (self.path.starts_with("/"))
+	{
 		return formatter.printf("%s://%s", self.scheme, self.path);
-	$endif
+	}
+	return formatter.printf("%s:///%s", self.scheme, self.path);
 }
 
 fn bool Uri.equal(self, Uri other) @operator(==)
@@ -54,9 +54,11 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 	String remaining_path = raw_uri[scheme_bound + 3..];
 
 	$if env::WIN32:
-		remaining_path = remaining_path.trim_left("/");
-		// Adjust for Windows authority/drive formatting quirks ('/C%3A/foo' -> 'C%3A/foo')
-		if (remaining_path.starts_with("/") && remaining_path.len >= 4 && remaining_path[2] == '%' && remaining_path[3] == '3')
+		if (remaining_path.starts_with("/") && remaining_path.len >= 3 && remaining_path[2] == ':')
+		{
+			remaining_path = remaining_path[1..];
+		}
+		else if (remaining_path.starts_with("/") && remaining_path.len >= 5 && (remaining_path[2..4] == "%3A" || remaining_path[2..4] == "%3a"))
 		{
 			remaining_path = remaining_path[1..];
 		}
@@ -135,9 +137,9 @@ fn Uri from_file_path(Allocator allocator, String native_path)
 
 fn String Uri.to_raw_string(&self, Allocator output_allocator)
 {
-	$if env::WIN32:
-		return string::format(output_allocator, "%s:///%s", self.scheme, self.path);
-	$else
+	if (self.path.starts_with("/"))
+	{
 		return string::format(output_allocator, "%s://%s", self.scheme, self.path);
-	$endif
+	}
+	return string::format(output_allocator, "%s:///%s", self.scheme, self.path);
 }

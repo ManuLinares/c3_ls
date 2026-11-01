@@ -40,38 +40,40 @@ fn void ProjectManager.free(&self)
 *>
 fn bool is_project_root_dir(Path dir)
 {
-	Path proj_json = dir.tappend(config::PROJECT_CONFIG_NAME) ?? (Path)"";
-	Path manifest_json = dir.tappend(config::MANIFEST_CONFIG_NAME) ?? (Path)"";
-	return path::exists(proj_json) || path::exists(manifest_json);
+	String dir_clean = ((String)dir).trim_right("/\\");
+	String p1 = string::tformat("%s/%s", dir_clean, config::PROJECT_CONFIG_NAME);
+	String p2 = string::tformat("%s/%s", dir_clean, config::MANIFEST_CONFIG_NAME);
+	return file::exists(p1) || file::exists(p2);
 }
 
 <*
  Walks up ancestor directories from file_path to find the nearest directory containing
  project.json or manifest.json.
-
 *>
 fn String find_enclosing_project_root(String file_path)
 {
 	if (file_path.len == 0) return "";
 
-	String dir = file_path;
-	if (!file::is_dir(dir))
+	Path? p = path::tnew(file_path);
+	if (catch p) return "";
+	Path dir = p;
+
+	if (!path::is_dir(dir))
 	{
-		dir = dir.path_tdirname() ?? "";
+		Path? parent = dir.parent();
+		if (catch parent) return "";
+		dir = parent;
 	}
 
 	while (dir.len > 0)
 	{
-		Path? base_p = path::tnew(dir);
-		if (catch base_p) break;
-
-		if (is_project_root_dir(base_p))
+		if (is_project_root_dir(dir))
 		{
-			return dir.copy(tmem);
+			return ((String)dir).copy(tmem);
 		}
 
-		String parent = dir.path_tdirname() ?? "";
-		if (parent.len == 0 || parent == dir) break;
+		Path? parent = dir.parent();
+		if (catch parent) break;
 		dir = parent;
 	}
 

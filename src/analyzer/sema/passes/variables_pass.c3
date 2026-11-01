@@ -26,10 +26,9 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 	};
 
 	String current_mod_name = "";
-	Path? p = path::tnew(sf.path);
-	if (try p_val = p)
+	if (sf.path.len > 0)
 	{
-		current_mod_name = p_val.basename();
+		current_mod_name = query::file_stem_from_path(sf.path);
 	}
 	if (current_mod_name.len == 0) current_mod_name = "default";
 

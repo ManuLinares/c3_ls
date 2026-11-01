@@ -3,6 +3,7 @@ module lsp::workspace_test @test;
 import lsp;
 import lsp::core;
 import analyzer::core;
+import analyzer::sema::query;
 import std::io;
 import std::collections::list;
 import std::collections::maybe;
@@ -213,7 +214,8 @@ fn void test_load_c3i_files_in_source_group()
 	proj.update();
 
 	// Verify miniaudio.c3i was automatically discovered and parsed
-	assert(proj.files.has_key((String)c3i_path));
+	Uri c3i_uri = uri::from_file_path(tmem, (String)c3i_path);
+	assert(proj.files.has_key(c3i_uri.path));
 	assert(proj.workspace.ctx.modules.has_key("miniaudio"));
 	test::eq(proj.workspace.get_diagnostics((String)main_path).len, 0);
 }
@@ -259,4 +261,13 @@ fn void test_target_sources_lazy_loaded_on_file_open()
 
 	assert(proj.workspace.ctx.modules.has_key("common"));
 	test::eq(proj.workspace.get_diagnostics((String)main_file).len, 0);
+}
+
+fn void test_mixed_slash_stem_and_parent_dir()
+{
+	test::eq(query::file_stem_from_path("C:/Users/mb\\project/main.c3"), "main");
+	test::eq(query::file_stem_from_path("C:\\Users\\mb/test.c3"), "test");
+	test::eq(query::file_stem_from_path("/root/single.c3"), "single");
+	test::eq(query::file_stem_from_path("standalone.c3"), "standalone");
+	test::eq(query::file_stem_from_path("\\root_file.c3"), "root_file");
 }
