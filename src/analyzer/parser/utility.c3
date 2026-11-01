@@ -77,7 +77,7 @@ fn bool can_start_expression(TokenKind kind)
 {
 	diagnostics::log_debug("can_start_expr: %s", kind.description);
 
-	if (is_keyword_ident(kind) || is_base_type(kind))
+	if (is_keyword_ident(kind) || is_base_type(kind) || is_type_primitive(kind))
 	{
 		return true;
 	}
@@ -92,7 +92,17 @@ fn bool can_start_expression(TokenKind kind)
 		case CONST_IDENT:
 		case HASH_IDENT:
 		case HASH_TYPE_IDENT:
+		case HASH_CONST_IDENT:
 		case BUILTIN:
+		case CT_EVAL:
+		case CT_DEFINED:
+		case CT_FEATURE:
+		case CT_STRINGIFY:
+		case CT_VAARG:
+		case CT_REFLECT:
+		case LENGTHOF:
+		case FN:
+		case ELLIPSIS:
 		case FLOAT_DECIMAL_LITERAL:
 		case FLOAT_HEX_LITERAL:
 		case INT_DECIMAL_LITERAL:
@@ -101,12 +111,20 @@ fn bool can_start_expression(TokenKind kind)
 		case INT_BIN_LITERAL:
 		case STRING_LITERAL:
 		case CHAR_LITERAL:
+		case BYTES_LITERAL:
+		case TRUE:
+		case FALSE:
+		case NULL:
 		case LPAREN:
 		case PLUS:
+		case PLUSPLUS:
 		case MINUS:
+		case MINUSMINUS:
 		case BANG:
+		case BANGBANG:
 		case BIT_NOT:
 		case AMP:
+		case AND:
 		case ASTERISK:
 		case LBRACE:
 			return true;

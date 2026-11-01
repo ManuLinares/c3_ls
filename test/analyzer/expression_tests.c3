@@ -679,3 +679,43 @@ fn void ct_feature_multiple_args()
 	bool success = context::process(context, source_code, "test");
 	test::eq(success, true);
 }
+
+fn void test_cast_typeof_expression()
+{
+	String source_code = `
+		module hello;
+		fn void foo()
+		{
+			sz a = (sz)$Typeof(int);
+			sz b = (sz)$Typeof(a);
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_cast_typeof.c3");
+	test::eq(success, true);
+}
+
+fn void test_cast_expression_starters()
+{
+	String source_code = `
+		module hello;
+
+		macro void @test_casts(#x, #const_arg)
+		{
+			bool a = (bool)$defined(#x);
+			sz b = (sz)lengthof(#x);
+			void* c = (void*)null;
+			int d = (int)true;
+			int e = 0;
+			int f = (int)++e;
+			int g = (int)--e;
+			void* h = (void*)&&e;
+			int i = (int)#const_arg;
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_casts.c3");
+	test::eq(success, true);
+}
