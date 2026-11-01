@@ -1632,8 +1632,6 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 	}
 }
 
-fn String get_type_of_expr(AnalyzerContext* context, SourceFile* sf, Node* expr, Location loc = { -1, -1 }) => type_of(context, sf, expr, loc);
-
 struct AccessSearchContext
 {
 	Range target_range;

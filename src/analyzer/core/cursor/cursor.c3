@@ -1,15 +1,6 @@
 module analyzer::cursor;
-import analyzer::core;
-import analyzer::sema;
+import analyzer, std::collections::list, std::io;
 
-import std::collections::list;
-import std::io;
-
-faultdef
-INVALID_NODE,
-UNEXPECTED_KIND,
-NOT_FOUND
-;
 <*
  Get the spelling/text for the current node. Always returns a valid String view.
 *>
@@ -516,28 +507,6 @@ fn Node* find_member_in_type(Node* node, String name)
 				}
 				return null;
 			}
-		default:
-			return null;
-	}
-}
-
-fn Node* get_type(Node* node)
-{
-	if (!node) return null;
-	switch (node.kind)
-	{
-		case STRUCT_DECL:
-			StructDecl* decl = node.as(StructDecl);
-			return decl.type;
-		case FN_DECL:
-			FnDecl* decl = node.as(FnDecl);
-			return decl.associated_type == null ? decl.ret_type : decl.associated_type;
-		case ENUM_DECL:
-			EnumDecl* decl = node.as(EnumDecl);
-			return decl.backing_type;
-		case VAR_DECL:
-			VarDecl* decl = node.as(VarDecl);
-			return decl.type;
 		default:
 			return null;
 	}

@@ -1,7 +1,144 @@
 module analyzer::core;
 import analyzer::lexer;
 
-faultdef NOT_FOUND;
+faultdef UNKNOWN_OP_OVERLOAD;
+
+bitstruct TypeFlags : uint
+{
+	bool is_none;
+	bool is_vector;
+	bool is_comptime;
+	bool is_optional;
+}
+
+bitstruct VarDeclFlags : uint
+{
+	bool is_const;
+	bool is_local;
+	bool is_extern;
+	bool is_thread_local;
+	bool is_inline;
+	bool is_static;
+
+	bool is_ref;
+	bool is_self;
+	bool is_self_by_ref;
+	bool is_variadic;
+	bool is_macro_optional_ellipsis;
+}
+
+bitstruct ContractFlags : char
+{
+	bool is_pure;
+}
+
+enum OverloadKind : char
+{
+	UNKNOWN,
+	OV_ELEMENT_AT,
+	OV_ELEMENT_REF,
+	OV_ELEMENT_SET,
+	OV_LEN,
+	OV_NEGATE,
+	OV_UNARY_MINUS,
+	OV_PLUS,
+	OV_MINUS,
+	OV_MULTIPLY,
+	OV_DIVIDE,
+	OV_REMINDER,
+	OV_AND,
+	OV_OR,
+	OV_XOR,
+	OV_SHL,
+	OV_SHR,
+	OV_EQUAL,
+	OV_LESS_THAN,
+	OV_PLUS_ASSIGN,
+	OV_MINUS_ASSIGN,
+	OV_MULTIPLY_ASSIGN,
+	OV_DIVIDE_ASSIGN,
+	OV_REMINDER_ASSIGN,
+	OV_AND_ASSIGN,
+	OV_OR_ASSIGN,
+	OV_XOR_ASSIGN,
+	OV_SHL_ASSIGN,
+	OV_SHR_ASSIGN,
+}
+
+fn OverloadKind get_overload_kind(TokenKind kind)
+{
+	switch (kind)
+	{
+		case PLUS:           return OV_PLUS;
+		case PLUS_ASSIGN:    return OV_PLUS_ASSIGN;
+		case MINUS:          return OV_MINUS;
+		case MINUS_ASSIGN:   return OV_MINUS_ASSIGN;
+		case ASTERISK:       return OV_MULTIPLY;
+		case MULT_ASSIGN:    return OV_MULTIPLY_ASSIGN;
+		case DIV:            return OV_DIVIDE;
+		case MOD:            return OV_REMINDER;
+		case MOD_ASSIGN:     return OV_REMINDER_ASSIGN;
+		case AMP:            return OV_AND;
+		case BIT_AND_ASSIGN: return OV_AND_ASSIGN;
+		case BIT_OR:         return OV_OR;
+		case BIT_OR_ASSIGN:  return OV_OR_ASSIGN;
+		case BIT_XOR:        return OV_XOR;
+		case BIT_XOR_ASSIGN: return OV_XOR_ASSIGN;
+		case LSHIFT:         return OV_SHL;
+		case LSHIFT_ASSIGN:  return OV_SHL_ASSIGN;
+		case RSHIFT:         return OV_SHR;
+		case RSHIFT_ASSIGN:  return OV_SHR_ASSIGN;
+		case BIT_NOT:        return OV_NEGATE;
+		case EQEQ:           return OV_EQUAL;
+		case LESS:           return OV_LESS_THAN;
+		default:
+			return UNKNOWN;
+	}
+}
+
+enum InOutModifier : char
+{
+	ANY,
+	IN,
+	OUT,
+	INOUT,
+	OWN,
+	DROP,
+	INIT,
+}
+
+enum Visibility : char
+{
+	PUBLIC,
+	PRIVATE,
+	LOCAL
+}
+
+enum TypeExprKind : char
+{
+	TYPE_IDENTIFIER,
+	TYPE_POINTER,
+	TYPE_ARRAY,
+	TYPE_SLICE,
+	TYPE_VECTOR,
+	TYPE_GENERIC,
+	TYPE_TYPEOF,
+	TYPE_TYPEFROM,
+	TYPE_FUNCTION
+}
+
+enum DesignatorKind : char
+{
+	PERIOD,
+	INDEX,
+	RANGE,
+}
+
+enum AccessKind : char
+{
+	INSTANCE,
+	STATIC
+}
 
 enum OperatorKind
 {
@@ -29,13 +166,13 @@ enum OperatorKind
 	OP_LT,
 	OP_LE,
 	OP_NE,
-	OP_EQ,  // Vec comparisons
+	OP_EQ,
 	OP_VEC_GT,
 	OP_VEC_GE,
 	OP_VEC_LT,
 	OP_VEC_LE,
 	OP_VEC_NE,
-	OP_VEC_EQ,  // Only "assign" BINOPS after this point
+	OP_VEC_EQ,
 	OP_ELVIS,
 	OP_ASSIGN,
 	OP_ADD_ASSIGN,
@@ -105,11 +242,11 @@ enum VarDeclKind : char
 	VAR_LOCAL,
 	VAR_GLOBAL,
 	VAR_FIELD,
-	VAR_BITFIELD,  // bitstruct field
-	VAR_PARAM,  // Regular parameter (foo)
-	VAR_PARAM_CT,  // Compile-time parameter ($foo)
-	VAR_PARAM_EXPR,  // Expression parameter (#foo)
-	VAR_PARAM_CT_TYPE,  // Compile-time type parameter ($Type)
+	VAR_BITFIELD,
+	VAR_PARAM,
+	VAR_PARAM_CT,
+	VAR_PARAM_EXPR,
+	VAR_PARAM_CT_TYPE,
 }
 
 enum UnaryOpKind : char
@@ -154,9 +291,9 @@ enum AliasDeclKind : char
 enum DeferKind : char
 {
 	NORMAL,
-	TRY,  // defer try ...
-	CATCH,  // defer catch ...
-	CATCH_VAR  // defer (catch var) ...
+	TRY,
+	CATCH,
+	CATCH_VAR
 }
 
 enum RangeKind : char
@@ -166,25 +303,6 @@ enum RangeKind : char
 	CONST_LEN,
 	CONST_RANGE,
 	SINGLE_ELEMENT,
-}
-
-enum TypeInfoKind
-{
-	INVALID,
-	IDENTIFIER,
-	CT_IDENTIFIER,
-	TYPEOF,
-	VATYPE,
-	EVALTYPE,
-	TYPEFROM,
-	ARRAY,
-	VECTOR,
-	INFERRED_ARRAY,
-	INFERRED_VECTOR,
-	SLICE,
-	FUNCTION,
-	POINTER,
-	GENERIC
 }
 
 enum TypeKind : char
@@ -365,7 +483,7 @@ enum BuiltinFunction
 	WASM_MEMORY_GROW,
 	WIDESTRING_16,
 	WIDESTRING_32,
-	NONE,  // Disabled for now!
+	NONE,
 	LLRINT,
 	LLROUND,
 	LRINT,

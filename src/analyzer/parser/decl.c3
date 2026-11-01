@@ -783,7 +783,7 @@ fn NodeArray parse_attributes(ContextScope scope, Node* parent_node, AttributePa
 		AttributeDecl* attr_node = ctx.ast.alloc_node(AttributeDecl, t.range);
 		defer attr_node.range.end = ctx.peek(-1).range.end;
 		attr_node.name = ctx.ident(t);
-		attr_node.attribute_kind = core::get_attribute_from_string(t.value);
+		attr_node.attribute_kind = AttributeKind::lookup_field(str, t.value) ?? AttributeKind.NONE;
 
 		if (parent_node)
 		{

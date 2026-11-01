@@ -633,7 +633,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 				CallExpr* call = node.as(CallExpr);
 				if (call.callee && cursor::spelling(call.callee, tmem) == "$Typeof" && call.args.len > 0)
 				{
-					String resolved = query::get_type_of_expr(ctx, sf, call.args[0]);
+					String resolved = query::type_of(ctx, sf, call.args[0], {-1, -1});
 					if (resolved.len > 0)
 					{
 						return string::tformat("typeid (%s)", resolved);
@@ -651,7 +651,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 				TypeExpr* te = node.as(TypeExpr);
 				if (te.type_kind == TYPE_TYPEOF && te.expr)
 				{
-					String resolved = query::get_type_of_expr(ctx, sf, te.expr);
+					String resolved = query::type_of(ctx, sf, te.expr, {-1, -1});
 					if (resolved.len > 0)
 					{
 						return string::tformat("typeid (%s)", resolved);

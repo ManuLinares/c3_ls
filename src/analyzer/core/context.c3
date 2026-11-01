@@ -1,19 +1,6 @@
 module analyzer::core::context;
+import analyzer, std::io;
 
-import analyzer::core::diagnostics;
-import analyzer::core::source_file;
-import analyzer::core::arch;
-import analyzer::core::os;
-import analyzer::core::mod;
-import analyzer::core::ast;
-
-import analyzer::lexer;
-import analyzer::parser;
-import analyzer::sema;
-import analyzer::sema::lookup;
-import analyzer::sema::registry;
-
-import std::io;
 <*
  If target.os or target.arch is `UNKNOWN` it will be inferred
 *>
@@ -125,17 +112,4 @@ fn bool process_file(AnalyzerContext* context, String path) => @pool()
 	}
 
 	return process(context, buffer, path);
-}
-
-<*
- @param [&in] context
- @require $Typeof(item) == POINTER : "item must be a pointer"
-*>
-macro void free_item(AnalyzerContext* context, item)
-{
-	$if $defined(item.free):
-		item.free(context.allocator);
-	$else
-		alloc::free(context.allocator, item);
-	$endif
 }

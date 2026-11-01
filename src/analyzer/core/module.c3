@@ -1,13 +1,6 @@
 module analyzer::core::mod;
+import analyzer, std::io;
 
-import analyzer::core::diagnostics;
-import analyzer::core::ast;
-
-import analyzer::lexer;
-import analyzer::parser;
-import analyzer::sema;
-
-import std::io;
 <*
  @param [&in] ctx
  @param [in] name
@@ -43,16 +36,6 @@ fn void add_node(Module* mod, Node* node)
 	{
 		mod.module_decls.push(node.as(ModuleDecl));
 	}
-}
-
-<*
- @param [&in] mod
- @param [in] local_name : "The name to format with"
- @return "e.g. foo::local"
-*>
-fn String get_qualified_name(Allocator alloc, Module* mod, String local_name)
-{
-	return string::format(alloc, "%s::%s", mod.name, local_name);
 }
 
 <*

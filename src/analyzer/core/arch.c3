@@ -26,30 +26,9 @@ fn char ptr_size(ArchType arch)
 			return 0;
 	}
 }
-
-fn char ArchType.ptr_size(self) => ptr_size(self);
-// Returns the native word size in bytes (usually matches pointer size).
-fn char word_size(ArchType arch)
-{
-	return ptr_size(arch);
-}
-
-fn char native_alignment(ArchType arch)
-{
-	return ptr_size(arch);
-}
-
 fn bool is_64bit(ArchType arch)
 {
 	return ptr_size(arch) == 8;
-}
-
-<*
- the max integer width the architecture can handle in one register.
-*>
-fn char max_int_width(ArchType arch)
-{
-	return ptr_size(arch) * 8;
 }
 
 fn TargetLayout get_platform_layout(OsType os, ArchType arch)

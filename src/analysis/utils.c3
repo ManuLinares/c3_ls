@@ -92,14 +92,6 @@ fn CompletionItemKind to_completion_kind(Node* node)
 	}
 }
 
-fn MarkupContent md(String md_text)
-{
-	return {
-		.value = md_text,
-		.kind = MARKDOWN
-	};
-}
-
 fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_name, String identifier)
 {
 	if (!ws.ctx) return null;

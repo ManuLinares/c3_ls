@@ -1,6 +1,6 @@
 module analyzer::core::ast;
 
-import analyzer::lexer;
+import analyzer::lexer, analyzer::core::constants;
 
 import std::collections::list;
 

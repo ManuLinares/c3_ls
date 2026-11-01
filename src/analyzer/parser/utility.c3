@@ -15,19 +15,6 @@ fn bool is_base_type(TokenKind kind)
 	return kind.is_base_type();
 }
 
-fn bool is_some_ident(TokenKind type)
-{
-	switch (type)
-	{
-		case TYPE_IDENT:
-		case IDENT:
-		case CONST_IDENT:
-			return true;
-		default:
-			return false;
-	}
-}
-
 fn bool is_non_type_ident(TokenKind k)
 {
 	return k == IDENT || k == HASH_IDENT || k == CT_IDENT;
@@ -50,46 +37,6 @@ fn bool is_type(ParseContext* ctx)
 		if (ctx.peek(i).kind == TYPE_IDENT) return true;
 	}
 
-	return false;
-}
-
-fn bool is_alias_name_kind(TokenKind kind)
-{
-	switch (kind)
-	{
-		case TYPE_IDENT:
-		case IDENT:
-		case CONST_IDENT:
-		case AT_IDENT:
-			return true;
-		default:
-			return false;
-	}
-}
-
-fn bool is_alias_source_name_kind(TokenKind kind)
-{
-	switch (kind)
-	{
-		case IDENT:
-		case CONST_IDENT:
-		case AT_IDENT:
-			return true;
-		default:
-			return false;
-	}
-}
-
-<*
- Return whether kind may appear as a path's final segment with options.
- @param kind : "Candidate token kind for the segment."
- @param options : "Final-segment allowances used by the caller."
-*>
-fn bool is_path_final_kind(TokenKind kind, PathExprOptions options)
-{
-	if (kind == IDENT) return true;
-	if (options.allow_const_final && kind == CONST_IDENT) return true;
-	if (options.allow_attr_final && kind == AT_IDENT) return true;
 	return false;
 }
 
@@ -121,94 +68,9 @@ fn void parse_attributes_into(ContextScope scope, Node* parent_node, List{Node*}
 	}
 }
 
-fn bool is_error_or_missing_node(Node* node)
-{
-	return node.kind == ERROR;
-}
-
-fn void? skip_balanced_group(ParseContext* ctx, TokenKind open, TokenKind close)
-{
-	advance(ctx);
-
-	int depth = 1;
-	while (!ctx.eof() && depth > 0)
-	{
-		if (ctx.is(open))
-		{
-			depth++;
-		}
-		else if (ctx.is(close))
-		{
-			depth--;
-		}
-
-		advance(ctx);
-	}
-}
-
 fn bool is_type_primitive(TokenKind kind)
 {
 	return kind.is_base_type() || kind == CT_TYPE_IDENT || kind == CT_TYPEOF || kind == CT_TYPEFROM;
-}
-
-fn bool is_declaration_followup(ParseContext* ctx)
-{
-	int i;
-
-	while (ctx.peek(i).kind == IDENT && ctx.peek(i + 1).kind == SCOPE)
-	{
-		i += 2;
-	}
-
-	i++;
-
-	if (ctx.is(CT_TYPEFROM) || ctx.is(CT_TYPEOF))
-	{
-		i++;
-		int depth = 1;
-		do
-		{
-			if (ctx.peek(i).kind == LPAREN) depth++;
-			if (ctx.peek(i).kind == RPAREN) depth--;
-
-			i++;
-		} while (depth != 0 && ctx.peek(i).kind != EOF);
-	}
-
-	while (true)
-	{
-		TokenKind k = ctx.peek(i).kind;
-
-		if (k == ASTERISK || k == QUESTION)
-		{
-			i++;
-		}
-		else if (k == LBRACKET)
-		{
-			i++;
-			while (ctx.peek(i).kind != RBRACKET && ctx.peek(i).kind != EOF) i++;
-			i++;
-		}
-		else if (k == LVEC)
-		{
-			i++;
-			while (ctx.peek(i).kind != RVEC && ctx.peek(i).kind != EOF) i++;
-			i++;
-		}
-		else if (k == LBRACE)
-		{
-			i++;
-			while (ctx.peek(i).kind != RBRACE && ctx.peek(i).kind != EOF) i++;
-			i++;
-		}
-		else
-		{
-			break;
-		}
-	}
-
-	TokenKind final_k = ctx.peek(i).kind;
-	return final_k == IDENT || final_k == CONST_IDENT || final_k == CT_IDENT;
 }
 
 fn bool can_start_expression(TokenKind kind)

@@ -1,9 +1,5 @@
 module analyzer::core::ast::serialize @feat(ANALYZER_CLI);
-
-import std::collections::nullable;
-import std::collections::maybe;
-import std::io;
-import analyzer::core::diagnostics;
+import analyzer::core::diagnostics, std::collections::ref, std::collections::maybe, std::io;
 
 alias JsonOutput @local = DString;
 

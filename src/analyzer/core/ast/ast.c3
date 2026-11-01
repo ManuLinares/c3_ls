@@ -1,8 +1,5 @@
 module analyzer::core::ast;
-
-import std::collections::list;
-import std::collections::nullable;
-import analyzer::core;
+import analyzer::core, std::collections::list, std::collections::ref;
 
 alias NodeArray = Node*[];
 alias NullableNode = Nullable{Node};
@@ -34,11 +31,6 @@ struct Node
  @require self.kind == NodeKind.$eval(@typename_to_constname($Type::name)) : "Invalid kind to cast"
 *>
 macro Node.as(&self, $Type) => ($Type*)self;
-
-fn bool Node.is_valid(&self) @inline
-{
-	return self.kind != ERROR && !self.flags.has_error;
-}
 
 struct Ast
 {
