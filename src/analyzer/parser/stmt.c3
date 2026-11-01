@@ -221,14 +221,15 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 	List{Node*} temp_stmts;
 	temp_stmts.init(tmem, 8);
 
+	ContextScope stmt_scope = scope.with_flags({ .is_local = true });
+	stmt_scope.flags.type_as_expression = false;
+	stmt_scope.flags.is_expr = false;
+	stmt_scope.flags.skip_eos = false;
+
 	while (!ctx.is(RBRACE) && !ctx.eof())
 	{
 		int start_pos = ctx.pos;
-		Node* stmt = parse_stmt(scope.with_flags(
-		{
-			.is_local = true
-		}
-		));
+		Node* stmt = parse_stmt(stmt_scope);
 		if (ctx.pos == start_pos)
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Unexpected token in block");

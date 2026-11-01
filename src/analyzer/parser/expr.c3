@@ -1110,18 +1110,23 @@ fn Node* parse_lambda_expr(ContextScope scope)
 		}
 		), null);
 	}
-	node.params = parse_parameter_list(scope);
+	node.params = parse_parameter_list(scope.with_only_flags({ .is_function = true }));
 	if (ctx.is(AT_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}
 
+	ContextScope body_scope = scope.with_only_flags({
+		.is_local = true,
+		.is_comptime = scope.flags.is_comptime
+	});
+
 	switch (true)
 	{
 		case consume(ctx, IMPLIES):
-			node.body = parse_expr(scope);
+			node.body = parse_expr(body_scope);
 		case ctx.is(LBRACE):
-			node.body = parse_compound_stmt(scope);
+			node.body = parse_compound_stmt(body_scope);
 		default:
 			diagnostics::error(ctx.context, ctx.current.range, "Expected the beginning of a block or a shortbody");
 			error_node(ctx, node);

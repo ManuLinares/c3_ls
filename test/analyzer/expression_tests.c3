@@ -719,3 +719,58 @@ fn void test_cast_expression_starters()
 	bool success = context::process(context, source_code, "test_casts.c3");
 	test::eq(success, true);
 }
+
+fn void test_optional_type_in_lambda_argument()
+{
+	String source_code = `
+		module test_lambda_opt;
+
+		struct GameObjectPtr {}
+		fn void register_method(String name, fn void() cb) {}
+
+		fn void test()
+		{
+			register_method("method", fn void() {
+				GameObjectPtr? positionObj = null;
+				if (catch positionObj) return;
+			});
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_lambda_opt.c3");
+	test::eq(success, true);
+}
+
+fn void test_optional_type_in_nested_lambda_expressions()
+{
+	String source_code = `
+		module test_nested_opt;
+
+		struct Handle { int id; }
+		alias Callback = fn void();
+
+		fn void take_fn(Callback cb) {}
+		fn void take_two(Callback a, Callback b) {}
+
+		fn void run()
+		{
+			take_two(
+				fn void() {
+					take_fn(fn void() {
+						Handle*? h = null;
+						if (catch h) return;
+					});
+				},
+				fn void() {
+					Handle*? h2 = null;
+					if (catch h2) return;
+				}
+			);
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_nested_opt.c3");
+	test::eq(success, true);
+}
