@@ -1,12 +1,6 @@
 module lsp::nested_substructs_test @test;
 
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::completion;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_nested_substruct_access_and_completion()
 {
@@ -41,7 +35,7 @@ fn void main() {
 	assert(hp_hover.contains("horsepower"));
 	assert(hp_hover.contains("int"));
 	// 2. Goto definition on `horsepower` -> jumps to `horsepower` in `struct Engine` (line 3)
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hp_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hp_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 3);
 	// 3. Hover on `engine` in `my_car.engine` (line 14, col 20)
@@ -98,7 +92,7 @@ fn void run() {
 	assert(b128_hover.contains("block_128"));
 	assert(b128_hover.contains("int128[4]"));
 	// 2. Go to definition on `w.block_128` -> jumps to `int128[4] block_128` on line 6
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, b128_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, b128_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 6);
 	// 3. Hover on `hash_ref` (line 15, col 9) -> shows `ulong* hash_ref`
@@ -107,7 +101,7 @@ fn void run() {
 	assert(href_hover.contains("ulong* hash_ref"));
 	// 4. Go to definition on `hash_ref` in `hash_ref[0]` (line 16, col 18)
 	LspPosition href_idx_pos = {.line = 16,.character = 18 };
-	LspLocation[] href_locs = goto_definition::goto_definition(&proj, doc_uri, href_idx_pos)!!;
+	LspLocation[] href_locs = definition::goto_definition(&proj, doc_uri, href_idx_pos)!!;
 	assert(href_locs.len > 0);
 	assert(href_locs[0].range.start.line == 15);
 }
@@ -159,7 +153,7 @@ fn void test() {
 	String h_query = hover::hover(&proj, doc_uri, query_pos)!!;
 	assert(h_query.contains("EcsQueryIter query"));
 
-	LspLocation[] locs_query = goto_definition::goto_definition(&proj, doc_uri, query_pos)!!;
+	LspLocation[] locs_query = definition::goto_definition(&proj, doc_uri, query_pos)!!;
 	assert(locs_query.len > 0);
 	assert(locs_query[0].range.start.line == 13);
 }
@@ -396,13 +390,13 @@ fn void test() {
 	assert(h.contains("int l2_val"));
 
 	// 6. Goto definition on 3rd level field `l2_val` -> line 9
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hover_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 9);
 
 	// 7. Goto definition on 2nd level sub-struct `level2` (line 27, col 22) -> line 8
 	LspPosition l2_def_pos = { .line = 27, .character = 22 };
-	LspLocation[] locs_l2 = goto_definition::goto_definition(&proj, doc_uri, l2_def_pos)!!;
+	LspLocation[] locs_l2 = definition::goto_definition(&proj, doc_uri, l2_def_pos)!!;
 	assert(locs_l2.len > 0);
 	assert(locs_l2[0].range.start.line == 8);
 }

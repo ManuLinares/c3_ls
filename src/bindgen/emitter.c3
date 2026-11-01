@@ -620,9 +620,9 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 {
 	HashSet{String} known_types;
 	known_types.tinit();
-	foreach (p : constants::Primitives::values)
+	foreach (pt : constants::PrimitiveType::values)
 	{
-		known_types.add(p);
+		known_types.add(pt.name);
 	}
 	const String[*] EXTRA_BUILTINS = {
 		"String", "ZString", "CVaList", "CLong", "CULong", "CChar", "CSChar",

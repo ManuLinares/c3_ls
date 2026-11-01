@@ -1,13 +1,5 @@
 module lsp::module_extension_test @test;
-
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::completion;
-import lsp::analysis::inlay_hints;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_reopened_module_cross_file_methods()
 {
@@ -52,7 +44,7 @@ fn void update() {
 	String add_hover = hover::hover(&proj, app_uri, add_pos)!!;
 	assert(add_hover.contains("Vector2D.add"));
 	// 2. Goto definition on `v1.add` -> jumps to file 2 (geom_ext.c3)
-	LspLocation[] add_locs = goto_definition::goto_definition(&proj, app_uri, add_pos)!!;
+	LspLocation[] add_locs = definition::goto_definition(&proj, app_uri, add_pos)!!;
 	assert(add_locs.len > 0);
 	assert(add_locs[0].uri.contains("geom_ext.c3"));
 	assert(add_locs[0].range.start.line == 1);

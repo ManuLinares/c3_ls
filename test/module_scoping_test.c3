@@ -1,12 +1,6 @@
 module lsp::module_scoping_test @test;
 
-import lsp::core;
-import lsp::analysis::goto_definition;
-import lsp::analysis::hover;
-import lsp::analysis::signature_help;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_multi_section_module_isolation()
 {
@@ -32,12 +26,12 @@ fn void run_internal_tests() {
 	defer doc_uri.free();
 	// Line 9: public_helper() call
 	LspPosition pub_pos = {.line = 8,.character = 14 };
-	LspLocation[] pub_locs = goto_definition::goto_definition(&proj, doc_uri, pub_pos)!!;
+	LspLocation[] pub_locs = definition::goto_definition(&proj, doc_uri, pub_pos)!!;
 	assert(pub_locs.len > 0);
 	assert(pub_locs[0].range.start.line == 1);
 	// Line 10: private_helper() call
 	LspPosition priv_pos = {.line = 9,.character = 14 };
-	LspLocation[] priv_locs = goto_definition::goto_definition(&proj, doc_uri, priv_pos)!!;
+	LspLocation[] priv_locs = definition::goto_definition(&proj, doc_uri, priv_pos)!!;
 	assert(priv_locs.len > 0);
 	assert(priv_locs[0].range.start.line == 4);
 }
@@ -97,7 +91,7 @@ fn void test() {
 	assert(h.contains("double.custom_clamp"));
 
 	// 2. Go to definition on `custom_clamp` in 2nd section -> line 6
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hover_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 6);
 

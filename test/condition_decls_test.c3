@@ -1,13 +1,6 @@
 module lsp::condition_decls_test @test;
 
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::references;
-import lsp::analysis::completion;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_try_unwrap_and_while_declaration_scoping()
 {
@@ -43,7 +36,7 @@ fn void process() {
 	String if_hover = hover::hover(&proj, doc_uri, if_var_pos)!!;
 	assert(if_hover.contains("current"));
 
-	LspLocation[] if_locs = goto_definition::goto_definition(&proj, doc_uri, if_var_pos)!!;
+	LspLocation[] if_locs = definition::goto_definition(&proj, doc_uri, if_var_pos)!!;
 	assert(if_locs.len > 0);
 	assert(if_locs[0].range.start.line == 10);
 
@@ -51,7 +44,7 @@ fn void process() {
 	String while_hover = hover::hover(&proj, doc_uri, while_var_pos)!!;
 	assert(while_hover.contains("curr"));
 
-	LspLocation[] while_locs = goto_definition::goto_definition(&proj, doc_uri, while_var_pos)!!;
+	LspLocation[] while_locs = definition::goto_definition(&proj, doc_uri, while_var_pos)!!;
 	assert(while_locs.len > 0);
 	assert(while_locs[0].range.start.line == 14);
 
@@ -139,13 +132,13 @@ fn void run(GfxWindow* win) {
 	assert(h_width.contains("int width"));
 
 	// 5. Go to definition on `width` in IntRect
-	LspLocation[] locs_width = goto_definition::goto_definition(&proj, doc_uri, width_pos)!!;
+	LspLocation[] locs_width = definition::goto_definition(&proj, doc_uri, width_pos)!!;
 	assert(locs_width.len > 0);
 	assert(locs_width[0].uri.contains("gfx.c3"));
 	assert(locs_width[0].range.start.line == 5);
 
 	// 6. Go to definition on `update` in GfxEvent
-	LspLocation[] locs_update = goto_definition::goto_definition(&proj, doc_uri, update_pos)!!;
+	LspLocation[] locs_update = definition::goto_definition(&proj, doc_uri, update_pos)!!;
 	assert(locs_update.len > 0);
 	assert(locs_update[0].uri.contains("gfx.c3"));
 	assert(locs_update[0].range.start.line == 15);
@@ -156,7 +149,7 @@ fn void run(GfxWindow* win) {
 	assert(h_event.contains("GfxEvent event"));
 
 	// 8. Go to definition on `event` declaration
-	LspLocation[] locs_event = goto_definition::goto_definition(&proj, doc_uri, event_pos)!!;
+	LspLocation[] locs_event = definition::goto_definition(&proj, doc_uri, event_pos)!!;
 	assert(locs_event.len > 0);
 	assert(locs_event[0].range.start.line == 4);
 }

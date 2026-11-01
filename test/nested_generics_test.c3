@@ -1,11 +1,5 @@
 module lsp::nested_generics_test @test;
-
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_nested_generics_navigation_and_hover()
 {
@@ -29,7 +23,7 @@ fn void test_nested_generics_navigation_and_hover()
 	assert(h.contains("HashMap"));
 	// 2. Goto definition on `set` method
 	LspPosition set_pos = {.line = 5,.character = 12 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, set_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, set_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("map.c3"));
 }

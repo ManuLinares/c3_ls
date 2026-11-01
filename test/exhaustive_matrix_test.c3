@@ -1,15 +1,5 @@
 module lsp::exhaustive_matrix_test @test;
-
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::completion;
-import lsp::analysis::references;
-import lsp::analysis::rename;
-import lsp::analysis::signature_help;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_generic_instantiation_hover_and_def()
 {
@@ -31,7 +21,7 @@ fn void test_generic_instantiation_hover_and_def()
 	assert(hover_stack.contains("Stack"));
 	// 2. Goto definition on generic method call .push(42)
 	LspPosition push_pos = {.line = 4,.character = 6 };
-	LspLocation[] push_locs = goto_definition::goto_definition(&proj, app_uri, push_pos)!!;
+	LspLocation[] push_locs = definition::goto_definition(&proj, app_uri, push_pos)!!;
 	assert(push_locs.len > 0);
 	assert(push_locs[0].uri.contains("stack.c3"));
 }
@@ -54,7 +44,7 @@ fn void test_distinct_types_and_inline_subtyping()
 	assert(handle_hover.contains("typedef Handle"));
 	// 2. Definition lookup for inherited method call `d.reset()` (line 13, col 6)
 	LspPosition reset_pos = {.line = 13,.character = 6 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, reset_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, reset_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 9);
 }
@@ -76,7 +66,7 @@ fn void test_macro_method_with_trailing_block()
 	String hover_macro = hover::hover(&proj, doc_uri, each_pos)!!;
 	assert(hover_macro.contains("macro Container.each"));
 	// 2. Goto definition on macro invocation
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, each_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, each_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 4);
 }
@@ -99,7 +89,7 @@ fn void test_bitstruct_fields_and_overlap()
 	assert(hover_sync.contains("sync"));
 	// 2. Goto definition on bitstruct field `mode` in `f.mode = 2;` (line 8, col 5)
 	LspPosition mode_pos = {.line = 8,.character = 5 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, mode_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, mode_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 2);
 }
@@ -122,7 +112,7 @@ fn void test_multifile_recursive_and_norecurse_imports()
 	defer app_uri.free();
 	// 1. Resolve imported function from non-recursive parent module
 	LspPosition close_pos = {.line = 4,.character = 4 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, close_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, close_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("net.c3"));
 }

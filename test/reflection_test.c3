@@ -1,12 +1,6 @@
 module lsp::reflection_test @test;
 
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::completion;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_typefrom_navigation()
 {
@@ -26,7 +20,7 @@ fn void main() {
 	defer doc_uri.free();
 
 	LspPosition packet_pos = {.line = 3,.character = 14 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, packet_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, packet_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 }
@@ -175,7 +169,7 @@ fn void test() {
 	assert(found_size);
 	// 2. Unimported private `Point` does not jump to std::crypto::ed25519
 	LspPosition point_pos = {.line = 4,.character = 4 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, point_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, point_pos)!!;
 	assert(locs.len == 0);
 }
 
@@ -198,7 +192,7 @@ fn void test_def() {
 	defer doc_uri.free();
 
 	LspPosition id_pos = {.line = 4,.character = 18 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, id_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, id_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 
@@ -343,12 +337,12 @@ fn void run() {
 	defer app_uri.free();
 	// 1. Public function in first section resolves cleanly
 	LspPosition fn_pos = {.line = 3,.character = 20 };
-	LspLocation[] fn_locs = goto_definition::goto_definition(&proj, app_uri, fn_pos)!!;
+	LspLocation[] fn_locs = definition::goto_definition(&proj, app_uri, fn_pos)!!;
 	assert(fn_locs.len > 0);
 	assert(fn_locs[0].range.start.line == 1);
 	// 2. Struct in @private section of same file is not accessible to consumer
 	LspPosition sk_pos = {.line = 4,.character = 4 };
-	LspLocation[] sk_locs = goto_definition::goto_definition(&proj, app_uri, sk_pos)!!;
+	LspLocation[] sk_locs = definition::goto_definition(&proj, app_uri, sk_pos)!!;
 	assert(sk_locs.len == 0);
 }
 

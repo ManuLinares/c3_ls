@@ -1,16 +1,5 @@
 module lsp::analysis::inlay_hints;
-
-import analyzer::core;
-import analyzer::cursor;
-import analyzer::sema::query;
-
-import std::collections::list;
-import std::collections::map;
-import std::io;
-
-import lsp::core;
-import lsp;
-import uri;
+import analyzer, lsp, uri, std::collections::list, std::collections::map, std::io;
 
 struct InlayHintCollector
 {

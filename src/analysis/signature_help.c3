@@ -1,26 +1,14 @@
 module lsp::analysis::signature_help;
-
-import analyzer::core;
-import analyzer::cursor;
-import analyzer::sema::query;
-
-import std::collections::list;
-import std::io;
-
-import lsp::core;
-import lsp;
-import lsp::analysis;
-import lsp::analysis::hover;
-import uri;
+import analyzer, lsp, uri, std::collections::list, std::io;
 
 fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition pos)
 {
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf || !project.workspace.ctx) return {.signatures = {} };
 
-	sz offset = analysis::compute_byte_offset(sf.content, pos.line, pos.character);
+	sz offset = utils::compute_byte_offset(sf.content, pos.line, pos.character);
 
-	CallTargetInfo target_info = analysis::parse_call_context(sf.content, offset);
+	CallTargetInfo target_info = utils::parse_call_context(sf.content, offset);
 	if (!target_info.is_valid) return {.signatures = {} };
 
 	Location loc = {

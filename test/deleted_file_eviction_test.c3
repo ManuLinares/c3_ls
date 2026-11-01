@@ -1,12 +1,6 @@
 module lsp::deleted_file_eviction_test @test;
 
-import lsp::core;
-import lsp::analysis::goto_definition;
-import lsp;
-import uri;
-import std::io;
-import std::io::file;
-import std::io::path;
+import lsp, uri, std::io;
 
 fn void test_deleted_dependency_eviction_and_definition_guard()
 {
@@ -43,7 +37,7 @@ fn void test_deleted_dependency_eviction_and_definition_guard()
 	assert(diags.len == 0);
 
 	LspPosition call_pos = { .line = 3, .character = 14 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, main_uri, call_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, main_uri, call_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("temp_dep.c3"));
 

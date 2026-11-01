@@ -1,11 +1,6 @@
 module lsp::hover_definition_test @test;
 
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_hover_on_function()
 {
@@ -38,7 +33,7 @@ fn void test_goto_definition()
 	proj.workspace.process_file("/virtual/test_goto.c3", source);
 
 	LspPosition pos = {.line = 2,.character = 22 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 }
@@ -65,7 +60,7 @@ fn void test_receiver_method_disambiguation()
 	assert(hover_res.contains("List.tinit"));
 	assert(!hover_res.contains("ParallelHash.tinit"));
 
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("list.c3"));
 }
@@ -93,7 +88,7 @@ fn void test_module_scoped_call_hover_and_definition()
 	String init_hover = hover::hover(&proj, app_uri, init_pos)!!;
 	assert(init_hover.contains("fn void init_window(int w, int h, String title)"));
 
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, init_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, init_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("gfx.c3"));
 	assert(locs[0].range.start.line == 1);
@@ -115,7 +110,7 @@ fn void test_short_body_expression_goto_definition()
 	defer app_uri.free();
 
 	LspPosition pos = {.line = 2,.character = 50 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("gfx_keys.c3"));
 	assert(locs[0].range.start.line == 1);
@@ -138,7 +133,7 @@ fn void test_self_member_hover_and_definition()
 	String h = hover::hover(&proj, doc_uri, pos)!!;
 	assert(h.contains("float x"));
 
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 2);
 }
@@ -165,7 +160,7 @@ fn void run_calc() {
 	defer doc_uri.free();
 	// Line 6: `  @step(1, 2);` -> cursor on `@step`
 	LspPosition pos = {.line = 6,.character = 4 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);  // Macro definition line, not local `int step` on line 3!
 }
@@ -189,7 +184,7 @@ fn void test_syntax_error_recovery_maintains_subsequent_definitions()
 	String hover_res = hover::hover(&proj, app_uri, pos)!!;
 	assert(hover_res.contains("List.tinit"));
 
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("list.c3"));
 }
@@ -208,12 +203,12 @@ fn void test_goto_definition_enum_variant_and_return_expr()
 	defer app_uri.free();
 
 	LspPosition page_up_pos = {.line = 4,.character = 18 };
-	LspLocation[] locs1 = goto_definition::goto_definition(&proj, app_uri, page_up_pos)!!;
+	LspLocation[] locs1 = definition::goto_definition(&proj, app_uri, page_up_pos)!!;
 	assert(locs1.len > 0);
 	assert(locs1[0].range.start.line == 1);
 
 	LspPosition return_idx_pos = {.line = 8,.character = 10 };
-	LspLocation[] locs2 = goto_definition::goto_definition(&proj, app_uri, return_idx_pos)!!;
+	LspLocation[] locs2 = definition::goto_definition(&proj, app_uri, return_idx_pos)!!;
 	assert(locs2.len > 0);
 	assert(locs2[0].range.start.line == 7);
 }
@@ -303,7 +298,7 @@ fn void test_goto_definition_struct_member_designated_init()
 	proj.workspace.process_file("/virtual/designated_init.c3", source);
 
 	LspPosition pos = {.line = 6,.character = 17 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 2);
 }
@@ -362,7 +357,7 @@ fn void test() {
 	assert(h.contains("double.custom_clamp"));
 
 	// 2. Go to definition on `custom_clamp` -> line 1
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hover_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 
@@ -417,7 +412,7 @@ fn void test() {
 	assert(clamp_hover.contains("double.custom_clamp"));
 
 	// 3. Go to definition on `custom_clamp` -> line 3
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 3);
 
@@ -469,7 +464,7 @@ fn void test() {
 	assert(trunc_hover.contains("trunc"));
 
 	// 2. Go to definition on `trunc` -> jumps to math.c3
-	LspLocation[] trunc_locs = goto_definition::goto_definition(&proj, doc_uri, trunc_pos)!!;
+	LspLocation[] trunc_locs = definition::goto_definition(&proj, doc_uri, trunc_pos)!!;
 	assert(trunc_locs.len > 0);
 	assert(trunc_locs[0].uri.contains("math.c3"));
 
@@ -479,7 +474,7 @@ fn void test() {
 	assert(clamp_hover.contains("double.custom_clamp"));
 
 	// 4. Go to definition on `custom_clamp` -> jumps to line 9
-	LspLocation[] clamp_locs = goto_definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
+	LspLocation[] clamp_locs = definition::goto_definition(&proj, doc_uri, clamp_pos)!!;
 	assert(clamp_locs.len > 0);
 	assert(clamp_locs[0].range.start.line == 9);
 
@@ -577,7 +572,7 @@ fn void test() {
 	assert(h.contains("double.custom_clamp"));
 
 	// 4. Go to definition on `custom_clamp` -> jumps to line 9
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hover_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 9);
 
@@ -641,7 +636,7 @@ fn void main() {
 	LspPosition pos = { .line = 6, .character = 11 };
 
 	// 1. Goto definition must return 0 locations (must not jump to mem_lib::free)
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 	test::eq(locs.len, 0);
 
 	// 2. Hover must be empty (must not display signature of mem_lib::free)
@@ -665,7 +660,7 @@ fn void test_module_function_vs_method_definition()
 	defer app_uri.free();
 
 	LspPosition init_pos = { .line = 3, .character = 8 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, init_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, init_pos)!!;
 	assert(locs.len > 0);
 	test::eq((int)locs[0].range.start.line, 2);
 }
@@ -688,7 +683,7 @@ fn void test_imported_submodule_short_name_definition()
 	defer impl_uri.free();
 
 	LspPosition pos = { .line = 4, .character = 15 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, impl_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, impl_uri, pos)!!;
 	assert(locs.len > 0);
 	test::eq((int)locs[0].range.start.line, 1);
 }
@@ -712,13 +707,13 @@ fn void test_multi_module_section_imports_definition()
 
 	// Line 3: sub::action() inside module client_a -> should resolve to mod_a.c3
 	LspPosition pos_a = { .line = 3, .character = 8 };
-	LspLocation[] locs_a = goto_definition::goto_definition(&proj, multi_uri, pos_a)!!;
+	LspLocation[] locs_a = definition::goto_definition(&proj, multi_uri, pos_a)!!;
 	assert(locs_a.len > 0);
 	test::eq(locs_a[0].uri, "file:///virtual/mod_a.c3");
 
 	// Line 9: sub::action() inside module client_b -> should resolve to mod_b.c3
 	LspPosition pos_b = { .line = 9, .character = 8 };
-	LspLocation[] locs_b = goto_definition::goto_definition(&proj, multi_uri, pos_b)!!;
+	LspLocation[] locs_b = definition::goto_definition(&proj, multi_uri, pos_b)!!;
 	assert(locs_b.len > 0);
 	test::eq(locs_b[0].uri, "file:///virtual/mod_b.c3");
 }
@@ -740,7 +735,7 @@ fn void test_qualified_fault_definition()
 
 	// Line 3: on INVALID_ARG (char 23)
 	LspPosition pos = { .line = 3, .character = 23 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, client_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, client_uri, pos)!!;
 	assert(locs.len > 0);
 	test::eq(locs[0].uri, "file:///virtual/faults.c3");
 	test::eq((int)locs[0].range.start.line, 1);
@@ -765,7 +760,7 @@ fn void test_module_multiple_declarations_definition()
 
 	// Line 3: on multi_mod (char 4)
 	LspPosition pos = { .line = 3, .character = 4 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, client_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, client_uri, pos)!!;
 	test::eq(locs.len, 2);
 }
 
@@ -786,7 +781,7 @@ fn void test_global_variable_member_definition()
 
 	// Line 2: on use_wayland (char 18)
 	LspPosition pos = { .line = 2, .character = 18 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, use_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, use_uri, pos)!!;
 	assert(locs.len > 0);
 	test::eq(locs[0].uri, "file:///virtual/def.c3");
 	test::eq((int)locs[0].range.start.line, 2);
@@ -828,7 +823,7 @@ fn void main()
 	assert(h1.contains("std::gfx::GfxSurface.do_something1"));
 
 	// 2. Goto definition on do_something1 -> line 4
-	LspLocation[] locs1 = goto_definition::goto_definition(&proj, doc_uri, pos1)!!;
+	LspLocation[] locs1 = definition::goto_definition(&proj, doc_uri, pos1)!!;
 	assert(locs1.len > 0);
 	test::eq((int)locs1[0].range.start.line, 4);
 
@@ -838,7 +833,7 @@ fn void main()
 	assert(h2.contains("gfx::GfxSurface.do_something2"));
 
 	// 4. Goto definition on do_something2 -> line 5
-	LspLocation[] locs2 = goto_definition::goto_definition(&proj, doc_uri, pos2)!!;
+	LspLocation[] locs2 = definition::goto_definition(&proj, doc_uri, pos2)!!;
 	assert(locs2.len > 0);
 	test::eq((int)locs2[0].range.start.line, 5);
 

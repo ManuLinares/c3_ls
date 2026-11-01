@@ -1,20 +1,6 @@
 module attributes_tests @test;
-
 import parser_tests;
-
-import analyzer::parser;
-import analyzer::core;
-import analyzer::sema;
-import lsp::analysis::goto_definition;
-import lsp::analysis::hover;
-import lsp::analysis::completion;
-import lsp;
-import lsp::core;
-import uri;
-import std::io;
-import std::collections::list;
-import std::io::file;
-import std::io::path;
+import analyzer, lsp, uri, std::io, std::collections::list, std::io::file, std::io::path;
 
 fn void module_private_test_weak_if()
 {
@@ -274,7 +260,7 @@ fn Vec Vec.add(self, Vec other) @operator(+) @HotInline { return { self.x + othe
 
 	// cursor on @HotInline at line 3, col 45
 	LspPosition use_pos = { .line = 3, .character = 45 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, use_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, use_pos)!!;
 	test::eq(locs.len, 1);
 	// should resolve to the attrmacro declaration on line 1
 	test::eq(locs[0].range.start.line, 1u);

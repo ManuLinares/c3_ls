@@ -1,10 +1,6 @@
 module lsp::document_symbols_test @test;
 
-import lsp::core;
-import lsp::analysis::document_symbols;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_document_symbols_outline()
 {
@@ -36,7 +32,7 @@ const int MAX_COUNT = 100;
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/doc_syms.c3");
 	defer doc_uri.free();
 
-	SymbolInformation[] syms = document_symbols::get_document_symbols(&proj, doc_uri)!!;
+	SymbolInformation[] syms = symbols::get_document_symbols(&proj, doc_uri)!!;
 	assert(syms.len >= 7);
 
 	bool found_module = false;

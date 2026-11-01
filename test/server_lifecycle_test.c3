@@ -74,7 +74,7 @@ fn void test_full_server_dispatch_flow()
 	assert(hover_content.contains("calculate"));
 	assert(hover_content.contains("fn int"));
 	// 3. Query goto definition on `calculate`
-	LspLocation[] locs = analysis::goto_definition::goto_definition(&proj, doc_uri, hover_pos)!!;
+	LspLocation[] locs = analysis::definition::goto_definition(&proj, doc_uri, hover_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 1);
 	// 4. Send didChange

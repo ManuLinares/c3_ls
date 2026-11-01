@@ -7,12 +7,12 @@ import analyzer::lexer;
 
 fn bool is_keyword_ident(TokenKind type)
 {
-	return type >= ALIAS && type <= WHILE;
+	return type.is_keyword();
 }
 
 fn bool is_base_type(TokenKind kind)
 {
-	return kind >= VOID_TYPE && kind <= UNTYPEDLIST_TYPE;
+	return kind.is_base_type();
 }
 
 fn bool is_some_ident(TokenKind type)
@@ -148,39 +148,7 @@ fn void? skip_balanced_group(ParseContext* ctx, TokenKind open, TokenKind close)
 
 fn bool is_type_primitive(TokenKind kind)
 {
-	switch (kind)
-	{
-		case BOOL_TYPE:
-		case CHAR_TYPE:
-		case DOUBLE_TYPE:
-		case FLOAT_TYPE:
-		case FLOAT16_TYPE:
-		case BFLOAT_TYPE:
-		case INT128_TYPE:
-		case ICHAR_TYPE:
-		case INT_TYPE:
-		case IPTR_TYPE:
-		case LONG_TYPE:
-		case SHORT_TYPE:
-		case UINT128_TYPE:
-		case UINT_TYPE:
-		case ULONG_TYPE:
-		case UPTR_TYPE:
-		case USHORT_TYPE:
-		case USZ_TYPE:
-		case SZ_TYPE:
-		case FLOAT128_TYPE:
-		case TYPEID_TYPE:
-		case FAULT_TYPE:
-		case ANY_TYPE:
-		case VOID_TYPE:
-		case CT_TYPE_IDENT:
-		case CT_TYPEOF:
-		case CT_TYPEFROM:
-			return true;
-		default:
-			return false;
-	}
+	return kind.is_base_type() || kind == CT_TYPE_IDENT || kind == CT_TYPEOF || kind == CT_TYPEFROM;
 }
 
 fn bool is_declaration_followup(ParseContext* ctx)

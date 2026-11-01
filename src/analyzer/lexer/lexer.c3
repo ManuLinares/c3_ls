@@ -267,85 +267,15 @@ fn Token lex_raw_string(Lexer* self)
 
 fn TokenKind lookup_keyword(String text)
 {
-	switch (text)
+	if (try kw = constants::Keyword::lookup_field(name, text))
 	{
-		case "alias": return ALIAS;
-		case "attrdef": return ATTRDEF;
-		case "attrgroup": return ATTRDEF;
-		case "attrmacro": return ATTRDEF;
-		case "bitstruct": return BITSTRUCT;
-		case "cenum": return CONSTDEF;
-		case "const": return CONST;
-		case "constdef": return CONSTDEF;
-		case "constset": return CONSTDEF;
-		case "distinct": return TYPEDEF;
-		case "enum": return ENUM;
-		case "excuse": return FAULTDEF;
-		case "faultconst": return FAULTDEF;
-		case "faultdef": return FAULTDEF;
-		case "faultset": return FAULTSET;
-		case "fn": return FN;
-		case "import": return IMPORT;
-		case "interface": return INTERFACE;
-		case "macro": return MACRO;
-		case "module": return MODULE;
-		case "typedef": return TYPEDEF;
-		case "struct": return STRUCT;
-		case "union": return UNION;
-		case "any": return ANY_TYPE;
-		case "asm": return ASM;
-		case "assert": return ASSERT;
-		case "break": return BREAK;
-		case "case": return CASE;
-		case "catch": return CATCH;
-		case "continue": return CONTINUE;
-		case "default": return DEFAULT;
-		case "defer": return DEFER;
-		case "do": return DO;
-		case "else": return ELSE;
-		case "false": return FALSE;
-		case "for": return FOR;
-		case "foreach": return FOREACH;
-		case "foreach_r": return FOREACH_R;
-		case "if": return IF;
-		case "lengthof": return LENGTHOF;
-		case "nextcase": return NEXTCASE;
-		case "null": return NULL;
-		case "return": return RETURN;
-		case "static": return STATIC;
-		case "switch": return SWITCH;
-		case "true": return TRUE;
-		case "try": return TRY;
-		case "var": return VAR;
-		case "while": return WHILE;
-		case "extern": return EXTERN;
-		case "inline": return INLINE;
-		case "tlocal": return TLOCAL;
-		case "void": return VOID_TYPE;
-		case "bool": return BOOL_TYPE;
-		case "char": return CHAR_TYPE;
-		case "ichar": return ICHAR_TYPE;
-		case "short": return SHORT_TYPE;
-		case "ushort": return USHORT_TYPE;
-		case "int": return INT_TYPE;
-		case "uint": return UINT_TYPE;
-		case "long": return LONG_TYPE;
-		case "ulong": return ULONG_TYPE;
-		case "int128": return INT128_TYPE;
-		case "uint128": return UINT128_TYPE;
-		case "iptr": return IPTR_TYPE;
-		case "uptr": return UPTR_TYPE;
-		case "sz": return SZ_TYPE;
-		case "usz": return USZ_TYPE;
-		case "float": return FLOAT_TYPE;
-		case "double": return DOUBLE_TYPE;
-		case "float16": return FLOAT16_TYPE;
-		case "bfloat": return BFLOAT_TYPE;
-		case "float128": return FLOAT128_TYPE;
-		case "fault": return FAULT_TYPE;
-		case "typeid": return TYPEID_TYPE;
-		default: return IDENT;
+		return kw.token;
 	}
+	if (try pt = constants::PrimitiveType::lookup_field(name, text))
+	{
+		return pt.token;
+	}
+	return IDENT;
 }
 
 fn Token lex_identifier(Lexer* self)

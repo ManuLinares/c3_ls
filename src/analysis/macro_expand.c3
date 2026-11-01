@@ -1,15 +1,5 @@
 module lsp::analysis::macro_expand;
-
-import analyzer::core;
-import analyzer::core::ast;
-import analyzer::cursor;
-import analyzer::sema::lookup;
-import analyzer::sema::query;
-import lsp::analysis;
-
-import std::collections::list;
-import std::collections::map;
-import std::io;
+import analyzer, lsp, std::collections::list, std::collections::map, std::io;
 
 struct MacroSubstitutions
 {
@@ -25,8 +15,8 @@ fn String get_node_source_text(SourceFile* sf, Node* node)
 	if (!sf || !node) return "";
 	if (node.range.start.line < 0 || node.range.end.line < 0) return cursor::spelling(node, tmem);
 
-	sz start_off = analysis::compute_byte_offset(sf.content, (uint)node.range.start.line, (uint)node.range.start.column);
-	sz end_off = analysis::compute_byte_offset(sf.content, (uint)node.range.end.line, (uint)node.range.end.column);
+	sz start_off = utils::compute_byte_offset(sf.content, (uint)node.range.start.line, (uint)node.range.start.column);
+	sz end_off = utils::compute_byte_offset(sf.content, (uint)node.range.end.line, (uint)node.range.end.column);
 
 	if (start_off < end_off && end_off <= sf.content.len)
 	{

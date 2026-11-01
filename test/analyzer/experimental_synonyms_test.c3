@@ -1,14 +1,5 @@
 module experimental_synonyms_test @test;
-
-import analyzer::core;
-import analyzer::parser;
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::document_symbols;
-import lsp;
-import uri;
-import std::io;
+import analyzer, lsp, uri, std::io;
 
 fn void test_distinct_keyword_as_typedef()
 {
@@ -178,11 +169,11 @@ fn void run(NativeId id, KeyCodes key) {
 	assert(h_id.contains("typedef NativeId = ulong"));
 	// 2. Go to definition on `KEY_ESC` (line 8, char 14) -> jumps to line 3
 	LspPosition key_pos = {.line = 8,.character = 14 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, key_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, key_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 3);
 	// 3. Document symbols outline
-	SymbolInformation[] syms = document_symbols::get_document_symbols(&proj, doc_uri)!!;
+	SymbolInformation[] syms = symbols::get_document_symbols(&proj, doc_uri)!!;
 	assert(syms.len >= 5);
 	bool found_distinct = false;
 	bool found_constset = false;

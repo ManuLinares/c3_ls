@@ -1,4 +1,4 @@
-module lsp::analysis::goto_definition;
+module lsp::analysis::definition;
 
 import analyzer::core;
 import analyzer::cursor;
@@ -8,9 +8,7 @@ import std::collections::list;
 import std::collections::map;
 import std::io;
 
-import lsp::core;
 import lsp;
-import lsp::analysis;
 import uri;
 
 fn bool node_to_location(LspProject* project, Uri fallback_uri, Node* node, LspLocation* out_loc)

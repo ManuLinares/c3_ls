@@ -1,34 +1,6 @@
 module lsp::server;
 
-import lsp::io_handler;
-import lsp::analysis;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::completion;
-import lsp::analysis::signature_help;
-import lsp::analysis::references;
-import lsp::analysis::rename;
-import lsp::analysis::semantic_tokens;
-import lsp::analysis::document_symbols;
-import lsp::analysis::workspace_symbols;
-import lsp::analysis::inlay_hints;
-import lsp::analysis::folding_ranges;
-import lsp::analysis::formatting;
-import lsp::analysis::code_actions;
-import lsp::bindgen;
-import lsp::translator;
-import lsp::core::config;
-import lsp::core::logger;
-import lsp;
-
-import std::io;
-import std::core::log;
-import std::thread;
-import std::time;
-import uri;
-import std::os::process;
-import std::collections::object;
-import std::collections::list;
+import lsp, uri, std::io, std::thread, std::time, std::os::process, std::collections::object, std::collections::list;
 
 bool is_ready;
 bool is_std_path_alloc;
@@ -501,7 +473,7 @@ fn void dispatch(LspMessage* message)
 				Uri? file_uri = uri::parse(tmem, message.params.definition.document.uri);
 				if (catch file_uri) return;
 				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				LspLocation[]? defs = goto_definition::goto_definition(proj, file_uri, message.params.definition.position);
+				LspLocation[]? defs = definition::goto_definition(proj, file_uri, message.params.definition.position);
 				LspGoToDefinitionResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -604,7 +576,7 @@ fn void dispatch(LspMessage* message)
 				Uri? file_uri = uri::parse(tmem, message.params.document_symbol.text_document.uri);
 				if (catch file_uri) return;
 				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				SymbolInformation[]? syms = document_symbols::get_document_symbols(proj, file_uri);
+				SymbolInformation[]? syms = symbols::get_document_symbols(proj, file_uri);
 				LspDocumentSymbolResponse resp = {
 					.jsonrpc = message.rpc,
 					.id = message.has_id ? message.id : -1,
@@ -617,13 +589,13 @@ fn void dispatch(LspMessage* message)
 			{
 				List{SymbolInformation} all_syms;
 				all_syms.tinit();
-				if (try syms = workspace_symbols::query_workspace_symbols(&project_manager.default_project, message.params.workspace_symbol.query))
+				if (try syms = symbols::query_workspace_symbols(&project_manager.default_project, message.params.workspace_symbol.query))
 				{
 					all_syms.push_all(syms);
 				}
 				project_manager.projects.@each(; root, proj)
 				{
-					if (try syms = workspace_symbols::query_workspace_symbols(proj, message.params.workspace_symbol.query))
+					if (try syms = symbols::query_workspace_symbols(proj, message.params.workspace_symbol.query))
 					{
 						all_syms.push_all(syms);
 					}

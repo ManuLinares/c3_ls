@@ -1,13 +1,6 @@
 module lsp::deep_method_chain_test @test;
 
-import lsp::core;
-import lsp::analysis::completion;
-import lsp::analysis::goto_definition;
-import lsp::analysis::hover;
-import lsp::analysis::signature_help;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_deep_method_and_member_chaining() @test
 {
@@ -90,12 +83,12 @@ fn void main() {
 	assert(h_clamp.contains("double.custom_clamp"));
 
 	// 5. Go to definition on `custom_clamp` (line 41, col 50) -> jumps to line 30
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, hover_clamp)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, hover_clamp)!!;
 	assert(locs.len > 0);
 	assert(locs[0].range.start.line == 30);
 
 	// 6. Go to definition on `get_e` (line 41, col 20) -> jumps to line 22
-	LspLocation[] locs_e = goto_definition::goto_definition(&proj, doc_uri, hover_get_e)!!;
+	LspLocation[] locs_e = definition::goto_definition(&proj, doc_uri, hover_get_e)!!;
 	assert(locs_e.len > 0);
 	assert(locs_e[0].range.start.line == 22);
 

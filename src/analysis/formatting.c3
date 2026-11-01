@@ -1,15 +1,5 @@
 module lsp::analysis::formatting;
-
-import analyzer::core;
-import analyzer::lexer;
-
-import std::collections::list;
-import std::io;
-
-import lsp::core;
-import lsp;
-import lsp::analysis;
-import uri;
+import analyzer, lsp, uri, std::collections::list, std::io;
 
 enum BraceKind : char
 {
@@ -832,7 +822,7 @@ FormattingOptions options
 
 	@pool()
 	{
-		sz[] line_offsets = analysis::build_line_offsets(tmem, full_buffer);
+		sz[] line_offsets = utils::build_line_offsets(tmem, full_buffer);
 
 		FormatterContext ctx = {
 			.buffer = full_buffer,
@@ -912,8 +902,8 @@ FormattingOptions options
 					end_doc_idx++;
 				}
 
-				sz start_off = analysis::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tok.range.start.line, (uint)tok.range.start.column);
-				sz end_off = analysis::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tokens[end_doc_idx].range.end.line, (uint)tokens[end_doc_idx].range.end.column);
+				sz start_off = utils::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tok.range.start.line, (uint)tok.range.start.column);
+				sz end_off = utils::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tokens[end_doc_idx].range.end.line, (uint)tokens[end_doc_idx].range.end.column);
 
 				if (start_off < end_off && end_off <= ctx.buffer.len)
 				{

@@ -1,18 +1,5 @@
 module lsp::analysis::hover;
-
-import analyzer::core;
-import analyzer::cursor;
-import analyzer::sema::query;
-import lsp::analysis::macro_expand;
-
-import std::collections::list;
-import std::collections::map;
-import std::io;
-
-import lsp::core;
-import lsp;
-import uri;
-import lsp::analysis;
+import analyzer, lsp, uri;
 
 struct CallFinderContext
 {
@@ -360,6 +347,58 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	Node* ct_node = acc_finder.found_access ? (Node*)acc_finder.found_access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
 	if (ct_node)
 	{
+		if (ct_node.kind == ACCESS_EXPR)
+		{
+			AccessExpr* acc = ct_node.as(AccessExpr);
+			String mem_name = cursor::spelling(acc.member, tmem);
+			if (acc.access_kind == STATIC)
+			{
+				if (try tp = constants::TypeProperty::lookup_field(name, mem_name))
+				{
+					String left_name = cursor::spelling(acc.left, tmem);
+					String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
+					DString h_buf;
+					h_buf.tinit();
+					h_buf.appendf("```c3\n%s::%s : %s\n", left_name, tp.name, tp.type_desc);
+					if (ct_eval.len > 0)
+					{
+						h_buf.appendf("// Compile-Time Evaluation:\n%s\n", ct_eval);
+					}
+					h_buf.append("```");
+					if (tp.doc.len > 0)
+					{
+						h_buf.appendf("\n\n%s", tp.doc);
+					}
+					return h_buf.str_view();
+				}
+			}
+			else
+			{
+				String left_str = cursor::spelling(acc.left, tmem);
+				bool is_reflect = (acc.left && (acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
+				if (is_reflect)
+				{
+					if (try rp = constants::ReflectProperty::lookup_field(name, mem_name))
+					{
+						String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
+						DString h_buf;
+						h_buf.tinit();
+						h_buf.appendf("```c3\n%s.%s : %s\n", left_str, rp.name, rp.type_desc);
+						if (ct_eval.len > 0)
+						{
+							h_buf.appendf("// Compile-Time Evaluation:\n%s\n", ct_eval);
+						}
+						h_buf.append("```");
+						if (rp.doc.len > 0)
+						{
+							h_buf.appendf("\n\n%s", rp.doc);
+						}
+						return h_buf.str_view();
+					}
+				}
+			}
+		}
+
 		String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
 		if (ct_eval.len > 0)
 		{

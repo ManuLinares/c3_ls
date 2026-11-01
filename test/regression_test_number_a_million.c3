@@ -1,17 +1,7 @@
 module lsp::regression_suite_test @test;
 
-import lsp::core;
-import lsp::core::config;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::macro_expand;
-import lsp;
-import uri;
-import std::io;
-import std::encoding::json;
-import std::collections::object;
-import std::collections::maybe;
-import analyzer::core;
+import lsp, uri, analyzer, std::io, std::encoding::json, std::collections::object, std::collections::maybe;
+
 <*
  Regression Test 1:
  Verifies that hover and Go-To-Definition work inside trailing macro blocks
@@ -48,7 +38,7 @@ fn void main() {
 	String h = hover::hover(&proj, app_uri, printfn_pos)!!;
 	assert(h.contains("fn void printfn"));
 	// Go to definition on `io::printfn` -> jumps to line 1 of std_io.c3
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, printfn_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, printfn_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("std_io.c3"));
 	assert(locs[0].range.start.line == 1);
@@ -108,7 +98,7 @@ fn void main() {
 	defer doc_uri.free();
 	// Hover over the non-existent function call
 	LspPosition pos = {.line = 2,.character = 5 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
 	// Must return an empty slice, never file:/// or invalid root locations
 	assert(locs.len == 0);
 }
@@ -158,7 +148,7 @@ fn void main() {
 	String h = hover::hover(&proj, app_uri, pos)!!;
 	assert(h.contains("fn void connect(String host, int port)"));
 
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("net_tcp.c3"));
 	assert(locs[0].range.start.line == 1);
@@ -404,7 +394,7 @@ fn void test() {
 	// Line 6: `  Path mock_dir = tmp_dir.tappend("c3_ls_test_sources")!!;`
 	// Cursor at character 28 on `tappend`
 	LspPosition pos = { .line = 6, .character = 28 };
-	LspLocation[] locs = goto_definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
 
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("io_path.c3"));
@@ -490,32 +480,32 @@ fn void test_lifecycle() {
 
 	// 1. Click on `translator` in `translator::decode` (line 6, col 30) -> jumps to module
 	LspPosition trans_pos = { .line = 6, .character = 30 };
-	LspLocation[] trans_locs = goto_definition::goto_definition(&proj, doc_uri, trans_pos)!!;
+	LspLocation[] trans_locs = definition::goto_definition(&proj, doc_uri, trans_pos)!!;
 	assert(trans_locs.len > 0);
 	assert(trans_locs[0].uri.contains("translator.c3"));
 
 	// 2. Click on `decode` in `translator::decode` (line 6, col 42) -> jumps to `fn decode`
 	LspPosition decode_pos = { .line = 6, .character = 42 };
-	LspLocation[] decode_locs = goto_definition::goto_definition(&proj, doc_uri, decode_pos)!!;
+	LspLocation[] decode_locs = definition::goto_definition(&proj, doc_uri, decode_pos)!!;
 	assert(decode_locs.len > 0);
 	assert(decode_locs[0].range.start.line == 17);
 
 	// 3. Click on `method` in `decoded.message.method` (line 8, col 24) -> jumps to `MessageKind method`
 	LspPosition method_pos = { .line = 8, .character = 24 };
-	LspLocation[] method_locs = goto_definition::goto_definition(&proj, doc_uri, method_pos)!!;
+	LspLocation[] method_locs = definition::goto_definition(&proj, doc_uri, method_pos)!!;
 	assert(method_locs.len > 0);
 	assert(method_locs[0].range.start.line == 11);
 
 	// 4. Click on `has_value` in `decoded.message.params.initialize.root_uri.has_value` (line 9, col 54)
 	LspPosition has_val_pos = { .line = 9, .character = 54 };
-	LspLocation[] has_val_locs = goto_definition::goto_definition(&proj, doc_uri, has_val_pos)!!;
+	LspLocation[] has_val_locs = definition::goto_definition(&proj, doc_uri, has_val_pos)!!;
 	assert(has_val_locs.len > 0);
 	assert(has_val_locs[0].uri.contains("maybe.c3"));
 	assert(has_val_locs[0].range.start.line == 2);
 
 	// 5. Click on `tappend` in `tmp_dir.tappend(...)!!;` (line 14, col 28) -> jumps to `tappend`
 	LspPosition tappend_pos = { .line = 14, .character = 28 };
-	LspLocation[] tappend_locs = goto_definition::goto_definition(&proj, doc_uri, tappend_pos)!!;
+	LspLocation[] tappend_locs = definition::goto_definition(&proj, doc_uri, tappend_pos)!!;
 	assert(tappend_locs.len > 0);
 	assert(tappend_locs[0].uri.contains("path.c3"));
 
@@ -529,7 +519,7 @@ fn void test_lifecycle() {
 	assert(path_hover.contains("alias Path"));
 
 	// 8. Go to Definition on `Path`
-	LspLocation[] path_locs = goto_definition::goto_definition(&proj, doc_uri, path_pos)!!;
+	LspLocation[] path_locs = definition::goto_definition(&proj, doc_uri, path_pos)!!;
 	assert(path_locs.len > 0);
 	assert(path_locs[0].uri.contains("path.c3"));
 	assert(path_locs[0].range.start.line == 1);

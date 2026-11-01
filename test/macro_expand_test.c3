@@ -1,12 +1,5 @@
 module lsp::macro_expand_test @test;
-
-import lsp::core;
-import lsp::analysis::hover;
-import lsp::analysis::goto_definition;
-import lsp::analysis::macro_expand;
-import lsp;
-import uri;
-import std::io;
+import lsp, uri, std::io;
 
 fn void test_expression_macro_expansion()
 {
@@ -157,7 +150,7 @@ fn void test_res() {
 	defer doc_uri.free();
 	// 1. Go to definition on `OkType` in `struct Result` (line 3, col 4)
 	LspPosition ok_type_pos = {.line = 3,.character = 4 };
-	LspLocation[] ok_locs = goto_definition::goto_definition(&proj, doc_uri, ok_type_pos)!!;
+	LspLocation[] ok_locs = definition::goto_definition(&proj, doc_uri, ok_type_pos)!!;
 	assert(ok_locs.len > 0);
 	assert(ok_locs[0].range.start.line == 0);
 	// 2. Hover on `OkType` in `struct Result`
@@ -169,7 +162,7 @@ fn void test_res() {
 	assert(or_else_hover.contains("macro OkType Result.@or_else"));
 	assert(or_else_hover.contains("@body"));
 	// 4. Go to definition on `or_else`
-	LspLocation[] or_else_locs = goto_definition::goto_definition(&proj, doc_uri, or_else_pos)!!;
+	LspLocation[] or_else_locs = definition::goto_definition(&proj, doc_uri, or_else_pos)!!;
 	assert(or_else_locs.len > 0);
 	assert(or_else_locs[0].range.start.line == 11);
 }
