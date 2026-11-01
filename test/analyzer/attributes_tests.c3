@@ -526,3 +526,34 @@ fn void run() @inline {}
 	assert(h_inline.contains("attribute @inline"));
 	assert(h_inline.contains("Forces function or call-site inlining."));
 }
+
+fn void test_module_attribute_excludes_attrmacro() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String code = `module attrtest_mod;
+attrmacro @MathLibc = @inline;
+module another_mod @
+`;
+
+	proj.workspace.process_file("/virtual/attr_mod.c3", code);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/attr_mod.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 2, .character = 20 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_private = false;
+	bool found_math_libc = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "@private") found_private = true;
+		if (item.label == "@MathLibc") found_math_libc = true;
+	}
+
+	assert(found_private);
+	assert(!found_math_libc);
+}

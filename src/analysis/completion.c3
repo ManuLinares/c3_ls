@@ -3440,7 +3440,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	else if (ctx.scope == ATTRIBUTE)
 	{
 		provide_builtin_attributes_for_target(&ctx, &items, ctx.attr_target);
-		if (ctx.attr_target != IMPORT && ctx.attr_target != CALL && ctx.attr_target != SWITCH)
+		if (ctx.attr_target != IMPORT && ctx.attr_target != MODULE && ctx.attr_target != CALL && ctx.attr_target != SWITCH && ctx.attr_target != ATTRDEF)
 		{
 			provide_attrmacros(&ctx, &items);
 		}
