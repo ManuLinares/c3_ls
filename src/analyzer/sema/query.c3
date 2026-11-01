@@ -465,6 +465,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 	if (sf)
 	{
 		List{String} imports = get_imported_modules_at_location(sf, loc);
+		String suffix = string::tformat("::%s", mod_prefix);
 		foreach (imp : imports)
 		{
 			String imp_sub = string::tformat("%s::%s", imp, mod_prefix);
@@ -472,6 +473,15 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			{
 				return submod;
 			}
+
+			String imp_prefix = string::tformat("%s::", imp);
+			context.modules.@each(; mname, m)
+			{
+				if (mname.starts_with(imp_prefix) && (mname == mod_prefix || mname.ends_with(suffix)))
+				{
+					return m;
+				}
+			};
 		}
 	}
 

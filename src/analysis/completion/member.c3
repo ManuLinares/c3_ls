@@ -924,7 +924,7 @@ fn void provide_enum_variants(List{CompletionItem} * items, Node* enum_node, Str
 				.detail = string::tformat("enum %s", type_name),
 				.insertText = insert_str,
 				.filterText = vname,
-				.sortText = string::tformat("0001_%s", vname),
+				.sortText = string::tformat("0000_%s", vname),
 				.data = string::tformat("enum_variant:%s:%s", type_name, vname)
 			}
 			);
@@ -1162,16 +1162,19 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 		case STATIC:
 			{
 				Location loc = { .line = (int)ctx.position.line, .column = (int)ctx.position.character };
-				String type_name = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, base_id, loc);
-				String clean_type = type_name;
-				if (try brace_idx = type_name.index_of_char('{'))
-				{
-					clean_type = type_name[:brace_idx].trim();
-				}
 
-				if (ctx.ws && ctx.ws.ctx)
+				bool is_type_name = (base_id.len > 0 && base_id[0] >= 'A' && base_id[0] <= 'Z') ||
+					constants::is_primitive(base_id) ||
+					base_id.contains("{") ||
+					base_id.starts_with("$");
+
+				if (!is_type_name && ctx.ws && ctx.ws.ctx)
 				{
-					Module* mod = analysis::find_module_by_identifier(ctx.ws, "", clean_type);
+					Module* mod = query::resolve_module_for_prefix(ctx.ws.ctx, ctx.sf, loc, base_id);
+					if (!mod)
+					{
+						mod = analysis::find_module_by_identifier(ctx.ws, "", base_id);
+					}
 					if (mod)
 					{
 						foreach (node : mod.nodes)
@@ -1192,7 +1195,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 									String fname = fdecl.name ? fdecl.name.text : "";
 									if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 									{
-										add_symbol_completion(ctx, items, fname, fault_node, clean_type, ctx.prefix);
+										add_symbol_completion(ctx, items, fname, fault_node, base_id, ctx.prefix);
 									}
 								}
 								continue;
@@ -1204,22 +1207,24 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 							if (sym_name.len == 0) continue;
 							if (fuzzy_match(sym_name, ctx.prefix))
 							{
-								add_symbol_completion(ctx, items, sym_name, node, clean_type, ctx.prefix);
+								add_symbol_completion(ctx, items, sym_name, node, base_id, ctx.prefix);
 							}
 						}
 						return true;
 					}
 				}
 
+				String type_name = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, base_id, loc);
+				String clean_type = type_name;
+				if (try brace_idx = type_name.index_of_char('{'))
+				{
+					clean_type = type_name[:brace_idx].trim();
+				}
+
 				List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(clean_type, ctx.sf);
 				if (syms.len() > 0 && syms.get(0).node)
 				{
 					Node* sym_node = syms.get(0).node;
-					if (sym_node.kind == ENUM_DECL)
-					{
-						provide_enum_variants(items, sym_node, type_name, ctx.prefix, ctx.missing_second_colon);
-					}
-
 					analysis::inject_type_properties(items, sym_node.kind, type_name, ctx.missing_second_colon);
 					return true;
 				}
@@ -1273,7 +1278,6 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem} * items)
 					if (is_type_access)
 					{
 						provide_enum_variants(items, type_node, clean_type, ctx.prefix, false);
-						analysis::inject_type_properties(items, type_node.kind, clean_type, false);
 					}
 					else
 					{

@@ -2444,7 +2444,47 @@ fn void run(Color c) {
 		if (item.label == "GREEN") found_green = true;
 		if (item.label == "values") found_values = true;
 	}
-	assert(found_red);
-	assert(found_green);
+	assert(!found_red);
+	assert(!found_green);
 	assert(found_values);
+}
+
+fn void test_recursive_import_submodule_static_completion() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String file_mod = `module std::io::file;
+fn void* open(String path, String mode) { return null; }
+fn void* load_temp(String path) { return null; }
+`;
+
+	String app_code = `module sometest;
+import std;
+
+fn void test_fn() {
+	file::
+}
+`;
+
+	proj.workspace.process_file("/virtual/file.c3", file_mod);
+	proj.workspace.process_file("/virtual/sometest.c3", app_code);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/sometest.c3");
+	defer doc_uri.free();
+
+	// Line 4, character 7: right after `file::`
+	LspPosition pos = { .line = 4, .character = 7 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_open = false;
+	bool found_load_temp = false;
+	foreach (item : items)
+	{
+		if (item.label == "open") found_open = true;
+		if (item.label == "load_temp") found_load_temp = true;
+	}
+	assert(found_open);
+	assert(found_load_temp);
 }

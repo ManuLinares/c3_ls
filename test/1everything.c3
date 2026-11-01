@@ -889,7 +889,7 @@ fn void compound_feat_demo() @feat(POSIX, WIN32) @feat(!WASM)
 tlocal int thread_local_counter = 0;
 
 // Standalone main entry point exercising language features
-fn int main()
+fn int shit_main()
 {
 	// Variable declarations with zero-init and @noinit
 	int zeroed_var;
