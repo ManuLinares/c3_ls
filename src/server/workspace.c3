@@ -31,7 +31,7 @@ struct LspWorkspace
 LspWorkspace* active_workspace @local = null;
 String active_processing_path @local = "";
 
-const uint MAX_DIAGNOSTICS_PER_FILE = 100;
+const sz MAX_DIAGNOSTICS_PER_FILE = 100;
 
 fn void on_analyzer_diagnostic(SourceFile* file, Range range, DiagnosticLevel level, String message)
 {

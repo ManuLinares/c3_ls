@@ -13,6 +13,46 @@
   "targets": {
     "c3_ls": {
       "type": "executable"
+    },
+    "web": {
+      "type": "executable",
+      "target": "emscripten",
+      "name": "index.html",
+      "output": "build/web",
+      "sources-override": [ "src/analyzer/**", "src/web.c3" ],
+      "features": [ "ANALYZER_CLI" ],
+      "debug-info": "none",
+      "opt": "O3",
+      "link-args": [
+        "-g0",
+        "-O3",
+        "-sASSERTIONS=0",
+        "-sSTACK_SIZE=4194304",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sNO_EXIT_RUNTIME=1",
+        "-sEXPORTED_FUNCTIONS=_main",
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap",
+        "--shell-file resources/web_shell.html"
+      ]
+    },
+    "web-debug": {
+      "type": "executable",
+      "target": "emscripten",
+      "name": "index.html",
+      "output": "build/web",
+      "sources-override": [ "src/analyzer/**", "src/web.c3" ],
+      "features": [ "ANALYZER_CLI" ],
+      "debug-info": "full",
+      "link-args": [
+        "-g3",
+        "-sASSERTIONS=2",
+        "-sSTACK_SIZE=4194304",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sNO_EXIT_RUNTIME=1",
+        "-sEXPORTED_FUNCTIONS=_main",
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap",
+        "--shell-file resources/web_shell.html"
+      ]
     }
   },
   "cpu": "generic",

@@ -59,10 +59,10 @@ fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
 	String s = line.str_view();
 	if (!s.contains("Content-Length:")) return translator::INVALID_MESSAGE~;
 
-	uint content_length = 0;
+	sz content_length = 0;
 	if (try cl_pos = s.index_of("Content-Length:"))
 	{
-		content_length = s[cl_pos + 15..].trim().to_uint() ?? 0;
+		content_length = (sz)(s[cl_pos + 15..].trim().to_uint() ?? 0);
 	}
 	if (content_length == 0) return translator::INVALID_MESSAGE~;
 	// Consume remaining headers until hitting the blank separator line

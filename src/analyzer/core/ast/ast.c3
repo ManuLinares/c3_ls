@@ -53,7 +53,12 @@ macro Node* Ast.error(&self, Range range)
 *>
 macro Ast.alloc_node(&self, $Type, Range range)
 {
-	$Type* node = alloc::new(self.allocator, $Type);
+	$Type* node;
+	$if $Type::alignment > mem::DEFAULT_MEM_ALIGNMENT:
+		node = alloc::new_aligned(self.allocator, $Type)!!;
+	$else
+		node = alloc::new(self.allocator, $Type);
+	$endif
 
 	node.kind = NodeKind.$eval(@typename_to_constname($Type::name));
 	node.range = range;

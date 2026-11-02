@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>C3 AST Playground</title>
+	<style>
+		* { box-sizing: border-box; margin: 0; padding: 0; }
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+			background: #181818;
+			color: #e0e0e0;
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+			overflow: hidden;
+		}
+		header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 8px 16px;
+			background: #222;
+			border-bottom: 1px solid #333;
+		}
+		h1 { font-size: 14px; font-weight: 600; }
+		#status { font-size: 12px; color: #888; }
+		main {
+			display: flex;
+			flex: 1;
+			overflow: hidden;
+		}
+		.pane {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+		.pane:first-child { border-right: 1px solid #333; }
+		.pane-header {
+			font-size: 11px;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
+			padding: 6px 12px;
+			background: #1e1e1e;
+			color: #888;
+			border-bottom: 1px solid #2d2d2d;
+		}
+		textarea, pre {
+			flex: 1;
+			padding: 12px;
+			font-family: "JetBrains Mono", "Fira Code", Menlo, monospace;
+			font-size: 13px;
+			line-height: 1.5;
+			border: none;
+			outline: none;
+			resize: none;
+			overflow: auto;
+			tab-size: 4;
+		}
+		textarea {
+			background: #181818;
+			color: #d4d4d4;
+		}
+		pre {
+			background: #141414;
+			color: #9cdcfe;
+		}
+	</style>
+</head>
+<body>
+	<header>
+		<h1>C3 AST Playground</h1>
+		<span id="status">Loading WebAssembly...</span>
+	</header>
+	<main>
+		<div class="pane">
+			<div class="pane-header">C3 Source</div>
+			<textarea id="code" spellcheck="false">module demo;
+
+struct Point {
+    int x;
+    int y;
+}
+
+fn int add(Point p, int offset) {
+    return p.x + p.y + offset;
+}
+</textarea>
+		</div>
+		<div class="pane">
+			<div class="pane-header">Serialized AST (JSON)</div>
+			<pre id="output"><code></code></pre>
+		</div>
+	</main>
+	<script>
+		var parseFn = null;
+		var timer = null;
+
+		function triggerParse() {
+			if (!parseFn) return;
+			var src = document.getElementById('code').value;
+			var t0 = performance.now();
+			var json = parseFn(src);
+			var t1 = performance.now();
+			document.getElementById('output').firstElementChild.textContent = json;
+			document.getElementById('status').textContent = 'Parsed in ' + (t1 - t0).toFixed(2) + ' ms';
+		}
+
+		var codeEl = document.getElementById('code');
+		codeEl.addEventListener('input', function() {
+			clearTimeout(timer);
+			timer = setTimeout(triggerParse, 150);
+		});
+
+		codeEl.addEventListener('keydown', function(e) {
+			if (e.key === 'Tab') {
+				e.preventDefault();
+				var start = this.selectionStart;
+				var end = this.selectionEnd;
+				this.value = this.value.substring(0, start) + "\t" + this.value.substring(end);
+				this.selectionStart = this.selectionEnd = start + 1;
+				triggerParse();
+			}
+		});
+
+		var Module = {
+			postRun: [function() {
+				parseFn = Module.cwrap('parse_c3_ast', 'string', ['string']);
+				document.getElementById('status').textContent = 'Ready';
+				triggerParse();
+			}],
+			printErr: function(text) {
+				console.error(text);
+			}
+		};
+	</script>
+	{{{ SCRIPT }}}
+</body>
+</html>

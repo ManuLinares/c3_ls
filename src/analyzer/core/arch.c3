@@ -18,9 +18,11 @@ fn char ptr_size(ArchType arch)
 		case X86_64:
 		case AARCH64:
 		case RISCV64:
+		case WASM64:
 			return 8;
 		case X86:
 		case ARM:
+		case WASM32:
 			return 4;
 		default:
 			return 0;

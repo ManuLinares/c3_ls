@@ -1,5 +1,5 @@
-module analyzer::core::ast::serialize @feat(ANALYZER_CLI);
-import analyzer::core::diagnostics, std::collections::ref, std::collections::maybe, std::io;
+module analyzer::core::ast::serialize @feat(ANALYZER_CLI | EMSCRIPTEN);
+import analyzer, std::collections::ref, std::collections::maybe, std::io;
 
 alias JsonOutput @local = DString;
 
@@ -38,21 +38,48 @@ macro void serialize(JsonOutput* output, item, int indent, int depth) @local
 			$endforeach
 			output.end_obj(indent, depth);
 
+		$case $Typeof(item) == Ident*:
+			if (item == null)
+			{
+				output.append("null");
+			}
+			else
+			{
+				output.appendf(`"%s"`, item.text);
+			}
+
+		$case $Typeof(item) == Type*:
+			if (item == null)
+			{
+				output.append("null");
+			}
+			else
+			{
+				output.appendf(`"%s"`, item.name);
+			}
+
 		$case $Typeof(item) == TypeExpr:
-			// $if TypeExpr::members.len != 3:
-			// 	$error "UPDATE THIS CODE HERE";
-			// $endif
 			output.start_obj(indent);
-
-			output.ser_entry("kind", item.kind,   indent, depth + 1);
-			output.ser_entry("optional", item.optional,  indent, depth + 1);
-			var $sw = "switch (item.kind.ordinal) {";
-			$foreach $i, $m : TypeExpr::members[^ 1].members:
-				$sw +++= @sprintf(`case %s: output.ser_entry("%s", item.$eval("%s"),   indent, depth + 1);`, $i, $m.name, $m.name);
-			$endforeach
-			$sw +++= "default: }";
-			$expand($sw);
-
+			output.ser_entry("type_kind", item.type_kind, indent, depth + 1);
+			output.ser_entry("optional", item.optional, indent, depth + 1);
+			switch (item.type_kind)
+			{
+				case TYPE_IDENTIFIER:
+					output.ser_entry("unresolved", item.unresolved, indent, depth + 1);
+				case TYPE_POINTER:
+				case TYPE_SLICE:
+					output.ser_entry("modify", item.modify, indent, depth + 1);
+				case TYPE_ARRAY:
+				case TYPE_VECTOR:
+					output.ser_entry("array", item.array, indent, depth + 1);
+				case TYPE_GENERIC:
+					output.ser_entry("generic", item.generic, indent, depth + 1);
+				case TYPE_TYPEOF:
+				case TYPE_TYPEFROM:
+					output.ser_entry("expr", item.expr, indent, depth + 1);
+				case TYPE_FUNCTION:
+					output.ser_entry("func", item.func, indent, depth + 1);
+			}
 			output.end_obj(indent, depth);
 
 		$case $Typeof(item)::kind == STRUCT:
@@ -62,11 +89,8 @@ macro void serialize(JsonOutput* output, item, int indent, int depth) @local
 			$endforeach
 			output.end_obj(indent, depth);
 
-		$case $Typeof(item) == Location:
-			output.appendf("{ line = %s, column = %s }", item.line, item.column);
-
 		$case $Typeof(item) == Ident:
-			output.appendf("%s", item.text);
+			output.appendf(`"%s"`, item.text);
 
 		$case $defined(item[0]) &&& $defined(lengthof(item)):
 			sz l_len = lengthof(item);
