@@ -1,5 +1,4 @@
 module lsp::analysis::completion;
-
 import analyzer::core, analyzer::cursor, analyzer::sema, std::collections, lsp, uri;
 
 enum ScopeKind
@@ -59,6 +58,7 @@ struct Context
 	bool is_designated_initializer;
 	bool designated_has_dot;
 	sz switch_open_brace;
+	bool is_stmt;
 }
 
 struct LocalCollectorContext
@@ -99,7 +99,14 @@ fn bool fuzzy_match(String target, String prefix)
 	return pi == prefix.len;
 }
 
-fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String symbol_name, Node* node, String base_identifier, String prefix = "")
+fn void add_symbol_completion(
+	Context* ctx,
+	List{CompletionItem}* items,
+	String symbol_name,
+	Node* node,
+	String base_identifier,
+	String prefix = ""
+)
 {
 	if (!node) return;
 
@@ -114,17 +121,6 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 	}
 
 	InsertTextFormat format = PLAIN_TEXT;
-
-	bool is_stmt = (ctx.scope == EXECUTION);
-	if (is_stmt && ctx.sf && ctx.offset <= ctx.sf.content.len)
-	{
-		sz p = ctx.offset;
-		while (p < ctx.sf.content.len && ctx.sf.content[p] != '\n')
-		{
-			if (ctx.sf.content[p] == ';') { is_stmt = false; break; }
-			p++;
-		}
-	}
 
 	switch (node.kind)
 	{
@@ -144,15 +140,36 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 					is_void = true;
 				}
 
-				if (is_void && is_stmt)
+				sz param_count = fd.params.len;
+				if (fd.associated_type != null && param_count > 0)
 				{
-					insert_text = string::tformat("%s($1);", insert_text);
+					param_count--;
+				}
+
+				if (param_count == 0)
+				{
+					if (is_void && ctx.is_stmt)
+					{
+						insert_text = string::tformat("%s();", insert_text);
+					}
+					else
+					{
+						insert_text = string::tformat("%s()", insert_text);
+					}
+					format = PLAIN_TEXT;
 				}
 				else
 				{
-					insert_text = string::tformat("%s($1)", insert_text);
+					if (is_void && ctx.is_stmt)
+					{
+						insert_text = string::tformat("%s($1);", insert_text);
+					}
+					else
+					{
+						insert_text = string::tformat("%s($1)", insert_text);
+					}
+					format = SNIPPET;
 				}
-				format = SNIPPET;
 			}
 		case MACRO_DECL:
 			{
@@ -170,15 +187,36 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 					is_void = true;
 				}
 
-				if (is_void && is_stmt)
+				sz param_count = md.params.len;
+				if (@ok(md.associated_type.get()) && param_count > 0)
 				{
-					insert_text = string::tformat("%s($1);", insert_text);
+					param_count--;
+				}
+
+				if (param_count == 0 && !md.body_params)
+				{
+					if (is_void && ctx.is_stmt)
+					{
+						insert_text = string::tformat("%s();", insert_text);
+					}
+					else
+					{
+						insert_text = string::tformat("%s()", insert_text);
+					}
+					format = PLAIN_TEXT;
 				}
 				else
 				{
-					insert_text = string::tformat("%s($1)", insert_text);
+					if (is_void && ctx.is_stmt)
+					{
+						insert_text = string::tformat("%s($1);", insert_text);
+					}
+					else
+					{
+						insert_text = string::tformat("%s($1)", insert_text);
+					}
+					format = SNIPPET;
 				}
-				format = SNIPPET;
 			}
 		case INTERFACE_DECL:
 			type_desc = "interface";
@@ -195,7 +233,7 @@ fn void add_symbol_completion(Context* ctx, List{CompletionItem}* items, String 
 		case VAR_DECL:
 			{
 				VarDecl* decl = node.as(VarDecl);
-				type_desc = decl.var_flags.is_const ? "constant" : "global var";
+				type_desc = decl.var_flags.is_const ? "constant" : (decl.var_kind == VAR_FIELD ? "field" : "global var");
 				if (decl.type) node_type = cursor::raw_type_identifier(decl.type) ?? "";
 			}
 		default:
@@ -314,7 +352,7 @@ fn bool is_type_position(Context* ctx)
 		sz scan = p - 1;
 		while (scan > 0 && (ctx.sf.content[scan - 1] == ' ' || ctx.sf.content[scan - 1] == '\t')) scan--;
 		sz kw_end = scan;
-		while (scan > 0 && ctx.sf.content[scan - 1].is_alnum()) scan--;
+		while (scan > 0 && (ctx.sf.content[scan - 1].is_alnum() || ctx.sf.content[scan - 1] == '_')) scan--;
 		String kw = ctx.sf.content[scan : kw_end - scan].trim();
 		if (kw == "if" || kw == "while" || kw == "for" || kw == "foreach" || kw == "switch" || kw == "catch")
 		{
@@ -329,12 +367,20 @@ fn bool is_type_position(Context* ctx)
 				if (!body || !body.range.contains(loc)) return true;
 			}
 		}
+		if (kw_end > scan)
+		{
+			return false;
+		}
 		if (prev_char == '(') return true;
 		return false;
 	}
 
 	return false;
 }
+
+// ---------------------------------------------------------------------------
+// Candidate Providers
+// ---------------------------------------------------------------------------
 
 fn bool is_matching_target(AttributeTargetMask mask, AttributeTargetKind target)
 {
@@ -380,19 +426,12 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 		{
 			case GLOBAL:
 				if (!kw.flags.is_top_level) continue;
-				break;
-
 			case CONTAINER:
 				if (!kw.flags.is_container) continue;
-				break;
-
 			case EXECUTION:
 				if (!kw.flags.is_statement && !kw.flags.is_expression) continue;
-				break;
-
 			case TYPE_ASSIGNMENT:
 				if (!kw.flags.is_expression) continue;
-				break;
 			default:
 				break;
 		}
@@ -405,7 +444,7 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 				.detail = "Keyword",
 				.insertText = kw.name,
 				.filterText = kw.name,
-				.sortText = string::tformat("0010_%s", kw.name),
+				.sortText = string::tformat("0010_%s", kw.name)
 			}
 			);
 		}
@@ -523,10 +562,6 @@ fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
 		}
 	};
 }
-
-// ---------------------------------------------------------------------------
-// Module Completion
-// ---------------------------------------------------------------------------
 
 fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFile* sf = null, sz offset = 0)
 {
@@ -651,10 +686,6 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFi
 	};
 }
 
-// ---------------------------------------------------------------------------
-// Local & Named Parameter Completion
-// ---------------------------------------------------------------------------
-
 fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
@@ -678,6 +709,11 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 					}
 					if (lctx.seen.add(vname))
 					{
+						String sort_prefix = "0001";
+						if (lctx.ctx.expected_type.len > 0)
+						{
+							sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
+						}
 						lctx.items.push(
 						{
 							.label = vname,
@@ -685,7 +721,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 							.detail = vtype,
 							.insertText = vname,
 							.filterText = vname,
-							.sortText = string::tformat("0001_%s", vname),
+							.sortText = string::tformat("%s_%s", sort_prefix, vname),
 							.data = string::tformat("local:%s", vname)
 						}
 						);
@@ -708,6 +744,11 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 					itype = itype.trim_right("?*& \t");
 					if (itype.len > 0) vtype = itype;
 				}
+				String sort_prefix = "0001";
+				if (lctx.ctx.expected_type.len > 0)
+				{
+					sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
+				}
 				lctx.items.push(
 				{
 					.label = vname,
@@ -715,7 +756,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 					.detail = vtype,
 					.insertText = vname,
 					.filterText = vname,
-					.sortText = string::tformat("0001_%s", vname),
+					.sortText = string::tformat("%s_%s", sort_prefix, vname),
 					.data = string::tformat("local:%s", vname)
 				}
 				);
@@ -732,6 +773,11 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 						if (lctx.seen.add(vname))
 						{
 							String vtype = ce.type ? (cursor::spelling(ce.type, tmem) ?: "fault") : "fault";
+							String sort_prefix = "0001";
+							if (lctx.ctx.expected_type.len > 0)
+							{
+								sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
+							}
 							lctx.items.push(
 							{
 								.label = vname,
@@ -739,7 +785,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 								.detail = vtype,
 								.insertText = vname,
 								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname),
+								.sortText = string::tformat("%s_%s", sort_prefix, vname),
 								.data = string::tformat("local:%s", vname)
 							}
 							);
@@ -994,6 +1040,7 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 		if (fuzzy_match(pname, ctx.prefix))
 		{
 			String ptype = vd.type ? (cursor::spelling(vd.type, tmem) ?: "any") : "any";
+			String sort_prefix = (param_pos_idx == (sz)target_info.active_param) ? "0002" : "0004";
 			items.push(
 			{
 				.label = string::tformat("%s:", pname),
@@ -1001,17 +1048,13 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 				.detail = string::tformat("%s %s:", ptype, pname),
 				.insertText = string::tformat("%s: ", pname),
 				.filterText = pname,
-				.sortText = string::tformat("0000_%s", pname),
+				.sortText = string::tformat("%s_%s", sort_prefix, pname),
 				.data = "property"
 			}
 			);
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Global Completion
-// ---------------------------------------------------------------------------
 
 fn void provide_global(Context* ctx, List{CompletionItem}* items)
 {
@@ -1251,7 +1294,7 @@ fn void provide_global_types_only(Context* ctx, List{CompletionItem}* items)
 }
 
 // ---------------------------------------------------------------------------
-// Member & Designated Initializer Completion
+// Member Access & Initializers
 // ---------------------------------------------------------------------------
 
 fn String resolve_root_initializer_type(Context* ctx, SourceFile* sf, sz pos)
@@ -2491,7 +2534,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 }
 
 // ---------------------------------------------------------------------------
-// Scope Detection & Resolution Logic
+// Context Classification
 // ---------------------------------------------------------------------------
 
 fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind* out_target)
@@ -3003,6 +3046,58 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 		}
 	}
 
+	if (ctx.sf && ctx.offset > 0)
+	{
+		CallTargetInfo target_info = utils::parse_call_context(ctx.sf.content, ctx.offset);
+		if (target_info.is_valid && target_info.callee_name.len > 0)
+		{
+			Node* callee_node = (ctx.ws && ctx.ws.ctx) ? query::resolve_callee_by_name(ctx.ws.ctx, ctx.sf, target_info.callee_name, loc) : null;
+			if (callee_node)
+			{
+				NodeArray params = {};
+				bool is_method = false;
+
+				switch (callee_node.kind)
+				{
+					case FN_DECL:
+						{
+							FnDecl* fd = callee_node.as(FnDecl);
+							params = fd.params;
+							is_method = (fd.associated_type != null);
+						}
+					case MACRO_DECL:
+						{
+							MacroDecl* md = callee_node.as(MacroDecl);
+							params = md.params;
+							is_method = @ok(md.associated_type.get());
+						}
+					default:
+						break;
+				}
+
+				sz param_offset = (target_info.callee_name.contains(".") && is_method) ? 1 : 0;
+				sz param_idx = (sz)target_info.active_param + param_offset;
+				if (param_idx < params.len)
+				{
+					Node* p = params[param_idx];
+					if (p && p.kind == VAR_DECL)
+					{
+						VarDecl* vd = p.as(VarDecl);
+						if (vd.type)
+						{
+							String ptype = cursor::raw_type_identifier(vd.type) ?? cursor::spelling(vd.type, tmem);
+							ptype = ptype.trim_right("*& \t");
+							if (ptype.len > 0 && out_expected_type)
+							{
+								*out_expected_type = ptype;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if (loc.line >= 0)
 	{
 		foreach (stmt : ctx.sf.ast.statements)
@@ -3080,7 +3175,7 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem}* it
 }
 
 // ---------------------------------------------------------------------------
-// Resolve Item & Resolve Completion Entries
+// Item Resolution
 // ---------------------------------------------------------------------------
 
 fn void resolve_item(LspProject* project, CompletionItem* item)
@@ -3382,10 +3477,12 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Entry Point
+// ---------------------------------------------------------------------------
+
 fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 {
-	log::debug("completion resolve at line %d, char %d", pos.line, pos.character);
-
 	List{CompletionItem} items;
 	items.init(tmem);
 
@@ -3406,21 +3503,36 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 
 	String caller_mod = query::get_module_name_at_location(sf, loc);
 
+	bool is_stmt = false;
+	if (offset <= sf.content.len)
+	{
+		sz p = offset;
+		is_stmt = true;
+		while (p < sf.content.len && sf.content[p] != '\n')
+		{
+			if (sf.content[p] == ';') { is_stmt = false; break; }
+			p++;
+		}
+	}
+
 	Context ctx = {
 		.uri = uri,
 		.position = pos,
+		.offset = offset,
 		.ws = &project.workspace,
 		.sf = sf,
 		.allocator = tmem,
 		.scope = EXECUTION,
 		.attr_target = NONE,
-		.offset = offset,
+		.access = NONE,
+		.base_identifier = "",
 		.expected_type = "",
 		.caller_mod = caller_mod,
 		.missing_second_colon = false,
 		.is_designated_initializer = false,
 		.designated_has_dot = false,
 		.switch_open_brace = -1,
+		.is_stmt = is_stmt
 	};
 
 	ctx.prefix = utils::extract_prefix(sf.content, ctx.offset);
@@ -3431,7 +3543,6 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 	ctx.expected_type = expected_type;
 
 	detect_access_context(&ctx, sf);
-	log::debug("completion: prefix=%s scope=%s access=%s", ctx.prefix, scope, ctx.access);
 
 	if (ctx.scope == NONE)
 	{
@@ -3479,6 +3590,7 @@ fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
 			{
 				collect_already_handled_cases(ctx.sf.content, ctx.switch_open_brace, ctx.offset, ctx.prefix.len, &seen_cases);
 			}
+			provide_named_args(&ctx, &items);
 			provide_expected_type_completions(&ctx, &items, expected_type, in_switch ? &seen_cases : null);
 			provide_locals(&ctx, &items);
 			provide_global(&ctx, &items);

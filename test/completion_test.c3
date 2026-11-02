@@ -1242,6 +1242,115 @@ fn void main() {
 	assert(found_compute);
 }
 
+fn void test_zero_param_call_completion_has_no_tabstops() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+fn void do_stuff() {}
+fn int get_val() => 42;
+
+struct Target { int id; }
+fn void Target.reset(&self) {}
+
+fn void main() {
+    Target t;
+    do_st
+    int x = get_v
+    t.res
+}
+`;
+
+	proj.workspace.process_file("/virtual/zero_params.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/zero_params.c3");
+	defer doc_uri.free();
+
+	// 1. Statement-level void 0-param function: cursor after `do_st` (line 10, col 9)
+	LspPosition pos1 = { .line = 10, .character = 9 };
+	CompletionItem[] items1 = completion::resolve(&proj, doc_uri, pos1)!!;
+	bool found_do_stuff = false;
+	foreach (item : items1)
+	{
+		if (item.label == "do_stuff")
+		{
+			found_do_stuff = true;
+			test::eq(item.insertText, "do_stuff();");
+			test::eq(item.insertTextFormat, InsertTextFormat.PLAIN_TEXT);
+		}
+	}
+	assert(found_do_stuff);
+
+	// 2. Expression-level non-void 0-param function: cursor after `get_v` (line 11, col 17)
+	LspPosition pos2 = { .line = 11, .character = 17 };
+	CompletionItem[] items2 = completion::resolve(&proj, doc_uri, pos2)!!;
+	bool found_get_val = false;
+	foreach (item : items2)
+	{
+		if (item.label == "get_val")
+		{
+			found_get_val = true;
+			test::eq(item.insertText, "get_val()");
+			test::eq(item.insertTextFormat, InsertTextFormat.PLAIN_TEXT);
+		}
+	}
+	assert(found_get_val);
+
+	// 3. Statement-level void method taking only &self: cursor after `t.res` (line 12, col 9)
+	LspPosition pos3 = { .line = 12, .character = 9 };
+	CompletionItem[] items3 = completion::resolve(&proj, doc_uri, pos3)!!;
+	bool found_reset = false;
+	foreach (item : items3)
+	{
+		if (item.label == "reset")
+		{
+			found_reset = true;
+			test::eq(item.insertText, "reset();");
+			test::eq(item.insertTextFormat, InsertTextFormat.PLAIN_TEXT);
+		}
+	}
+	assert(found_reset);
+}
+
+fn void test_enum_call_provides_named_args() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+
+enum LogLevel { DEBUG, INFO, ERROR }
+fn void configure(LogLevel level, int timeout) {}
+
+fn void main() {
+    configure(
+}
+`;
+
+	proj.workspace.process_file("/virtual/enum_named_arg.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/enum_named_arg.c3");
+	defer doc_uri.free();
+
+	// Line 6, col 14: inside `configure(`
+	LspPosition pos = { .line = 6, .character = 14 };
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+
+	bool found_variant = false;
+	bool found_named_arg = false;
+
+	foreach (item : items)
+	{
+		if (item.label == "DEBUG") found_variant = true;
+		if (item.label == "level:") found_named_arg = true;
+	}
+
+	assert(found_variant);
+	assert(found_named_arg);
+}
+
 <*
  Feature 3: Fuzzy subsequence completion matching (`v2` matches `Vector2`,
  and `ccl` matches `custom_clamp`).
