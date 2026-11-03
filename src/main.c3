@@ -35,10 +35,24 @@ struct CliArgs
 
 fn int main(String[] args)
 {
+	$if $feat(ANALYZER_CLI):
+		for (sz i = 1; i < args.len; i++)
+		{
+			if (args[i] == "--analyze")
+			{
+				if (i + 1 >= args.len)
+				{
+					io::eprintfn("Error: --analyze requires a file path argument.");
+					return 1;
+				}
+				return run_analyzer_cli(args[i + 1]);
+			}
+		}
+	$endif
+
 	CliArgs cli = {
 		.log_level = ERROR
 	};
-
 	sz? result = argparse::@parse(args,
 		"h*", "help*", "Show help manual",                                           &cli.help,
 		"",  "stdlib-path", "Path to C3 standard library",                           &cli.stdlib_path,
@@ -137,5 +151,42 @@ fn int main(String[] args)
 	}
 
 	server::start(cli);
+	return 0;
+}
+
+
+///
+
+module lsp @feat(ANALYZER_CLI);
+import analyzer, std;
+
+fn int run_analyzer_cli(String path)
+{
+	String? content = (String)file::load(tmem, path);
+	if (catch err = content)
+	{
+		io::eprintfn("Error reading '%s': %s", path, err);
+		return 1;
+	}
+
+	AnalyzerContext* ctx = context::create(tmem);
+	(void)context::process(ctx, content, path);
+
+	SourceFile* sf = ctx.files.get(path) ?? null;
+	if (!sf)
+	{
+		io::eprintfn("Error: File not found in context: '%s'", path);
+		return 1;
+	}
+
+	io::print("[\n");
+	for (sz i = 0; i < sf.ast.statements.len(); i++)
+	{
+		Node* stmt = sf.ast.statements.get(i);
+		if (!stmt) continue;
+		if (i > 0) io::print(",\n");
+		io::print(stmt.serialize(tmem, 2));
+	}
+	io::print("\n]\n");
 	return 0;
 }

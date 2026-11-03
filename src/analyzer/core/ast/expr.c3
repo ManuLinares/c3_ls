@@ -83,7 +83,7 @@ struct CallExpr
 	inline Node node;
 	bool is_outer_call;
 	Node* callee;
-	MacroBodyExpr* macro_body_expr;
+	Node* macro_body_expr;
 	NodeArray args;
 	NodeArray attributes;
 }

@@ -592,13 +592,13 @@ fn String expand_macro(AnalyzerContext* ctx, SourceFile* sf, CallExpr* call, Mac
 		}
 	}
 
-	if (call.macro_body_expr && call.macro_body_expr.body)
+	if (call.macro_body_expr && call.macro_body_expr.as(MacroBodyExpr).body)
 	{
 		DString body_str;
 		body_str.tinit();
 		MacroSubstitutions empty_subs;
 		empty_subs.params.tinit();
-		format_node_with_substitutions(&body_str, call.macro_body_expr.body, &empty_subs, 1);
+		format_node_with_substitutions(&body_str, call.macro_body_expr.as(MacroBodyExpr).body, &empty_subs, 1);
 		subs.body_block = body_str.str_view();
 	}
 
