@@ -96,6 +96,19 @@ jobs:
           chmod +x build-mac-x64/c3_ls
           tar -czvf dist/c3_ls-macos-x86_64.tar.gz -C build-mac-x64 c3_ls
 
+      # 6. Web Playground (WASM)
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v16
+
+      - name: Build Web Playground
+        run: c3c build web
+
+      - name: Upload Pages Artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/web
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -112,6 +125,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
+          name: binaries
           path: release_assets
           merge-multiple: true
 
@@ -142,3 +156,23 @@ jobs:
         with:
           files: release_assets/*
           generate_release_notes: true
+
+  # Deploy Web Playground to GitHub Pages on main
+  deploy-pages:
+    name: Deploy GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

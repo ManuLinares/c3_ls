@@ -197,7 +197,12 @@ macro void serialize(JsonOutput* output, item, int indent, int depth) @local
 	$endswitch
 }
 
-fn void node_serialize(Node* self, JsonOutput* output, int indent, int depth) @local
+macro void ser_node_payload(JsonOutput* output, Node* self, $Type, int indent, int depth) @local
+{
+	output.ser_entry($Type::name, (($Type*)self), indent, depth);
+}
+
+fn void node_serialize(Node* self, JsonOutput* output, int indent, int depth) @noinline @local
 {
 	if (self == null) { output.append("null"); return; }
 
@@ -211,7 +216,7 @@ fn void node_serialize(Node* self, JsonOutput* output, int indent, int depth) @l
 
 	var $sw = "switch (self.kind) {";
 	$foreach $m : NodeKind::values:
-		$sw +++= @sprintf(`case %s: output.ser_entry("%s", ((%s*) self), indent, depth + 1);`, $m.description, $m.description, @str_pascalcase($m.description));
+		$sw +++= @sprintf(`case %s: ser_node_payload(output, self, %s, indent, depth + 1);`, $m.description, @str_pascalcase($m.description));
 	$endforeach
 	$sw +++= "default: }";
 	$expand($sw);

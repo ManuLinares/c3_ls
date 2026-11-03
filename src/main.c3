@@ -169,7 +169,8 @@ fn int run_analyzer_cli(String path)
 		return 1;
 	}
 
-	AnalyzerContext* ctx = context::create(tmem);
+	AnalyzerContext* ctx = context::create(mem);
+	defer context::free(ctx);
 	(void)context::process(ctx, content, path);
 
 	SourceFile* sf = ctx.files.get(path) ?? null;

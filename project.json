@@ -27,12 +27,13 @@
         "-g0",
         "-O3",
         "-sASSERTIONS=0",
-        "-sSTACK_SIZE=4194304",
+        "-sSTACK_SIZE=16777216",
         "-sALLOW_MEMORY_GROWTH=1",
         "-sNO_EXIT_RUNTIME=1",
         "-sEXPORTED_FUNCTIONS=_main",
         "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap",
-        "--shell-file resources/web_shell.html"
+        "--shell-file resources/web_shell.html",
+        "-sMALLOC=emmalloc"
       ]
     },
     "web-debug": {
@@ -46,7 +47,7 @@
       "link-args": [
         "-g3",
         "-sASSERTIONS=2",
-        "-sSTACK_SIZE=4194304",
+        "-sSTACK_SIZE=16777216",
         "-sALLOW_MEMORY_GROWTH=1",
         "-sNO_EXIT_RUNTIME=1",
         "-sEXPORTED_FUNCTIONS=_main",

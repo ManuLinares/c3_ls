@@ -23,7 +23,14 @@
 			border-bottom: 1px solid #333;
 		}
 		h1 { font-size: 14px; font-weight: 600; }
-		#status { font-size: 12px; color: #888; }
+		.header-meta {
+			display: flex;
+			gap: 16px;
+			font-size: 12px;
+			align-items: center;
+		}
+		#node-indicator { color: #4ec9b0; font-family: monospace; }
+		#status { color: #888; }
 		main {
 			display: flex;
 			flex: 1;
@@ -44,37 +51,90 @@
 			background: #1e1e1e;
 			color: #888;
 			border-bottom: 1px solid #2d2d2d;
+			display: flex;
+			justify-content: space-between;
 		}
 		textarea, pre {
-			flex: 1;
 			padding: 12px;
 			font-family: "JetBrains Mono", "Fira Code", Menlo, monospace;
 			font-size: 13px;
 			line-height: 1.5;
 			border: none;
 			outline: none;
-			resize: none;
-			overflow: auto;
 			tab-size: 4;
 		}
 		textarea {
+			flex: 1;
 			background: #181818;
 			color: #d4d4d4;
+			resize: none;
+			overflow: auto;
+		}
+		#output-container {
+			flex: 1;
+			overflow: auto;
+			background: #141414;
 		}
 		pre {
 			background: #141414;
 			color: #9cdcfe;
+		}
+		#diagnostics-pane {
+			max-height: 140px;
+			border-top: 1px solid #2d2d2d;
+			background: #1c1414;
+			overflow-y: auto;
+			display: none;
+		}
+		#diagnostics-pane.has-errors { display: block; }
+		.diag-item {
+			padding: 4px 12px;
+			font-size: 12px;
+			font-family: monospace;
+			cursor: pointer;
+			display: flex;
+			gap: 8px;
+			border-bottom: 1px solid #281d1d;
+		}
+		.diag-item:hover { background: #2f2222; }
+		.diag-badge {
+			padding: 1px 4px;
+			border-radius: 2px;
+			font-weight: 600;
+			font-size: 10px;
+			text-transform: uppercase;
+		}
+		.diag-badge.error { background: #d13438; color: #fff; }
+		.diag-badge.warning { background: #d89614; color: #000; }
+		.diag-loc { color: #888; }
+		.diag-msg { color: #e0e0e0; flex: 1; }
+
+		.node-anchor {
+			display: inline-block;
+			transition: background-color 0.15s ease;
+		}
+		.node-anchor.active {
+			background-color: #264f78;
+			color: #ffffff;
+			outline: 1px solid #75beff;
+			border-radius: 2px;
 		}
 	</style>
 </head>
 <body>
 	<header>
 		<h1>C3 AST Playground</h1>
-		<span id="status">Loading WebAssembly...</span>
+		<div class="header-meta">
+			<span id="node-indicator">Node: -</span>
+			<span id="status">Loading WebAssembly...</span>
+		</div>
 	</header>
 	<main>
 		<div class="pane">
-			<div class="pane-header">C3 Source</div>
+			<div class="pane-header">
+				<span>C3 Source</span>
+				<span id="caret-pos">Line 1, Col 1</span>
+			</div>
 			<textarea id="code" spellcheck="false">module demo;
 
 struct Point {
@@ -86,31 +146,176 @@ fn int add(Point p, int offset) {
     return p.x + p.y + offset;
 }
 </textarea>
+			<div id="diagnostics-pane"></div>
 		</div>
 		<div class="pane">
 			<div class="pane-header">Serialized AST (JSON)</div>
-			<pre id="output"><code></code></pre>
+			<div id="output-container">
+				<pre id="output"><code></code></pre>
+			</div>
 		</div>
 	</main>
 	<script>
 		var parseFn = null;
 		var timer = null;
+		var currentAst = null;
+		var lastActiveNodeEl = null;
+
+		var codeEl = document.getElementById('code');
+		var outputCodeEl = document.getElementById('output').firstElementChild;
+		var diagPane = document.getElementById('diagnostics-pane');
+		var caretPosEl = document.getElementById('caret-pos');
+		var nodeIndicator = document.getElementById('node-indicator');
+
+		function getCaretPos(el) {
+			var text = el.value.substring(0, el.selectionStart);
+			var lines = text.split('\n');
+			return {
+				line: lines.length - 1,
+				column: lines[lines.length - 1].length
+			};
+		}
+
+		function jumpTo(line, col) {
+			var lines = codeEl.value.split('\n');
+			var pos = 0;
+			for (var i = 0; i < line && i < lines.length; i++) {
+				pos += lines[i].length + 1;
+			}
+			pos += Math.min(col, (lines[line] || '').length);
+			codeEl.focus();
+			codeEl.setSelectionRange(pos, pos);
+			updateCaretPosition();
+		}
+
+		function findNodeAt(ast, line, col) {
+			var best = null;
+			var bestSpan = Infinity;
+
+			function walk(val) {
+				if (!val || typeof val !== 'object') return;
+				if (Array.isArray(val)) {
+					for (var i = 0; i < val.length; i++) walk(val[i]);
+					return;
+				}
+				var start = val['range.start'];
+				var end = val['range.end'];
+				if (start && end && typeof val.id === 'number') {
+					var afterStart = (line > start.line) || (line === start.line && col >= start.column);
+					var beforeEnd = (line < end.line) || (line === end.line && col <= end.column);
+					if (afterStart && beforeEnd) {
+						var span = (end.line - start.line) * 100000 + (end.column - start.column);
+						if (span < bestSpan) {
+							best = val;
+							bestSpan = span;
+						}
+					}
+				}
+				var keys = Object.keys(val);
+				for (var k = 0; k < keys.length; k++) {
+					var key = keys[k];
+					if (key !== 'range.start' && key !== 'range.end') {
+						walk(val[key]);
+					}
+				}
+			}
+
+			walk(ast);
+			return best;
+		}
+
+		function updateCaretPosition() {
+			var pos = getCaretPos(codeEl);
+			caretPosEl.textContent = 'Line ' + (pos.line + 1) + ', Col ' + (pos.column + 1);
+
+			if (!currentAst) {
+				nodeIndicator.textContent = 'Node: -';
+				return;
+			}
+
+			var node = findNodeAt(currentAst, pos.line, pos.column);
+			if (!node) {
+				nodeIndicator.textContent = 'Node: -';
+				if (lastActiveNodeEl) {
+					lastActiveNodeEl.classList.remove('active');
+					lastActiveNodeEl = null;
+				}
+				return;
+			}
+
+			nodeIndicator.textContent = (node.kind || 'Node') + ' (#' + node.id + ')';
+
+			var el = document.getElementById('ast-node-' + node.id);
+			if (el && el !== lastActiveNodeEl) {
+				if (lastActiveNodeEl) lastActiveNodeEl.classList.remove('active');
+				el.classList.add('active');
+				lastActiveNodeEl = el;
+				el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			}
+		}
+
+		function renderDiagnostics(errors) {
+			if (!errors || errors.length === 0) {
+				diagPane.classList.remove('has-errors');
+				diagPane.innerHTML = '';
+				return;
+			}
+
+			diagPane.classList.add('has-errors');
+			var html = '';
+			for (var i = 0; i < errors.length; i++) {
+				var err = errors[i];
+				html += '<div class="diag-item" onclick="jumpTo(' + err.line + ',' + err.column + ')">' +
+					'<span class="diag-badge ' + err.level + '">' + err.level + '</span>' +
+					'<span class="diag-loc">[' + (err.line + 1) + ':' + (err.column + 1) + ']</span>' +
+					'<span class="diag-msg">' + escapeHtml(err.message) + '</span>' +
+				'</div>';
+			}
+			diagPane.innerHTML = html;
+		}
+
+		function escapeHtml(str) {
+			return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		}
 
 		function triggerParse() {
 			if (!parseFn) return;
-			var src = document.getElementById('code').value;
+			var src = codeEl.value;
 			var t0 = performance.now();
-			var json = parseFn(src);
+			var raw = parseFn(src);
 			var t1 = performance.now();
-			document.getElementById('output').firstElementChild.textContent = json;
+
+			var envelope;
+			try {
+				envelope = JSON.parse(raw);
+			} catch (e) {
+				console.error("JSON.parse error:", e, raw);
+				envelope = { errors: [], ast: [] };
+			}
+
+			currentAst = envelope.ast;
+			renderDiagnostics(envelope.errors);
+
+			var astJson = JSON.stringify(envelope.ast, null, 2) || '[]';
+			var formattedHtml = escapeHtml(astJson).replace(
+				/(&quot;id&quot;:\s*)(\d+)/g,
+				'$1<span id="ast-node-$2" class="node-anchor">$2</span>'
+			);
+
+			outputCodeEl.innerHTML = formattedHtml;
 			document.getElementById('status').textContent = 'Parsed in ' + (t1 - t0).toFixed(2) + ' ms';
+			lastActiveNodeEl = null;
+			updateCaretPosition();
 		}
 
-		var codeEl = document.getElementById('code');
 		codeEl.addEventListener('input', function() {
 			clearTimeout(timer);
 			timer = setTimeout(triggerParse, 150);
 		});
+
+		codeEl.addEventListener('click', updateCaretPosition);
+		codeEl.addEventListener('keyup', updateCaretPosition);
+		codeEl.addEventListener('select', updateCaretPosition);
 
 		codeEl.addEventListener('keydown', function(e) {
 			if (e.key === 'Tab') {
