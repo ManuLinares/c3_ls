@@ -507,7 +507,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 	return fallback_mod;
 }
 
-fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, String type_name)
+fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, String type_name, Location loc = { -1, -1 })
 {
 	if (!context || type_name.len == 0) return null;
 
@@ -524,7 +524,7 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 	{
 		String parent_type = clean_type[:dot_idx].trim();
 		String child_name = clean_type[dot_idx + 1..].trim();
-		Node* parent_node = find_type_node_in_context(context, sf, parent_type);
+		Node* parent_node = find_type_node_in_context(context, sf, parent_type, loc);
 		if (parent_node && parent_node.kind == STRUCT_DECL)
 		{
 			foreach (f : parent_node.as(StructDecl).fields)
@@ -544,20 +544,20 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		{
 			if (try ty_info = context.registry.types.get(clean_type))
 			{
-				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc)))
 				{
 					return ty_info.node;
 				}
 			}
 		}
 
-		String caller_mod = sf ? get_source_file_module_name(sf) : "";
+		String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
 		if (caller_mod.len > 0)
 		{
 			String local_qname = string::tformat("%s::%s", caller_mod, clean_type);
 			if (try ty_info = context.registry.types.get(local_qname))
 			{
-				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc)))
 				{
 					return ty_info.node;
 				}
@@ -566,13 +566,13 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 
 		if (sf)
 		{
-			List{String} imports = get_source_file_imported_modules(sf);
+			List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
 			foreach (imp : imports)
 			{
 				String imp_qname = string::tformat("%s::%s", imp, clean_type);
 				if (try ty_info = context.registry.types.get(imp_qname))
 				{
-					if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+					if (ty_info.node && is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc))
 					{
 						return ty_info.node;
 					}
@@ -586,7 +586,7 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		{
 			if (!matched && (qname == clean_type || qname.ends_with(suffix)))
 			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, tinfo.node, tinfo.mod))
+				if (!sf || (is_module_visible_to_file(context, sf, tinfo.mod, loc) && is_symbol_accessible_from_file(context, sf, tinfo.node, tinfo.mod, loc)))
 				{
 					matched = tinfo;
 				}
@@ -1231,6 +1231,10 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	clean_type = clean_type.trim_right("*&? \t");
 
 	Node* type_node = find_type_node_in_context(context, sf, clean_type);
+	if (!type_node)
+	{
+		type_node = find_type_node_in_context(context, null, clean_type);
+	}
 	if (!type_node) return null;
 
 	Node* field = cursor::find_member_in_type(type_node, member_name);
@@ -1405,9 +1409,12 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 	{
 		if (!found && mod && mod_name != caller_mod)
 		{
-			if (Node* sym = find_symbol_in_module(context, mod, symbol_name, sf, true))
+			if (!sf || is_module_visible_to_file(context, sf, mod_name, loc))
 			{
-				found = sym;
+				if (Node* sym = find_symbol_in_module(context, mod, symbol_name, sf, true))
+				{
+					found = sym;
+				}
 			}
 		}
 	};
@@ -1837,7 +1844,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 	if (target_node.kind == TYPE_EXPR)
 	{
-		Node* ty_node = find_type_node_in_context(context, sf, symbol_name);
+		Node* ty_node = find_type_node_in_context(context, sf, symbol_name, loc);
 		if (ty_node) return ty_node;
 	}
 
@@ -1953,9 +1960,108 @@ fn String resolve_type_of_chain(AnalyzerContext* context, SourceFile* sf, String
 	String clean = expr_str.trim();
 	while (clean.starts_with("(") && clean.ends_with(")") && clean.len >= 2)
 	{
-		clean = clean[1 : ^2].trim();
+		int pdepth = 0;
+		bool matched = false;
+		for (sz i = 0; i < clean.len; i++)
+		{
+			if (clean[i] == '(')
+			{
+				pdepth++;
+			}
+			else if (clean[i] == ')')
+			{
+				pdepth--;
+				if (pdepth == 0)
+				{
+					if (i == clean.len - 1)
+					{
+						matched = true;
+					}
+					break;
+				}
+			}
+		}
+		if (matched)
+		{
+			clean = clean[1..clean.len - 2].trim();
+		}
+		else
+		{
+			break;
+		}
 	}
 	if (clean.len == 0) return "";
+
+	if (clean.ends_with("]"))
+	{
+		int bdepth = 0;
+		sz open_b = (sz)-1;
+		for (sz i = clean.len; i > 0; i--)
+		{
+			if (clean[i - 1] == ']')
+			{
+				bdepth++;
+			}
+			else if (clean[i - 1] == '[')
+			{
+				bdepth--;
+				if (bdepth == 0)
+				{
+					open_b = i - 1;
+					break;
+				}
+			}
+		}
+		if (open_b != (sz)-1 && open_b > 0)
+		{
+			String base_expr = clean[:open_b].trim();
+			String base_t = resolve_type_of_chain(context, sf, base_expr, loc);
+			if (base_t.ends_with("[]"))
+			{
+				return base_t[:base_t.len - 2].trim();
+			}
+			if (try arr_b = base_t.rindex_of_char('['))
+			{
+				return base_t[:arr_b].trim();
+			}
+			if (base_t.ends_with("*"))
+			{
+				return base_t[:base_t.len - 1].trim();
+			}
+			return base_t;
+		}
+	}
+
+	if (clean.starts_with("(") && clean.contains(")"))
+	{
+		sz open_count = 0;
+		sz cast_close = 0;
+		for (sz i = 0; i < clean.len; i++)
+		{
+			if (clean[i] == '(')
+			{
+				open_count++;
+			}
+			else if (clean[i] == ')')
+			{
+				open_count--;
+				if (open_count == 0)
+				{
+					cast_close = i;
+					break;
+				}
+			}
+		}
+		if (cast_close > 1)
+		{
+			String cast_type = clean[1..cast_close - 1].trim();
+			String cast_clean = cast_type.trim_right("*&? \t");
+			if (cast_clean.len > 0 && (cast_clean[0].is_upper() || constants::is_primitive(cast_clean)))
+			{
+				return cast_type;
+			}
+		}
+	}
 
 	if ((clean.starts_with("\"") && clean.ends_with("\"")) || (clean.starts_with("`") && clean.ends_with("`"))) return "String";
 	if (clean.starts_with("'") && clean.ends_with("'") && clean.len >= 2) return "char";

@@ -853,3 +853,28 @@ fn void main()
 	assert(found2);
 	assert(found3);
 }
+
+fn void test_hover_on_builtin_len_property() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module lala;
+import std;
+
+fn void main()
+{
+	io::printn("asd".len);
+}
+`;
+
+	proj.workspace.process_file("/virtual/str_len_hover.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/str_len_hover.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 5, .character = 19 };
+	String h = hover::hover(&proj, doc_uri, pos)!!;
+	assert(h.contains("sz len"));
+	assert(h.contains("Number of elements"));
+}

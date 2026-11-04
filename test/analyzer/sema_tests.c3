@@ -290,3 +290,37 @@ fn void test_ct_if_elif_else_same_var_name()
 	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/test_ct_if_var.c3");
 	test::eq(diags.len, 0);
 }
+
+fn void test_resolve_type_of_chain_indexing_and_casts()
+{
+	String source_code = `
+		module test_chain;
+
+		struct Point { int x; int y; }
+
+		fn void run(Point[] pts, void* raw)
+		{
+			Point first = pts[0];
+			Point* p = (Point*)raw;
+		}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_chain.c3");
+	assert(success);
+
+	SourceFile* sf = context.files.get("test_chain.c3")!!;
+	Location loc = { .line = 7, .column = 4 };
+
+	// 1. Array/slice indexing resolves to element type
+	String t_index = query::resolve_type_of_chain(context, sf, "pts[0]", loc);
+	test::eq(t_index, "Point");
+
+	// 2. Type cast resolves to cast target type
+	String t_cast = query::resolve_type_of_chain(context, sf, "(Point*)raw", loc);
+	test::eq(t_cast, "Point*");
+
+	// 3. Parenthesized cast resolves to cast target type
+	String t_nested = query::resolve_type_of_chain(context, sf, "((Point*)raw)", loc);
+	test::eq(t_nested, "Point*");
+}

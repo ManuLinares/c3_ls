@@ -146,7 +146,19 @@ fn void add_symbol_completion(
 					param_count--;
 				}
 
-				if (param_count == 0)
+				bool has_lparen_ahead = false;
+				if (ctx.sf && ctx.offset < ctx.sf.content.len)
+				{
+					sz scan = ctx.offset;
+					while (scan < ctx.sf.content.len && (ctx.sf.content[scan] == ' ' || ctx.sf.content[scan] == '\t')) scan++;
+					if (scan < ctx.sf.content.len && ctx.sf.content[scan] == '(') has_lparen_ahead = true;
+				}
+
+				if (has_lparen_ahead)
+				{
+					format = PLAIN_TEXT;
+				}
+				else if (param_count == 0)
 				{
 					if (is_void && ctx.is_stmt)
 					{
@@ -193,7 +205,19 @@ fn void add_symbol_completion(
 					param_count--;
 				}
 
-				if (param_count == 0 && !md.body_params)
+				bool has_lparen_ahead = false;
+				if (ctx.sf && ctx.offset < ctx.sf.content.len)
+				{
+					sz scan = ctx.offset;
+					while (scan < ctx.sf.content.len && (ctx.sf.content[scan] == ' ' || ctx.sf.content[scan] == '\t')) scan++;
+					if (scan < ctx.sf.content.len && ctx.sf.content[scan] == '(') has_lparen_ahead = true;
+				}
+
+				if (has_lparen_ahead)
+				{
+					format = PLAIN_TEXT;
+				}
+				else if (param_count == 0 && !md.body_params)
 				{
 					if (is_void && ctx.is_stmt)
 					{
@@ -2479,7 +2503,12 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 							.label = "len",
 							.kind = PROPERTY,
 							.detail = "sz",
+							.documentation = {
+								.kind = MARKDOWN,
+								.value = "Number of elements in the array, slice, vector, or string."
+							},
 							.insertText = "len",
+							.insertTextFormat = PLAIN_TEXT,
 							.filterText = "len",
 							.sortText = "0001_len",
 							.data = "property"
@@ -2496,7 +2525,12 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 								.label = "ptr",
 								.kind = PROPERTY,
 								.detail = ptr_type,
+								.documentation = {
+									.kind = MARKDOWN,
+									.value = "Pointer to the underlying elements of the array, slice, or string."
+								},
 								.insertText = "ptr",
+								.insertTextFormat = PLAIN_TEXT,
 								.filterText = "ptr",
 								.sortText = "0001_ptr",
 								.data = "property"
@@ -2927,6 +2961,31 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 		return NONE;
 	}
 
+	if (text_before == "return" || text_before.starts_with("return "))
+	{
+		if (loc.line >= 0)
+		{
+			foreach (stmt : ctx.sf.ast.statements)
+			{
+				if (stmt && stmt.range.contains(loc) && stmt.kind == FN_DECL)
+				{
+					FnDecl* fd = stmt.as(FnDecl);
+					if (fd.ret_type)
+					{
+						String rtype = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+						rtype = rtype.trim_right("*&? \t");
+						if (rtype.len > 0)
+						{
+							if (out_expected_type) *out_expected_type = rtype;
+							return TYPE_ASSIGNMENT;
+						}
+					}
+					break;
+				}
+			}
+		}
+	}
+
 	String text_before_case = text_before;
 	if (text_before_case.starts_with("case") || text_before_case.starts_with("$case"))
 	{
@@ -3193,7 +3252,8 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 
 	if (item.data.len > 0)
 	{
-		if (item.data == "property") return;
+
+		//if (item.data == "property") return; /// why vscode, why you do this to me
 
 		if (item.data.starts_with("local:"))
 		{

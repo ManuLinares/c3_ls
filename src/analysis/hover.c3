@@ -374,6 +374,23 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 			}
 			else
 			{
+				if (acc.member && acc.member.range.contains(loc))
+				{
+					String recv_type = query::type_of(project.workspace.ctx, sf, acc.left, loc);
+					String clean_type = recv_type.trim_right("*&? \t");
+
+					if (mem_name == "len" && (clean_type == "String" || clean_type.ends_with("[]") || clean_type.contains("[")))
+					{
+						return "```c3\nsz len\n```\n\nNumber of elements in the array, slice, vector, or string.";
+					}
+
+					if (mem_name == "ptr" && (clean_type == "String" || clean_type.ends_with("[]")))
+					{
+						String ptr_type = clean_type == "String" ? "char*" : string::tformat("%s*", clean_type.strip_suffix("[]"));
+						return string::tformat("```c3\n%s ptr\n```\n\nPointer to the underlying elements of the array, slice, or string.", ptr_type);
+					}
+				}
+
 				String left_str = cursor::spelling(acc.left, tmem);
 				bool is_reflect = (acc.left && (acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
 				if (is_reflect)
