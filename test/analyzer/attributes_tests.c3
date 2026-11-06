@@ -557,3 +557,70 @@ module another_mod @
 	assert(found_private);
 	assert(!found_math_libc);
 }
+
+fn void test_chained_attrmacro_and_struct_attribute() @test
+{
+	String code = `module lala;
+
+attrmacro @MyTag = @tag("abc", 1);
+attrmacro @MyTag2 = @MyTag;
+
+struct Foo @MyTag2
+{
+	int x;
+}
+
+$assert(Foo::has_tag("abc"));
+$assert(Foo::get_tag("abc") == 1);
+
+fn void main()
+{
+	assert(Foo::has_tag("abc"));
+	assert(Foo::get_tag("abc") == 1);
+}
+`;
+
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	ws.process_file("/virtual/attrmacro_chain.c3", code);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/attrmacro_chain.c3");
+	test::eq(diags.len, 0);
+}
+
+fn void test_prefix_attributes_rejected_at_top_level() @test
+{
+	String code = `module test_bad_attrs;
+
+@private attrmacro @Fast = @inline;
+@local struct Internal { int x; }
+
+fn void main() {}
+`;
+
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	ws.process_file("/virtual/bad_prefix_attrs.c3", code);
+	LspDiagnostic[] diags = ws.get_diagnostics("/virtual/bad_prefix_attrs.c3");
+	test::eq(diags.len, 2);
+	test::eq(diags[0].range.start.line, 2u);
+	test::eq(diags[0].message, "Expected the start of a global declaration here");
+	test::eq(diags[1].range.start.line, 3u);
+	test::eq(diags[1].message, "Expected the start of a global declaration here");
+
+	assert(ws.ctx.modules.has_key("test_bad_attrs"));
+	Module* mod = ws.ctx.modules.get("test_bad_attrs")!!;
+	bool found_main = false;
+	foreach (node : mod.nodes)
+	{
+		if (node && node.kind == FN_DECL && node.as(FnDecl).name && node.as(FnDecl).name.text == "main")
+		{
+			found_main = true;
+			break;
+		}
+	}
+	assert(found_main);
+}

@@ -1111,7 +1111,7 @@ fn Node* parse_lambda_expr(ContextScope scope)
 		), null);
 	}
 	node.params = parse_parameter_list(scope.with_only_flags({ .is_function = true }));
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}

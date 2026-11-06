@@ -952,3 +952,18 @@ fn void path_prefixed_method_declarations() @test
 	assert(@ok(mac.associated_type.get()));
 	test::eq(cursor::spelling(mac.associated_type.get()!!, tmem), "std::gfx::GfxSurface");
 }
+
+fn void test_shebang_and_top_level_ct_echo() @test
+{
+	String source_code = `#!/usr/bin/env c3c
+module test_shebang;
+
+$echo "Testing top-level echo";
+
+fn void main() {}
+`;
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_shebang.c3");
+	test::eq(success, true);
+}

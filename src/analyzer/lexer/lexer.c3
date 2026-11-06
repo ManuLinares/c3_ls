@@ -843,7 +843,12 @@ fn Token next(Lexer* lexer)
 			}
 			nextcase;
 		case '@':
+			return lex_identifier(lexer);
 		case '#':
+			if (lexer.index == 0 && lexer.peek(1) == '!')
+			{
+				return lex_line_comment(lexer);
+			}
 			return lex_identifier(lexer);
 		default:
 			if (is_digit(lexer.current)) return lex_number(lexer);

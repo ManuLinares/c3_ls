@@ -2,11 +2,37 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug Tests",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/testrun",
+      "args": ["--test-filter", "${input:testFilter}"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-tests"
+    },
+    {
+      "name": "Debug All Tests",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/testrun",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-tests"
+    },
+    {
       "name": "Attach to c3_ls",
       "type": "lldb",
       "request": "attach",
       "program": "${workspaceFolder}/build/c3_ls",
       "pid": "${command:pickProcess}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testFilter",
+      "type": "promptString",
+      "description": "Test filter (e.g. attributes_tests::test_chained_attrmacro_and_struct_attribute)",
+      "default": ""
     }
   ]
 }

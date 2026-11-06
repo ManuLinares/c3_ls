@@ -33,7 +33,7 @@ fn Node* parse_module_decl(ContextScope scope)
 		node.generics = parse_generic_decl(scope);
 	}
 
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}
@@ -194,7 +194,7 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 
 	node.paths = alloc::clone_slice(ctx.allocator, temp_paths.array_view());
 
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}
@@ -427,7 +427,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 		node.generics = parse_generic_decl(scope);
 	}
 
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}
@@ -770,13 +770,6 @@ fn NodeArray parse_attributes(ContextScope scope, Node* parent_node, AttributePa
 
 	while (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
-		if (ctx.is(AT_TYPE_IDENT) && !flags.allow_type_ident)
-		{
-			diagnostics::error(ctx.context, ctx.current.range, "Attribute '@TypeIdent' not allowed here");
-			advance(ctx);
-			continue;
-		}
-
 		Token t = ctx.current;
 		advance(ctx);
 
@@ -930,7 +923,7 @@ fn Node* parse_expand_decl(ContextScope scope)
 
 	expect(ctx, (Node*)node, RPAREN);
 
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, (Node*)node);
 	}
@@ -1244,7 +1237,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 			fault_node.contract.set(contract);
 			advance(ctx);
 
-			if (ctx.is(AT_IDENT))
+			if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 			{
 				fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
 			}
@@ -1435,9 +1428,9 @@ fn Node* parse_attrdef_decl(ContextScope scope) => @pool()
 		node.params = parse_parameter_list(scope);
 	}
 
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
-		node.defined_attributes = parse_attributes(scope, node);
+		node.attributes = parse_attributes(scope, node);
 	}
 
 	if (consume(ctx, EQ))
@@ -1574,7 +1567,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 		variant.name = ctx.ident(ctx.current);
 		advance(ctx);
 
-		if (ctx.is(AT_IDENT))
+		if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 		{
 			variant.attributes = parse_attributes(scope, variant);
 		}

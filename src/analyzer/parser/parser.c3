@@ -66,8 +66,8 @@ fn bool is_token_start_of_decl(TokenKind kind)
 		case CONST:
 		case CT_EXPAND:
 		case CT_ASSERT:
-		case AT_IDENT:
-		case AT_TYPE_IDENT:
+		case CT_ECHO:
+		case CT_ERROR:
 		case EXTERN:
 		case TLOCAL:
 		case INLINE:
@@ -374,6 +374,7 @@ fn void apply_section_visibility_default(ParseContext* ctx, Node* node)
 		case TYPEDEF_DECL: attrs = node.as(TypedefDecl).attributes;
 		case ALIAS_DECL: attrs = node.as(AliasDecl).attributes;
 		case INTERFACE_DECL: attrs = node.as(InterfaceDecl).attributes;
+		case ATTRDEF_DECL: attrs = node.as(AttrdefDecl).attributes;
 		default: break;
 	}
 
@@ -395,68 +396,12 @@ fn void apply_section_visibility_default(ParseContext* ctx, Node* node)
 	}
 }
 
-fn void attach_leading_attributes(ParseContext* ctx, Node* node, List{Node*} * leading_attributes)
-{
-	if (!node || leading_attributes.len() == 0) return;
-
-	node.flags.has_attributes = true;
-
-	foreach (attr : *leading_attributes)
-	{
-		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
-		AttributeDecl* attr_decl = attr.as(AttributeDecl);
-		switch (attr_decl.attribute_kind)
-		{
-			case PRIVATE: node.visibility = PRIVATE;
-			case LOCAL:   node.visibility = LOCAL;
-			case PUBLIC:  node.visibility = PUBLIC;
-			default:
-		}
-	}
-
-	NodeArray* target_attrs = null;
-	switch (node.kind)
-	{
-		case FN_DECL:        target_attrs = &node.as(FnDecl).attributes;
-		case MACRO_DECL:     target_attrs = &node.as(MacroDecl).attributes;
-		case STRUCT_DECL:    target_attrs = &node.as(StructDecl).attributes;
-		case ENUM_DECL:      target_attrs = &node.as(EnumDecl).attributes;
-		case VAR_DECL:       target_attrs = &node.as(VarDecl).attributes;
-		case TYPEDEF_DECL:   target_attrs = &node.as(TypedefDecl).attributes;
-		case ALIAS_DECL:     target_attrs = &node.as(AliasDecl).attributes;
-		case INTERFACE_DECL: target_attrs = &node.as(InterfaceDecl).attributes;
-		case MODULE_DECL:    target_attrs = &node.as(ModuleDecl).attributes;
-		case CT_EXPAND_DECL: target_attrs = &node.as(CtExpandDecl).attributes;
-		default:
-			break;
-	}
-
-	if (target_attrs)
-	{
-		if (target_attrs.len == 0)
-		{
-			*target_attrs = alloc::clone_slice(ctx.allocator, leading_attributes.array_view());
-		}
-		else
-		{
-			List{Node*} merged;
-			merged.init(tmem, leading_attributes.len() + target_attrs.len);
-			foreach (a : *leading_attributes) merged.push(a);
-			foreach (a : *target_attrs) merged.push(a);
-			*target_attrs = alloc::clone_slice(ctx.allocator, merged.array_view());
-		}
-	}
-}
-
 fn Node* parse_top_level_statement(ParseContext* ctx)
 {
 	Node* node = null;
 	ContextScope scope = {
 		.ctx = ctx
 	};
-
-	List{Node*} leading_attributes;
-	leading_attributes.init(tmem, 4);
 
 	while (true)
 	{
@@ -480,10 +425,6 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 				scope.flags.is_static = true;
 				advance(ctx);
 				continue;
-			case AT_IDENT:
-			case AT_TYPE_IDENT:
-				append_node_array(&leading_attributes, parse_attributes(scope, null, {.allow_type_ident = true }));
-				continue;
 			default:
 				break;
 		}
@@ -493,7 +434,6 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 	if (is_type(ctx))
 	{
 		node = parse_var_decl(scope, null);
-		attach_leading_attributes(ctx, node, &leading_attributes);
 		apply_section_visibility_default(ctx, node);
 		return node;
 	}
@@ -564,13 +504,17 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 			node.range.end = ctx.peek(-1).range.end;
 			CtAssertDecl* ctassert = node.as(CtAssertDecl);
 			ctassert.stmt = stmt;
+		case CT_ECHO:
+			node = parse_ct_echo_stmt(scope);
+		case CT_ERROR:
+			node = parse_ct_error_stmt(scope);
 		default:
+			diagnostics::error(ctx.context, ctx.current.range, "Expected the start of a global declaration here");
 			ctx.error_count++;
 			synchronize(ctx, DECLARATION);
 			break;
 	}
 
-	attach_leading_attributes(ctx, node, &leading_attributes);
 	apply_section_visibility_default(ctx, node);
 	return node;
 }

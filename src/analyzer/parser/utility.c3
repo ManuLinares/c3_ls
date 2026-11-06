@@ -62,7 +62,7 @@ fn void append_node_array(List{Node*} * list, NodeArray nodes)
 fn void parse_attributes_into(ContextScope scope, Node* parent_node, List{Node*} * list)
 {
 	ParseContext* ctx = scope.ctx;
-	if (ctx.is(AT_IDENT))
+	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		append_node_array(list, parse_attributes(scope, parent_node));
 	}

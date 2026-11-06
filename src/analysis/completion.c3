@@ -2741,8 +2741,7 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 		}
 		if (!inside_fn)
 		{
-			*out_target = ANY;
-			return true;
+			return false;
 		}
 	}
 
