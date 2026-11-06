@@ -102,3 +102,114 @@ fn void test() {
 	assert(sig_res.signatures[0].parameters.len == 2);
 	assert(sig_res.signatures[0].parameters[0].label.contains("min"));
 }
+
+fn void test_per_item_import_public_isolation() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String mod_a = `module mod_a;
+fn void pub_a() {}
+fn void priv_a() @private {}
+`;
+
+	String mod_b = `module mod_b;
+fn void pub_b() {}
+fn void priv_b() @private {}
+`;
+
+	String consumer = `module consumer;
+import mod_a @public, mod_b;
+
+fn void run() {
+    mod_a::priv_a();
+    mod_b::priv_b();
+}
+`;
+
+	proj.workspace.process_file("/virtual/mod_a.c3", mod_a);
+	proj.workspace.process_file("/virtual/mod_b.c3", mod_b);
+	proj.workspace.process_file("/virtual/consumer.c3", consumer);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/consumer.c3");
+	defer doc_uri.free();
+
+	// 1. mod_a::priv_a() resolves because mod_a was imported @public
+	LspPosition pos_a = { .line = 4, .character = 12 };
+	LspLocation[] locs_a = definition::goto_definition(&proj, doc_uri, pos_a)!!;
+	test::eq(locs_a.len, 1);
+	test::eq((int)locs_a[0].range.start.line, 2);
+
+	// 2. mod_b::priv_b() must NOT resolve because mod_b does not have @public
+	LspPosition pos_b = { .line = 5, .character = 12 };
+	LspLocation[] locs_b = definition::goto_definition(&proj, doc_uri, pos_b)!!;
+	test::eq(locs_b.len, 0);
+}
+
+fn void test_multisection_private_does_not_block_public_api() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String file1 = `module shared_lib;
+fn void public_api() {}
+`;
+
+	String file2 = `module shared_lib @private;
+fn void internal_helper() {}
+`;
+
+	String consumer = `module consumer;
+import shared_lib;
+
+fn void run() {
+    shared_lib::public_api();
+}
+`;
+
+	proj.workspace.process_file("/virtual/file1.c3", file1);
+	proj.workspace.process_file("/virtual/file2.c3", file2);
+	proj.workspace.process_file("/virtual/consumer.c3", consumer);
+
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/consumer.c3");
+	defer doc_uri.free();
+
+	LspPosition pos = { .line = 4, .character = 18 };
+	String h = hover::hover(&proj, doc_uri, pos) ?? "";
+	assert(h.contains("fn void public_api()"));
+
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
+	test::eq(locs.len, 1);
+	assert(locs[0].uri.contains("file1.c3"));
+	test::eq((int)locs[0].range.start.line, 1);
+}
+
+fn void test_same_file_local_symbol_section_isolation() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void local_action() @local {}
+
+module app;
+fn void run() {
+    local_action();
+}
+`;
+
+	proj.workspace.process_file("/virtual/same_file_sections.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/same_file_sections.c3");
+	defer doc_uri.free();
+
+	// Line 5, col 6: local_action() in section 2 cannot access @local symbol from section 1
+	LspPosition pos = { .line = 5, .character = 6 };
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
+	test::eq(locs.len, 0);
+
+	String h = hover::hover(&proj, doc_uri, pos) ?? "";
+	test::eq(h.len, 0);
+}

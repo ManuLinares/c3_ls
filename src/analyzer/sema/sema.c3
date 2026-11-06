@@ -85,7 +85,7 @@ fn void analyze_imports(SemaContext* ctx)
 				ctx.imports.set(full_path, { full_path, node });
 			}
 
-			if (!cursor::has_attribute(imp, NORECURSE, null))
+			if (!cursor::has_attribute(imp, NORECURSE, null) && !cursor::has_attribute(path, NORECURSE, null))
 			{
 				sz offset = 0;
 				while (try idx = full_path[offset..].index_of("::"))

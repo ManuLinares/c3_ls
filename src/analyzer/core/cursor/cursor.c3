@@ -233,6 +233,14 @@ fn bool has_attribute(Node* node, AttributeKind kind, Node**out_attribute)
 			FnDecl* func = node.as(FnDecl);
 			temp = func.attributes;
 			break;
+		case IMPORT_DECL:
+			ImportDecl* imp = node.as(ImportDecl);
+			temp = imp.attributes;
+			break;
+		case PATH_EXPR:
+			PathExpr* pe = node.as(PathExpr);
+			temp = pe.attributes;
+			break;
 		default:
 			return false;
 	}

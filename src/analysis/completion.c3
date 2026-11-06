@@ -560,7 +560,7 @@ fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
 		if (aname.len == 0) return;
 
 		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
-		if (query::is_symbol_accessible_from_file(ctx.ws.ctx, ctx.sf, attr_info.node, attr_info.mod, loc))
+		if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, attr_info.node, attr_info.mod))
 		{
 			if (fuzzy_match(aname, ctx.prefix))
 			{
@@ -1868,7 +1868,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem}* items, Stri
 					if (fndecl.associated_type && query::is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
 					{
 						Location loc = { (int)ctx.position.line, (int)ctx.position.character };
-						if (query::is_symbol_accessible_from_file(ctx.ws.ctx, ctx.sf, curr.node, curr.mod, loc))
+						if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, curr.node, curr.mod))
 						{
 							String mname = fndecl.name ? fndecl.name.text : "";
 							if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
@@ -1898,7 +1898,7 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem}* items, Stri
 						if (query::is_matching_associated_type(assoc_node, clean_type, type_name))
 						{
 							Location loc = { (int)ctx.position.line, (int)ctx.position.character };
-							if (query::is_symbol_accessible_from_file(ctx.ws.ctx, ctx.sf, curr.node, curr.mod, loc))
+							if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, curr.node, curr.mod))
 							{
 								String mname = mac.name ? mac.name.text : "";
 								if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
@@ -2391,7 +2391,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 								foreach (fault_node : fd.faults)
 								{
 									if (!fault_node || fault_node.kind != FAULT_DECL) continue;
-									if (!query::is_symbol_accessible_from_file(ctx.ws.ctx, ctx.sf, fault_node, mod.name, loc)) continue;
+									if (!query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, fault_node, mod.name)) continue;
 
 									FaultDecl* fdecl = fault_node.as(FaultDecl);
 									String fname = fdecl.name ? fdecl.name.text : "";
@@ -2403,7 +2403,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 								continue;
 							}
 
-							if (!query::is_symbol_accessible_from_file(ctx.ws.ctx, ctx.sf, node, mod.name, loc)) continue;
+							if (!query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, node, mod.name)) continue;
 
 							String sym_name = cursor::spelling(node, tmem);
 							if (sym_name.len == 0) continue;

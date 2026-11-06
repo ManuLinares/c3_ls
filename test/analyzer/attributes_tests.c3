@@ -624,3 +624,24 @@ fn void main() {}
 	}
 	assert(found_main);
 }
+
+fn void test_import_has_attribute_norecurse() @test
+{
+	String source_code = `
+		module test_norecurse;
+		import std::io @norecurse, std::math;
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_norecurse.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("test_norecurse")!!;
+	ImportDecl* imp = mod.nodes[1].as(ImportDecl);
+	test::eq(imp.paths.len, 2);
+
+	Node* out_attr = null;
+	test::eq(cursor::has_attribute(imp.paths[0], AttributeKind.NORECURSE, &out_attr), true);
+	test::ne(out_attr, null);
+	test::eq(cursor::has_attribute(imp.paths[0], AttributeKind.PUBLIC, null), false);
+	test::eq(cursor::has_attribute(imp.paths[1], AttributeKind.NORECURSE, null), false);
+}

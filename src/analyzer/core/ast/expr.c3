@@ -22,6 +22,7 @@ struct PathExpr
 	inline Node node;
 	Ident* path;
 	bool is_prefix;
+	NodeArray attributes;
 }
 
 <*

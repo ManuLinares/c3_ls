@@ -154,7 +154,8 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 }
 
 <*
- import_decl ::= import path_expr (',' path_expr)* ';' attributes?
+ import_decl ::= import import_item (',' import_item)* ';'
+ import_item ::= path_expr attributes?
  @require scope.ctx.current.kind == IMPORT
 *>
 fn Node* parse_import_decl(ContextScope scope) => @pool()
@@ -166,6 +167,8 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 	defer node.range.end = ctx.peek(-1).range.end;
 	List{Node*} temp_paths;
 	temp_paths.init(tmem, 4);
+	List{Node*} temp_attrs;
+	temp_attrs.init(tmem, 4);
 
 	while (!ctx.eof() && !ctx.is(EOS) && !is_token_start_of_decl(ctx.current.kind))
 	{
@@ -183,6 +186,14 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 			node.flags.has_error = true;
 		}
 
+		List{Node*} item_attrs;
+		item_attrs.init(tmem, 2);
+		parse_attributes_into(scope, path_node, &item_attrs);
+		if (path_node && path_node.kind == PATH_EXPR)
+		{
+			path_node.as(PathExpr).attributes = alloc::clone_slice(ctx.allocator, item_attrs.array_view());
+		}
+
 		if (!consume(ctx, COMMA)) break;
 		if (ctx.is(EOS))
 		{
@@ -192,12 +203,10 @@ fn Node* parse_import_decl(ContextScope scope) => @pool()
 		}
 	}
 
-	node.paths = alloc::clone_slice(ctx.allocator, temp_paths.array_view());
+	parse_attributes_into(scope, (Node*)node, &temp_attrs);
 
-	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
-	{
-		node.attributes = parse_attributes(scope, node);
-	}
+	node.paths = alloc::clone_slice(ctx.allocator, temp_paths.array_view());
+	node.attributes = alloc::clone_slice(ctx.allocator, temp_attrs.array_view());
 
 	(void)consume(ctx, EOS);
 

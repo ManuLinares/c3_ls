@@ -163,23 +163,6 @@ fn bool is_vector_type(String type_name)
 	return type_name.contains("[<") && type_name.contains(">]");
 }
 
-fn bool is_module_private(Module* mod)
-{
-	if (!mod) return false;
-	foreach (md : mod.module_decls)
-	{
-		if (!md) continue;
-		foreach (attr : md.attributes)
-		{
-			if (attr && attr.kind == ATTRIBUTE_DECL && attr.as(AttributeDecl).attribute_kind == AttributeKind.PRIVATE)
-			{
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 fn String get_source_file_module_name(SourceFile* sf)
 {
 	if (!sf) return "";
@@ -267,7 +250,7 @@ fn void get_module_section_stmt_range(SourceFile* sf, Location loc, sz* out_star
 	}
 }
 
-fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod, Location loc = { -1, -1 })
+fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod)
 {
 	if (!sf || target_mod.len == 0) return false;
 	sz start_idx = 0;
@@ -279,16 +262,8 @@ fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod, Locatio
 		Node* stmt = sf.ast.statements.get(i);
 		if (!stmt || stmt.kind != IMPORT_DECL) continue;
 		ImportDecl* imp = stmt.as(ImportDecl);
-		bool has_public = false;
-		foreach (attr : imp.attributes)
-		{
-			if (attr && attr.kind == ATTRIBUTE_DECL && attr.as(AttributeDecl).attribute_kind == AttributeKind.PUBLIC)
-			{
-				has_public = true;
-				break;
-			}
-		}
-		if (!has_public) continue;
+		bool stmt_is_public = cursor::has_attribute((Node*)imp, PUBLIC, null);
+
 		foreach (p : imp.paths)
 		{
 			if (!p || p.kind != PATH_EXPR) continue;
@@ -296,7 +271,7 @@ fn bool is_imported_as_public_in_file(SourceFile* sf, String target_mod, Locatio
 			String imp_path = pe.path ? pe.path.text.strip_suffix("::") : "";
 			if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
 			{
-				return true;
+				if (stmt_is_public || cursor::has_attribute(p, PUBLIC, null)) return true;
 			}
 		}
 	}
@@ -343,15 +318,12 @@ fn List{String} get_source_file_imported_modules(SourceFile* sf)
 	return get_imported_modules_at_location(sf, { -1, -1 });
 }
 
-fn bool is_module_visible_to_file(AnalyzerContext* context, SourceFile* sf, String target_mod, Location loc = { -1, -1 })
+fn bool is_module_visible_at(AnalyzerContext* context, SourceFile* sf, Location loc, String target_mod)
 {
 	if (!sf || target_mod.len == 0) return false;
 
 	String sf_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
 	if (sf_mod.len > 0 && sf_mod == target_mod) return true;
-
-	Module* target_mod_obj = context ? (context.modules.get(target_mod) ?? null) : null;
-	if (target_mod_obj && is_module_private(target_mod_obj)) return false;
 
 	if (target_mod == "std::core" || target_mod.starts_with("std::core::")) return true;
 
@@ -367,7 +339,6 @@ fn bool is_module_visible_to_file(AnalyzerContext* context, SourceFile* sf, Stri
 	{
 		if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
 		{
-			if (target_mod_obj && is_module_private(target_mod_obj)) continue;
 			return true;
 		}
 	}
@@ -375,28 +346,39 @@ fn bool is_module_visible_to_file(AnalyzerContext* context, SourceFile* sf, Stri
 	return false;
 }
 
-fn bool is_symbol_accessible_from_file(AnalyzerContext* context, SourceFile* sf, Node* target_node, String target_mod, Location loc = { -1, -1 })
+fn bool is_symbol_accessible_at(AnalyzerContext* context, SourceFile* sf, Location loc, Node* target_node, String target_mod)
 {
 	if (!target_node || !sf) return false;
-	if (sf.contains_node(target_node))
+
+	switch (target_node.visibility)
 	{
-		if (target_node.visibility == Visibility.PRIVATE)
-		{
+		case PUBLIC:
+			return true;
+
+		case LOCAL:
+			if (!sf.contains_node(target_node)) return false;
+			if (loc.line < 0) return true;
+			sz start_idx = 0;
+			sz end_idx = 0;
+			get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+			for (sz i = start_idx; i < end_idx; i++)
+			{
+				Node* sec_stmt = sf.ast.statements.get(i);
+				if (!sec_stmt) continue;
+				if (sec_stmt == target_node || sec_stmt.range.contains_range(target_node.range))
+				{
+					return true;
+				}
+			}
+			return false;
+
+		case PRIVATE:
 			String caller_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
 			if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
+			if (caller_mod.len == 0 && target_mod.len == 0 && sf.contains_node(target_node)) return true;
+			if (is_imported_as_public_at(sf, loc, target_mod)) return true;
 			return false;
-		}
-		return true;
 	}
-
-	Visibility vis = target_node.visibility;
-	if (vis == Visibility.LOCAL) return false;
-	if (vis != Visibility.PRIVATE) return true;
-
-	String caller_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
-	if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
-	if (is_imported_as_public_in_file(sf, target_mod, loc)) return true;
-	return false;
 }
 
 fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, Location loc, String mod_prefix)
@@ -542,12 +524,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 	{
 		if (clean_type.contains("::"))
 		{
-			if (try ty_info = context.registry.types.get(clean_type))
+			TypeInfo* curr = context.registry.types.get(clean_type) ?? null;
+			while (curr != null)
 			{
-				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc)))
+				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 				{
-					return ty_info.node;
+					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 
@@ -555,12 +539,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		if (caller_mod.len > 0)
 		{
 			String local_qname = string::tformat("%s::%s", caller_mod, clean_type);
-			if (try ty_info = context.registry.types.get(local_qname))
+			TypeInfo* curr = context.registry.types.get(local_qname) ?? null;
+			while (curr != null)
 			{
-				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc)))
+				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 				{
-					return ty_info.node;
+					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 
@@ -570,12 +556,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 			foreach (imp : imports)
 			{
 				String imp_qname = string::tformat("%s::%s", imp, clean_type);
-				if (try ty_info = context.registry.types.get(imp_qname))
+				TypeInfo* curr = context.registry.types.get(imp_qname) ?? null;
+				while (curr != null)
 				{
-					if (ty_info.node && is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod, loc))
+					if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
 					{
-						return ty_info.node;
+						return curr.node;
 					}
+					curr = curr.next;
 				}
 			}
 		}
@@ -586,9 +574,15 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		{
 			if (!matched && (qname == clean_type || qname.ends_with(suffix)))
 			{
-				if (!sf || (is_module_visible_to_file(context, sf, tinfo.mod, loc) && is_symbol_accessible_from_file(context, sf, tinfo.node, tinfo.mod, loc)))
+				TypeInfo* curr = tinfo;
+				while (curr != null)
 				{
-					matched = tinfo;
+					if (!sf || (is_module_visible_at(context, sf, loc, curr.mod) && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
+					{
+						matched = curr;
+						break;
+					}
+					curr = curr.next;
 				}
 			}
 		};
@@ -599,7 +593,7 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 	{
 		context.modules.@each(; mod_name, mod)
 		{
-			if (mod && (!sf || is_module_visible_to_file(context, sf, mod_name)))
+			if (mod && (!sf || is_module_visible_at(context, sf, loc, mod_name)))
 			{
 				foreach (n : mod.nodes)
 				{
@@ -610,22 +604,22 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 						case STRUCT_DECL:
 							if (n.as(StructDecl).name && n.as(StructDecl).name.text == clean_type)
 							{
-								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
 							}
 						case ENUM_DECL:
 							if (n.as(EnumDecl).name && n.as(EnumDecl).name.text == clean_type)
 							{
-								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
 							}
 						case TYPEDEF_DECL:
 							if (n.as(TypedefDecl).name && n.as(TypedefDecl).name.text == clean_type)
 							{
-								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
 							}
 						case ALIAS_DECL:
 							if (n.as(AliasDecl).name && n.as(AliasDecl).name.text == clean_type)
 							{
-								if (!sf || is_symbol_accessible_from_file(context, sf, n, mod_name)) return n;
+								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
 							}
 						default:
 							break;
@@ -719,7 +713,7 @@ fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, St
 	return false;
 }
 
-fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name)
+fn Node* check_fn_list_for_method(AnalyzerContext* context, FunctionInfo* head, String type_name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	FunctionInfo* curr = head;
 	while (curr != null)
@@ -729,7 +723,10 @@ fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name)
 			FnDecl* fd = curr.node.as(FnDecl);
 			if (fd.associated_type && is_matching_associated_type(fd.associated_type, type_name))
 			{
-				return curr.node;
+				if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
+				{
+					return curr.node;
+				}
 			}
 		}
 		curr = curr.next;
@@ -737,7 +734,7 @@ fn Node* check_fn_list_for_method(FunctionInfo* head, String type_name)
 	return null;
 }
 
-fn Node* check_macro_list_for_method(MacroInfo* head, String type_name)
+fn Node* check_macro_list_for_method(AnalyzerContext* context, MacroInfo* head, String type_name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	MacroInfo* curr = head;
 	while (curr != null)
@@ -749,7 +746,10 @@ fn Node* check_macro_list_for_method(MacroInfo* head, String type_name)
 			{
 				if (is_matching_associated_type(assoc_node, type_name))
 				{
-					return curr.node;
+					if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
+					{
+						return curr.node;
+					}
 				}
 			}
 		}
@@ -758,7 +758,7 @@ fn Node* check_macro_list_for_method(MacroInfo* head, String type_name)
 	return null;
 }
 
-fn Node* check_fn_list_for_function(FunctionInfo* head)
+fn Node* check_fn_list_for_function(AnalyzerContext* context, FunctionInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	FunctionInfo* curr = head;
 	while (curr != null)
@@ -768,7 +768,10 @@ fn Node* check_fn_list_for_function(FunctionInfo* head)
 			FnDecl* fd = curr.node.as(FnDecl);
 			if (fd.associated_type == null)
 			{
-				return curr.node;
+				if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
+				{
+					return curr.node;
+				}
 			}
 		}
 		curr = curr.next;
@@ -776,7 +779,7 @@ fn Node* check_fn_list_for_function(FunctionInfo* head)
 	return null;
 }
 
-fn Node* check_macro_list_for_macro(MacroInfo* head)
+fn Node* check_macro_list_for_macro(AnalyzerContext* context, MacroInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	MacroInfo* curr = head;
 	while (curr != null)
@@ -786,7 +789,10 @@ fn Node* check_macro_list_for_macro(MacroInfo* head)
 			MacroDecl* md = curr.node.as(MacroDecl);
 			if (!@ok(md.associated_type.get()))
 			{
-				return curr.node;
+				if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
+				{
+					return curr.node;
+				}
 			}
 		}
 		curr = curr.next;
@@ -794,39 +800,48 @@ fn Node* check_macro_list_for_macro(MacroInfo* head)
 	return null;
 }
 
-fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "")
+fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "", Location loc = { -1, -1 })
 {
 	if (!context || !context.registry || name.len == 0) return null;
 
 	if (caller_mod.len > 0)
 	{
 		String local_qname = string::tformat("%s::%s", caller_mod, name);
-		if (try ai = context.registry.attrmacros.get(local_qname))
+		AttrdefInfo* curr = context.registry.attrmacros.get(local_qname) ?? null;
+		while (curr != null)
 		{
-			if (ai.node) return ai.node;
+			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
+			{
+				return curr.node;
+			}
+			curr = curr.next;
 		}
 	}
 
-	if (try ai = context.registry.attrmacros.get(name))
+	AttrdefInfo* direct = context.registry.attrmacros.get(name) ?? null;
+	while (direct != null)
 	{
-		if (ai.node && (!sf || is_symbol_accessible_from_file(context, sf, ai.node, ai.mod)))
+		if (direct.node && (!sf || is_symbol_accessible_at(context, sf, loc, direct.node, direct.mod)))
 		{
-			return ai.node;
+			return direct.node;
 		}
+		direct = direct.next;
 	}
 
 	if (sf)
 	{
-		List{String} imports = get_source_file_imported_modules(sf);
+		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, name);
-			if (try ai = context.registry.attrmacros.get(imp_qname))
+			AttrdefInfo* curr = context.registry.attrmacros.get(imp_qname) ?? null;
+			while (curr != null)
 			{
-				if (ai.node && is_symbol_accessible_from_file(context, sf, ai.node, ai.mod))
+				if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
 				{
-					return ai.node;
+					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 	}
@@ -834,7 +849,7 @@ fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 	Node* found = null;
 	context.modules.@each(; mod_name, mod)
 	{
-		if (!found && mod && (!sf || is_module_visible_to_file(context, sf, mod_name)))
+		if (!found && mod && (!sf || is_module_visible_at(context, sf, loc, mod_name)))
 		{
 			foreach (node : mod.nodes)
 			{
@@ -843,7 +858,7 @@ fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 					AttrdefDecl* ad = node.as(AttrdefDecl);
 					if (ad.name && ad.name.text == name)
 					{
-						if (!sf || is_symbol_accessible_from_file(context, sf, node, mod_name))
+						if (!sf || is_symbol_accessible_at(context, sf, loc, node, mod_name))
 						{
 							found = node;
 							break;
@@ -857,7 +872,7 @@ fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 	return found;
 }
 
-fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String name)
+fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	if (!context || !mod) return null;
 	String qname = string::tformat("%s::%s", mod.name, name);
@@ -865,11 +880,11 @@ fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String n
 	{
 		if (try fn_info = context.registry.functions.get(qname))
 		{
-			if (Node* n = check_fn_list_for_function(fn_info)) return n;
+			if (Node* n = check_fn_list_for_function(context, fn_info, sf, loc)) return n;
 		}
 		if (try mac_info = context.registry.macros.get(qname))
 		{
-			if (Node* n = check_macro_list_for_macro(mac_info)) return n;
+			if (Node* n = check_macro_list_for_macro(context, mac_info, sf, loc)) return n;
 		}
 	}
 	foreach (stmt : mod.nodes)
@@ -877,6 +892,7 @@ fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String n
 		if (!stmt || stmt.kind == ERROR) continue;
 		if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
 		if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
+		if (sf && !is_symbol_accessible_at(context, sf, loc, stmt, mod.name)) continue;
 		String sname = cursor::spelling(stmt, tmem);
 		if (sname == name || sname.strip_prefix("@") == name.strip_prefix("@"))
 		{
@@ -886,31 +902,33 @@ fn Node* find_callable_in_module(AnalyzerContext* context, Module* mod, String n
 	return null;
 }
 
-fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String symbol_name, SourceFile* sf = null, bool check_access = false)
+fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String symbol_name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	if (!context || !mod || symbol_name.len == 0) return null;
 
-	if (Node* c = find_callable_in_module(context, mod, symbol_name))
+	if (Node* c = find_callable_in_module(context, mod, symbol_name, sf, loc))
 	{
-		if (!check_access || !sf || is_symbol_accessible_from_file(context, sf, c, mod.name)) return c;
+		return c;
 	}
 
 	String qname = string::tformat("%s::%s", mod.name, symbol_name);
 	if (context.registry)
 	{
-		if (try ty_info = context.registry.types.get(qname))
+		TypeInfo* curr = context.registry.types.get(qname) ?? null;
+		while (curr != null)
 		{
-			if (ty_info.node && (!check_access || !sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 			{
-				return ty_info.node;
+				return curr.node;
 			}
+			curr = curr.next;
 		}
 	}
 
 	foreach (stmt : mod.nodes)
 	{
 		if (!stmt || stmt.kind == ERROR) continue;
-		if (check_access && sf && !is_symbol_accessible_from_file(context, sf, stmt, mod.name)) continue;
+		if (sf && !is_symbol_accessible_at(context, sf, loc, stmt, mod.name)) continue;
 
 		String sname = cursor::spelling(stmt, tmem);
 		if (sname.len > 0 && (sname == symbol_name || sname.strip_prefix("@") == symbol_name.strip_prefix("@")))
@@ -936,6 +954,7 @@ fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String sym
 					foreach (fault_node : fd.faults)
 					{
 						if (!fault_node || fault_node.kind != FAULT_DECL) continue;
+						if (sf && !is_symbol_accessible_at(context, sf, loc, fault_node, mod.name)) continue;
 						FaultDecl* fdecl = fault_node.as(FaultDecl);
 						if (fdecl.name && fdecl.name.text == symbol_name) return fault_node;
 					}
@@ -962,81 +981,57 @@ fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String sym
 	return null;
 }
 
-fn Node* find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "")
+fn Node* find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "", Location loc = { -1, -1 })
 {
 	if (!context || !context.registry || name.len == 0) return null;
 
-	if (caller_mod.len > 0)
+	String effective_mod = caller_mod;
+	if (effective_mod.len == 0 && sf)
 	{
-		String local_qname = string::tformat("%s::%s", caller_mod, name);
+		effective_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+	}
+
+	if (effective_mod.len > 0)
+	{
+		String local_qname = string::tformat("%s::%s", effective_mod, name);
 		if (try fn_info = context.registry.functions.get(local_qname))
 		{
-			if (Node* n = check_fn_list_for_function(fn_info)) return n;
+			if (Node* n = check_fn_list_for_function(context, fn_info, sf, loc)) return n;
 		}
 		if (try mac_info = context.registry.macros.get(local_qname))
 		{
-			if (Node* n = check_macro_list_for_macro(mac_info)) return n;
+			if (Node* n = check_macro_list_for_macro(context, mac_info, sf, loc)) return n;
 		}
 	}
 
 	if (try fn_info = context.registry.functions.get(name))
 	{
-		if (Node* fn_node = check_fn_list_for_function(fn_info))
-		{
-			if (!sf || is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-			{
-				return fn_node;
-			}
-		}
+		if (Node* fn_node = check_fn_list_for_function(context, fn_info, sf, loc)) return fn_node;
 	}
 	if (try mac_info = context.registry.macros.get(name))
 	{
-		if (Node* mac_node = check_macro_list_for_macro(mac_info))
-		{
-			if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-			{
-				return mac_node;
-			}
-		}
+		if (Node* mac_node = check_macro_list_for_macro(context, mac_info, sf, loc)) return mac_node;
 	}
 
 	String clean_name = name.strip_prefix("@");
 	if (try mac_info = context.registry.macros.get(clean_name))
 	{
-		if (Node* mac_node = check_macro_list_for_macro(mac_info))
-		{
-			if (!sf || is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-			{
-				return mac_node;
-			}
-		}
+		if (Node* mac_node = check_macro_list_for_macro(context, mac_info, sf, loc)) return mac_node;
 	}
 
 	if (sf)
 	{
-		List{String} imports = get_source_file_imported_modules(sf);
+		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, name);
 			if (try fn_info = context.registry.functions.get(imp_qname))
 			{
-				if (Node* fn_node = check_fn_list_for_function(fn_info))
-				{
-					if (is_symbol_accessible_from_file(context, sf, fn_node, fn_info.mod))
-					{
-						return fn_node;
-					}
-				}
+				if (Node* fn_node = check_fn_list_for_function(context, fn_info, sf, loc)) return fn_node;
 			}
 			if (try mac_info = context.registry.macros.get(imp_qname))
 			{
-				if (Node* mac_node = check_macro_list_for_macro(mac_info))
-				{
-					if (is_symbol_accessible_from_file(context, sf, mac_node, mac_info.mod))
-					{
-						return mac_node;
-					}
-				}
+				if (Node* mac_node = check_macro_list_for_macro(context, mac_info, sf, loc)) return mac_node;
 			}
 		}
 	}
@@ -1065,37 +1060,37 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 			String qname1 = string::tformat("%s::%s", caller_mod, clean_mname);
 			if (try fn_info = context.registry.functions.get(qname1))
 			{
-				if (Node* m = check_fn_list_for_method(fn_info, clean_type)) return m;
+				if (Node* m = check_fn_list_for_method(context, fn_info, clean_type, sf, loc)) return m;
 			}
 			if (try mac_info = context.registry.macros.get(qname1))
 			{
-				if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
+				if (Node* m = check_macro_list_for_method(context, mac_info, clean_type, sf, loc)) return m;
 			}
 			String qname2 = string::tformat("%s::%s", caller_mod, at_mname);
 			if (try mac_info = context.registry.macros.get(qname2))
 			{
-				if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
+				if (Node* m = check_macro_list_for_method(context, mac_info, clean_type, sf, loc)) return m;
 			}
 		}
 
 		if (sf)
 		{
-			List{String} imports = get_source_file_imported_modules(sf);
+			List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
 			foreach (imp : imports)
 			{
 				String qname1 = string::tformat("%s::%s", imp, clean_mname);
 				if (try fn_info = context.registry.functions.get(qname1))
 				{
-					if (Node* m = check_fn_list_for_method(fn_info, clean_type)) return m;
+					if (Node* m = check_fn_list_for_method(context, fn_info, clean_type, sf, loc)) return m;
 				}
 				if (try mac_info = context.registry.macros.get(qname1))
 				{
-					if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
+					if (Node* m = check_macro_list_for_method(context, mac_info, clean_type, sf, loc)) return m;
 				}
 				String qname2 = string::tformat("%s::%s", imp, at_mname);
 				if (try mac_info = context.registry.macros.get(qname2))
 				{
-					if (Node* m = check_macro_list_for_method(mac_info, clean_type)) return m;
+					if (Node* m = check_macro_list_for_method(context, mac_info, clean_type, sf, loc)) return m;
 				}
 			}
 		}
@@ -1108,10 +1103,7 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 		{
 			if (!found_m && (qname == clean_mname || qname.ends_with(suffix1)))
 			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, fn_info.node, fn_info.mod))
-				{
-					found_m = check_fn_list_for_method(fn_info, clean_type);
-				}
+				found_m = check_fn_list_for_method(context, fn_info, clean_type, sf, loc);
 			}
 		};
 		if (found_m) return found_m;
@@ -1120,10 +1112,7 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 		{
 			if (!found_m && (qname == clean_mname || qname.ends_with(suffix1) || qname.ends_with(suffix2)))
 			{
-				if (!sf || is_symbol_accessible_from_file(context, sf, mac_info.node, mac_info.mod))
-				{
-					found_m = check_macro_list_for_method(mac_info, clean_type);
-				}
+				found_m = check_macro_list_for_method(context, mac_info, clean_type, sf, loc);
 			}
 		};
 		if (found_m) return found_m;
@@ -1373,7 +1362,7 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 		String mod_prefix = symbol_name[:last_colons];
 		String short_name = symbol_name[last_colons + 2..];
 		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_prefix);
-		if (mod) return find_symbol_in_module(context, mod, short_name, sf, true);
+		if (mod) return find_symbol_in_module(context, mod, short_name, sf, loc);
 		return null;
 	}
 
@@ -1382,7 +1371,7 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 	{
 		if (Module* m = context.modules.get(caller_mod) ?? null)
 		{
-			if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, false))
+			if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, loc))
 			{
 				return sym;
 			}
@@ -1396,7 +1385,7 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 		{
 			if (Module* m = context.modules.get(imp) ?? null)
 			{
-				if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, true))
+				if (Node* sym = find_symbol_in_module(context, m, symbol_name, sf, loc))
 				{
 					return sym;
 				}
@@ -1409,9 +1398,9 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 	{
 		if (!found && mod && mod_name != caller_mod)
 		{
-			if (!sf || is_module_visible_to_file(context, sf, mod_name, loc))
+			if (!sf || is_module_visible_at(context, sf, loc, mod_name))
 			{
-				if (Node* sym = find_symbol_in_module(context, mod, symbol_name, sf, true))
+				if (Node* sym = find_symbol_in_module(context, mod, symbol_name, sf, loc))
 				{
 					found = sym;
 				}
@@ -1515,7 +1504,7 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 
 					if (mod)
 					{
-						if (Node* sym = find_symbol_in_module(context, mod, id_name, sf, true))
+						if (Node* sym = find_symbol_in_module(context, mod, id_name, sf, effective_loc))
 						{
 							String t = type_of_symbol(context, sf, sym, effective_loc);
 							if (t.len > 0) return t;
@@ -1539,7 +1528,7 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				{
 					if (try ty_info = context.registry.types.get(id_name))
 					{
-						if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+						if (ty_info.node && (!sf || is_symbol_accessible_at(context, sf, effective_loc, ty_info.node, ty_info.mod)))
 						{
 							return id_name;
 						}
@@ -1712,7 +1701,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 			if (target_node.as(AttributeDecl).name && context)
 			{
 				String caller_mod = get_module_name_at_location(sf, loc);
-				Node* def = find_attrmacro_in_scope(context, sf, target_node.as(AttributeDecl).name.text, caller_mod);
+				Node* def = find_attrmacro_in_scope(context, sf, target_node.as(AttributeDecl).name.text, caller_mod, loc);
 				if (def) return def;
 			}
 			return target_node;
@@ -1784,7 +1773,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 			if (mod)
 			{
-				return find_symbol_in_module(context, mod, symbol_name);
+				return find_symbol_in_module(context, mod, symbol_name, sf, loc);
 			}
 			return null;
 		}
@@ -1850,26 +1839,31 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 	if (context && context.registry)
 	{
-		if (try ty_info = context.registry.types.get(symbol_name))
+		TypeInfo* direct_ty = context.registry.types.get(symbol_name) ?? null;
+		while (direct_ty != null)
 		{
-			if (ty_info.node && is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod))
+			if (direct_ty.node && is_symbol_accessible_at(context, sf, loc, direct_ty.node, direct_ty.mod))
 			{
-				return ty_info.node;
+				return direct_ty.node;
 			}
+			direct_ty = direct_ty.next;
 		}
 
-		if (Node* c = find_callable_in_scope(context, sf, symbol_name)) return c;
+		String caller_mod = get_module_name_at_location(sf, loc);
+		if (Node* c = find_callable_in_scope(context, sf, symbol_name, caller_mod, loc)) return c;
 
-		List{String} imports = get_source_file_imported_modules(sf);
+		List{String} imports = get_imported_modules_at_location(sf, loc);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, symbol_name);
-			if (try ty_info = context.registry.types.get(imp_qname))
+			TypeInfo* imp_ty = context.registry.types.get(imp_qname) ?? null;
+			while (imp_ty != null)
 			{
-				if (ty_info.node && (!sf || is_symbol_accessible_from_file(context, sf, ty_info.node, ty_info.mod)))
+				if (imp_ty.node && is_symbol_accessible_at(context, sf, loc, imp_ty.node, imp_ty.mod))
 				{
-					return ty_info.node;
+					return imp_ty.node;
 				}
+				imp_ty = imp_ty.next;
 			}
 		}
 	}
@@ -1878,7 +1872,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 	{
 		context.modules.@each(; mod_name, mod)
 		{
-			if (mod && is_module_visible_to_file(context, sf, mod_name))
+			if (mod && is_module_visible_at(context, sf, loc, mod_name))
 			{
 				foreach (md : mod.module_decls)
 				{
@@ -1898,7 +1892,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 				foreach (node : mod.nodes)
 				{
 					if (!node || node.kind == ERROR) continue;
-					if (!is_symbol_accessible_from_file(context, sf, node, mod_name)) continue;
+					if (!is_symbol_accessible_at(context, sf, loc, node, mod_name)) continue;
 
 					GenericDecl* gd = null;
 					switch (node.kind)
@@ -2289,7 +2283,7 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 		String fn_name = callee_name[idx + 2..];
 
 		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
-		return find_callable_in_module(context, mod, fn_name);
+		return find_callable_in_module(context, mod, fn_name, sf, loc);
 	}
 
 	if (try dot_idx = callee_name.rindex_of_char('.'))
@@ -2314,7 +2308,7 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 		return null;
 	}
 
-	return find_callable_in_scope(context, sf, callee_name, caller_mod);
+	return find_callable_in_scope(context, sf, callee_name, caller_mod, loc);
 }
 
 fn String file_stem_from_path(String p)

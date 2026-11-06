@@ -121,7 +121,7 @@ fn SourceFile* LspWorkspace.get_source_file_by_path(&self, String path)
 	return self.ctx.files.get(path) ?? null;
 }
 
-fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, SourceFile* sf = null)
+fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	List{SymbolEntry} results;
 	results.tinit();
@@ -132,7 +132,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 	{
 		self.ctx.modules.@each(; mod_name, mod)
 		{
-			if (!sf || query::is_module_visible_to_file(self.ctx, sf, mod_name))
+			if (!sf || query::is_module_visible_at(self.ctx, sf, loc, mod_name))
 			{
 				String qname = string::tformat("%s::%s", mod_name, name);
 				FunctionInfo* fn_info = self.ctx.registry.functions.get(qname) ?? null;
@@ -140,7 +140,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 				{
 					if (fn_info.node && fn_info.node.kind != ERROR)
 					{
-						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, fn_info.node, mod_name))
+						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, fn_info.node, mod_name))
 						{
 							results.push(
 							{
@@ -157,7 +157,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 				{
 					if (ty_info.node && ty_info.node.kind != ERROR)
 					{
-						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, ty_info.node, mod_name))
+						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, ty_info.node, mod_name))
 						{
 							results.push(
 							{
@@ -174,7 +174,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 				{
 					if (mac_info.node && mac_info.node.kind != ERROR)
 					{
-						if (!sf || query::is_symbol_accessible_from_file(self.ctx, sf, mac_info.node, mod_name))
+						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, mac_info.node, mod_name))
 						{
 							results.push(
 							{
@@ -191,12 +191,12 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 
 	self.ctx.modules.@each(; mod_name, mod)
 	{
-		if (mod && (!sf || query::is_module_visible_to_file(self.ctx, sf, mod_name)))
+		if (mod && (!sf || query::is_module_visible_at(self.ctx, sf, loc, mod_name)))
 		{
 			foreach (n : mod.nodes)
 			{
 				if (!n) continue;
-				if (sf && !query::is_symbol_accessible_from_file(self.ctx, sf, n, mod_name)) continue;
+				if (sf && !query::is_symbol_accessible_at(self.ctx, sf, loc, n, mod_name)) continue;
 
 				switch (n.kind)
 				{
@@ -251,7 +251,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 				foreach (stmt : file_sf.ast.statements)
 				{
 					if (!stmt || stmt.kind == ERROR) continue;
-					if (sf && !query::is_symbol_accessible_from_file(self.ctx, sf, stmt, file_mod)) continue;
+					if (sf && !query::is_symbol_accessible_at(self.ctx, sf, loc, stmt, file_mod)) continue;
 
 					String sname = cursor::spelling(stmt, tmem);
 					if (sname == name)

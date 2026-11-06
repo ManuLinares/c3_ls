@@ -983,3 +983,23 @@ fn void test_alias_with_trailing_attributes() @test
 	test::eq(ad.attributes.len, 1);
 	test::eq(parser_tests::@attr(ad, 0).attribute_kind, AttributeKind.SIMD);
 }
+
+fn void test_import_with_per_item_attributes() @test
+{
+	String source_code = `
+		module test_import_attrs;
+		import std::gfx::x11 @public, std::gfx::egl @public, std::gfx::gl @public;
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_import_attrs.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("test_import_attrs")!!;
+	ImportDecl* imp = mod.nodes[1].as(ImportDecl);
+	test::eq(imp.paths.len, 3);
+	foreach (p : imp.paths)
+	{
+		test::eq(p.as(PathExpr).attributes.len, 1);
+		test::eq(cursor::has_attribute(p, AttributeKind.PUBLIC, null), true);
+	}
+}
