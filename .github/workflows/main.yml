@@ -38,15 +38,23 @@ jobs:
           C3C_UNIT_TEST_DIR: ${{ github.workspace }}/../c3c/test/unit
         run: c3c test
 
-      - name: Install Toolchains & Wine
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev gcc-aarch64-linux-gnu wine
-
       - name: Get current month
         id: get-date
         run: echo "month=$(/bin/date -u '+%Y-%m')" >> $GITHUB_OUTPUT
         shell: bash
+
+      - name: Cache APT packages
+        uses: actions/cache@v6
+        with:
+          path: /var/cache/apt/archives
+          key: apt-deps-${{ runner.os }}-${{ steps.get-date.outputs.month }}
+          restore-keys: |
+            apt-deps-${{ runner.os }}-
+
+      - name: Install Toolchains & Wine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev gcc-aarch64-linux-gnu wine
 
       - name: Cache SDKs
         id: cache-sdks
