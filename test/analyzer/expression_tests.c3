@@ -774,3 +774,19 @@ fn void test_optional_type_in_nested_lambda_expressions()
 	bool success = context::process(context, source_code, "test_nested_opt.c3");
 	test::eq(success, true);
 }
+
+fn void test_empty_raw_string_and_escaped_backtick() @test
+{
+	String source_code = "module test_raw_str;\n"
+		"String empty = ``;\n"
+		"String with_quote = `before `` inside `` after`;\n"
+		"String normal = `simple text`;\n"
+		"fn void run() {\n"
+		"    assert(empty == \"\");\n"
+		"    assert(empty.len == 0);\n"
+		"}\n";
+
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_raw_str.c3");
+	test::eq(success, true);
+}

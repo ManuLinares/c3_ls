@@ -224,36 +224,26 @@ fn Token lex_raw_string(Lexer* self)
 {
 	Location start = self.location;
 	int start_index = self.index;
-
-	int delim_len = 0;
-	while (self.current == '`')
-	{
-		delim_len++;
-		advance(self);
-	}
+	advance(self);
 
 	while (self.current != 0)
 	{
 		if (self.current == '`')
 		{
-			int count = 0;
-			while (self.current == '`')
+			if (self.peek(1) == '`')
 			{
-				count++;
-				advance(self);
+				advance(self, 2);
+				continue;
 			}
-			if (count == delim_len)
-			{
-				return {
-					.kind = STRING_LITERAL,
-					.value = self.get_string(start_index, self.index - start_index),
-					.range = {
-						.start = start,
-						.end = self.location
-					}
-				};
-			}
-			continue;
+			advance(self);
+			return {
+				.kind = STRING_LITERAL,
+				.value = self.get_string(start_index, self.index - start_index),
+				.range = {
+					.start = start,
+					.end = self.location
+				}
+			};
 		}
 		advance(self);
 	}
