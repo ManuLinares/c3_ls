@@ -28,7 +28,14 @@ jobs:
         with:
           version: nightly
 
+      - name: Fetch Upstream c3c Unit Tests
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/c3lang/c3c.git ../c3c
+          git -C ../c3c sparse-checkout set test/unit
+
       - name: Run Linux Test Suite
+        env:
+          C3C_UNIT_TEST_DIR: ${{ github.workspace }}/../c3c/test/unit
         run: c3c test
 
       - name: Install Toolchains & Wine
