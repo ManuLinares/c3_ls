@@ -286,6 +286,66 @@ fn void parse_join_strings(ContextScope scope, String* list)
 	* list = current_str.copy(ctx.allocator);
 }
 
+fn bool parse_join_bytes(ContextScope scope, LiteralExpr* literal) @local
+{
+	ParseContext* ctx = scope.ctx;
+	if (ctx.eof() || !ctx.is(BYTES_LITERAL)) return false;
+
+	Token first_tok = ctx.current;
+	bool is_b64 = first_tok.value.starts_with("b64");
+
+	DString joined;
+	joined.tinit();
+	Token last_tok = first_tok;
+
+	while (!ctx.eof() && ctx.is(BYTES_LITERAL))
+	{
+		last_tok = ctx.current;
+		String val = last_tok.value;
+		advance(ctx);
+
+		sz prefix_len = val.starts_with("b64") ? (sz)4 : (sz)2;
+		sz min_len = prefix_len + 1;
+		if (val.len < min_len) continue;
+
+		String payload = val[prefix_len : val.len - (prefix_len + 1)];
+		for (sz i = 0; i < payload.len; i++)
+		{
+			if (!payload[i].is_space()) joined.append_char(payload[i]);
+		}
+	}
+
+	if (is_b64)
+	{
+		char[]? decoded = base64::decode(ctx.allocator, joined.str_view());
+		if (catch err = decoded)
+		{
+			diagnostics::error(ctx.context, last_tok.range, "Failed to decode Base64(%s)", err);
+			return false;
+		}
+		literal.bytes = decoded;
+		return true;
+	}
+
+	if (joined.len() % 2 != 0)
+	{
+		diagnostics::error(ctx.context, last_tok.range,
+			"Hex literal payload must have an even number of digits (got %s chars in '%s')",
+			joined.len(),
+			joined.str_view());
+		return false;
+	}
+
+	char[]? decoded = hex::decode(ctx.allocator, joined.str_view());
+	if (catch err = decoded)
+	{
+		diagnostics::error(ctx.context, last_tok.range, "Failed to decode hex(%s): %s", joined.str_view(), err);
+		return false;
+	}
+	literal.bytes = decoded;
+	return true;
+}
+
 fn Node* parse_literal_expr(ContextScope scope) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
@@ -422,53 +482,11 @@ fn Node* parse_literal_expr(ContextScope scope) => @pool()
 			break;
 		case BYTES_LITERAL:
 			literal.literal_kind = BYTES_LITERAL;
-			switch (true)
+			if (!parse_join_bytes(scope, literal))
 			{
-			case token_text.starts_with("b64"):
-				String payload = token_text[4 : ^ 5];
-				String clean = payload.treplace(" ", "")
-				.treplace("\t", "")
-				.treplace("\n", "")
-				.treplace("\r", "");
-				diagnostics::log_debug(clean);
-				char[]? b64 = base64::decode(tmem, clean);
-				if (catch err = b64)
-				{
-					diagnostics::error(ctx.context, token.range, "Failed to decode Base64(%s)", err);
-					advance(ctx);
-					return ctx.ast.error(start);
-				}
-				literal.bytes = alloc::clone_slice(ctx.allocator, b64);
-				advance(ctx);
-			case token_text.starts_with("x"):
-				String payload = token_text[2 : ^ 3];
-				String clean = payload.treplace(" ", "")
-				.treplace("\t", "")
-				.treplace("\n", "")
-				.treplace("\r", "");
-				diagnostics::log_debug("%s", clean);
-				if (clean.len % 2 != 0)
-				{
-					diagnostics::error(ctx.context, token.range,
-					"Hex literal payload must have an even number of digits (got %s chars in '%s')",
-					clean.len,
-					clean);
-					advance(ctx);
-					return ctx.ast.error(start);
-				}
-				char[]? hex = hex::decode(tmem, clean);
-				if (catch err = hex)
-				{
-					diagnostics::error(ctx.context, token.range, "Failed to decode hex(%s): %s", clean, err);
-					advance(ctx);
-					return ctx.ast.error(start);
-				}
-				literal.bytes = alloc::clone_slice(ctx.allocator, hex);
-				advance(ctx);
-			default:
-				break;
-		}
-		break;
+				return ctx.ast.error(start);
+			}
+			
 		case CHAR_LITERAL:
 			literal.literal_kind = INT_LITERAL;
 

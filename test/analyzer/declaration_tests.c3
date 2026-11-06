@@ -967,3 +967,19 @@ fn void main() {}
 	bool success = context::process(context, source_code, "test_shebang.c3");
 	test::eq(success, true);
 }
+
+fn void test_alias_with_trailing_attributes() @test
+{
+	String source_code = `
+		module test_alias_attrs;
+		alias Vec4 = int[<4>] @simd;
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_alias_attrs.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("test_alias_attrs")!!;
+	AliasDecl* ad = mod.nodes[1].as(AliasDecl);
+	test::eq(ad.attributes.len, 1);
+	test::eq(parser_tests::@attr(ad, 0).attribute_kind, AttributeKind.SIMD);
+}

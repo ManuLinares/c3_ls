@@ -801,7 +801,7 @@ fn Token next(Lexer* lexer)
 			}
 			nextcase;
 		case 'b':
-			if (lexer.peek(1) == '6' && lexer.peek(2) == '4' && (lexer.peek(3) == '`' || lexer.peek(3) == '"'))
+			if (lexer.peek(1) == '6' && lexer.peek(2) == '4' && (lexer.peek(3) == '`' || lexer.peek(3) == '"' || lexer.peek(3) == '\''))
 			{
 				Location start = lexer.location;
 				int start_index = lexer.index;

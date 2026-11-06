@@ -241,10 +241,9 @@ fn Node* parse_alias_decl(ContextScope scope)
 	{
 		node.generics = parse_generic_decl(scope);
 	}
-	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
-	{
-		node.attributes = parse_attributes(scope, node, {.allow_type_ident = true });
-	}
+	List{Node*} attributes;
+	attributes.init(tmem, 4);
+	parse_attributes_into(scope, (Node*)node, &attributes, {.allow_type_ident = true });
 
 	if (!consume(ctx, EQ))
 	{
@@ -269,6 +268,9 @@ fn Node* parse_alias_decl(ContextScope scope)
 		node.alias_kind = IDENT_ALIAS;
 		node.target = parse_expr(scope);
 	}
+
+	parse_attributes_into(scope, (Node*)node, &attributes, {.allow_type_ident = true });
+	node.attributes = alloc::clone_slice(ctx.allocator, attributes.array_view());
 
 	(void)expect(ctx, node, EOS);
 

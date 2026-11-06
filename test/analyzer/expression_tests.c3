@@ -790,3 +790,47 @@ fn void test_empty_raw_string_and_escaped_backtick() @test
 	bool success = context::process(context, source_code, "test_raw_str.c3");
 	test::eq(success, true);
 }
+
+fn void test_adjacent_bytes_literal_concatenation() @test
+{
+	String source_code = `
+		module test_bytes;
+		const char[] A =
+			x"1234"
+			x"5678";
+		const char[] B =
+			x'AABB'
+			x'CCDD';
+		const char[] C =
+			b64"SGV"
+			b64"sbG8=";
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	bool success = context::process(context, source_code, "test_bytes.c3");
+	test::eq(success, true);
+
+	Module* mod = context.modules.get("test_bytes")!!;
+	VarDecl* a = mod.nodes[1].as(VarDecl);
+	LiteralExpr* lit_a = a.init_expr.as(LiteralExpr);
+	test::eq(lit_a.literal_kind, LiteralKind.BYTES_LITERAL);
+	test::eq(lit_a.bytes.len, 4);
+	test::eq((char)lit_a.bytes[0], (char)0x12);
+	test::eq((char)lit_a.bytes[1], (char)0x34);
+	test::eq((char)lit_a.bytes[2], (char)0x56);
+	test::eq((char)lit_a.bytes[3], (char)0x78);
+
+	VarDecl* b = mod.nodes[2].as(VarDecl);
+	LiteralExpr* lit_b = b.init_expr.as(LiteralExpr);
+	test::eq(lit_b.literal_kind, LiteralKind.BYTES_LITERAL);
+	test::eq(lit_b.bytes.len, 4);
+	test::eq((char)lit_b.bytes[0], (char)0xAA);
+	test::eq((char)lit_b.bytes[1], (char)0xBB);
+	test::eq((char)lit_b.bytes[2], (char)0xCC);
+	test::eq((char)lit_b.bytes[3], (char)0xDD);
+
+	VarDecl* c = mod.nodes[3].as(VarDecl);
+	LiteralExpr* lit_c = c.init_expr.as(LiteralExpr);
+	test::eq(lit_c.literal_kind, LiteralKind.BYTES_LITERAL);
+	test::eq(lit_c.bytes.len, 5);
+	test::eq((String)lit_c.bytes, "Hello");
+}

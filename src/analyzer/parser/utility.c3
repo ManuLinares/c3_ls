@@ -59,12 +59,12 @@ fn void append_node_array(List{Node*} * list, NodeArray nodes)
  @param [&inout] parent_node : "Node receiving visibility and has-attributes side effects."
  @param [&inout] list : "Destination list for parsed ATTRIBUTE_DECL nodes."
 *>
-fn void parse_attributes_into(ContextScope scope, Node* parent_node, List{Node*} * list)
+fn void parse_attributes_into(ContextScope scope, Node* parent_node, List{Node*} * list, AttributeParseFlags flags = {})
 {
 	ParseContext* ctx = scope.ctx;
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
-		append_node_array(list, parse_attributes(scope, parent_node));
+		append_node_array(list, parse_attributes(scope, parent_node, flags));
 	}
 }
 
