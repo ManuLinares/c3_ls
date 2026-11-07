@@ -1093,6 +1093,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 {
 	ParseContext* ctx = scope.ctx;
 	StructDecl* node = ctx.ast.alloc_node(StructDecl, ctx.current.range);
+	node.is_bitstruct = true;
 	advance(ctx);
 	defer node.range.end = ctx.peek(-1).range.end;
 

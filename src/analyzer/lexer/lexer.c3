@@ -395,18 +395,31 @@ fn Token lex_number(Lexer* self)
 		}
 	}
 
-	char c = (char)ascii::to_lower(self.current);
-	if (c == 'u' || c == 'i' || c == 'f' || c == 'l' || c == 'd')
+	// Suffixes accepted by c3c: integers `u`, `ul`, `ull`, `l`, `ll`;
+	// decimals `f`, `d` (which also make an integer literal a float).
+	switch ((char)ascii::to_lower(self.current))
 	{
-		if ((c == 'f' || c == 'd') && kind == INT_DECIMAL_LITERAL)
-		{
-			kind = FLOAT_DECIMAL_LITERAL;
-		}
-		advance(self);
-		while (self.current != 0 && ascii::is_alnum(self.current))
-		{
+		case 'u':
 			advance(self);
-		}
+			if (ascii::to_lower(self.current) == 'l')
+			{
+				advance(self);
+				if (ascii::to_lower(self.current) == 'l') advance(self);
+			}
+		case 'l':
+			advance(self);
+			if (ascii::to_lower(self.current) == 'l') advance(self);
+		case 'f':
+		case 'd':
+			if (kind == INT_DECIMAL_LITERAL) kind = FLOAT_DECIMAL_LITERAL;
+			advance(self);
+		default:
+			break;
+	}
+	if (self.current != 0 && (ascii::is_alnum(self.current) || self.current == '_'))
+	{
+		while (self.current != 0 && (ascii::is_alnum(self.current) || self.current == '_')) advance(self);
+		diagnostics::error(self.ctx, { start, self.location }, "This doesn't seem to be a valid literal.");
 	}
 
 	return {

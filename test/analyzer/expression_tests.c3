@@ -16,7 +16,7 @@ fn void test_literals()
 
 		tlocal bool blocal = true;
 
-		int [*] arr = {};
+		int[2] arr = {};
 		int [*] arr2 = {1};
 
 		// Primitives & Numbers
@@ -31,8 +31,8 @@ fn void test_literals()
 		int g = 0o755;
 
 		// Floats & Real Exponents
-		float h = 3.14159f32;
-		double i = 2e+10f64;
+		float h = 3.14159f;
+		double i = 2e+10d;
 		float j = 0x1.Ap-2f;
 		float jx = 0x1.Ap-2F;
 		double jxx = 0x1.Ap-2d;
@@ -725,13 +725,14 @@ fn void test_optional_type_in_lambda_argument()
 	String source_code = `
 		module test_lambda_opt;
 
-		struct GameObjectPtr {}
-		fn void register_method(String name, fn void() cb) {}
+		struct GameObjectPtr { void* ptr; }
+		alias MethodCallback = fn void();
+		fn void register_method(String name, MethodCallback cb) {}
 
 		fn void test()
 		{
 			register_method("method", fn void() {
-				GameObjectPtr? positionObj = null;
+				GameObjectPtr? positionObj = {};
 				if (catch positionObj) return;
 			});
 		}

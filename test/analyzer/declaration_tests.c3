@@ -457,6 +457,9 @@ fn void struct_decl()
 {
 	String source_code = `
 		module hello;
+		import std::io;
+
+		struct Bar { int x; }
 
 		<*
 		*>
@@ -465,8 +468,8 @@ fn void struct_decl()
 			<*
 				Comment
 			*>
-			int a;
 			inline Bar b;
+			int a;
 
 			struct sub
 			{
@@ -475,26 +478,32 @@ fn void struct_decl()
 				union sub_union
 				{
 					int faf;
+					float faf_f;
 				}
 			}
 
 			struct
 			{
-				int a;
+				int anon_x;
+				int anon_y;
 			}
 
 			union
 			{
-				int a;
+				int as_int;
+				float as_float;
+				char[4] as_bytes;
 			}
 
-			bitstruct bits
+			bitstruct bits : char
 			{
-				bool a;
-				bool b;
-				bool c;
+				bool a : 0;
+				bool b : 1;
+				bool c : 2;
 			}
 		}
+
+		fn usz? Foo.to_format(&self, Formatter* f) @dynamic => f.print("Foo");
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -503,11 +512,39 @@ fn void struct_decl()
 
 	Module* mod = context.modules.get("hello")!!;
 
-	Node* target_node = mod.nodes[1];
-	StructDecl* head  = target_node.as(StructDecl);
+	StructDecl* head = null;
+	foreach (n : mod.nodes)
+	{
+		if (n && n.kind == STRUCT_DECL && n.as(StructDecl).name.text == "Foo") head = n.as(StructDecl);
+	}
+	test::ne(head, null);
 	test::ne(head.next, null);
+
+	// b, a, sub, anonymous struct, anonymous union, bits
+	test::eq(head.fields.len, 6);
+	test::eq(head.fields[0].as(VarDecl).var_flags.is_inline, true);
+
+	StructDecl* sub = head.fields[2].as(StructDecl);
+	test::eq(sub.name.text, "sub");
+	test::eq(sub.is_union, false);
+	test::eq(sub.fields.len, 2);
+	StructDecl* sub_union = sub.fields[1].as(StructDecl);
+	test::eq(sub_union.is_union, true);
+	test::eq(sub_union.fields.len, 2);
+
+	StructDecl* anon_struct = head.fields[3].as(StructDecl);
+	test::eq(anon_struct.is_union, false);
+	test::eq(anon_struct.fields.len, 2);
+
+	StructDecl* anon_union = head.fields[4].as(StructDecl);
+	test::eq(anon_union.is_union, true);
+	test::eq(anon_union.fields.len, 3);
+
+	StructDecl* bits = head.fields[5].as(StructDecl);
+	test::eq(bits.is_bitstruct, true);
+	test::eq(bits.fields.len, 3);
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
-	test::eq(parser_tests::count_kind(mod, STRUCT_DECL), 1);
+	test::eq(parser_tests::count_kind(mod, STRUCT_DECL), 2);
 }
 
 fn void bitstruct_decl()
@@ -713,9 +750,11 @@ fn void param_inline_fn_type_and_sigils()
 {
 	String source_code = `
 		module hello;
-		fn void register_callback(fn void(int a, double b) cb, void* user_data) {}
-		fn void by_ref_param(Type* &name) {}
-		macro void @for_each(#Type, $COUNT; @body(idx, elem)) {}
+		alias Callback = fn void(int a, double b);
+		fn void register_callback(Callback cb, void* user_data) {}
+		struct Type { int x; }
+		fn void Type.by_ref_param(&self) {}
+		macro void @for_each(#type, $count; @body(idx, elem)) {}
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -724,25 +763,29 @@ fn void param_inline_fn_type_and_sigils()
 
 	Module* mod = context.modules.get("hello")!!;
 
-	FnDecl* fn_cb = mod.nodes[1].as(FnDecl);
+	AliasDecl* cb_alias = mod.nodes[1].as(AliasDecl);
+	test::eq(cb_alias.name.text, "Callback");
+	test::eq(cb_alias.target.as(TypeExpr).type_kind, TypeExprKind.TYPE_FUNCTION);
+
+	FnDecl* fn_cb = mod.nodes[2].as(FnDecl);
 	test::eq(fn_cb.params.len, 2);
 	VarDecl* cb_param = fn_cb.params[0].as(VarDecl);
 	test::eq(cb_param.name.text, "cb");
-	test::eq(cb_param.type.as(TypeExpr).type_kind, TypeExprKind.TYPE_FUNCTION);
+	test::eq(cb_param.type.as(TypeExpr).unresolved.name.text, "Callback");
 
-	FnDecl* fn_ref = mod.nodes[2].as(FnDecl);
+	FnDecl* fn_ref = mod.nodes[4].as(FnDecl);
 	VarDecl* ref_param = fn_ref.params[0].as(VarDecl);
 	test::eq(ref_param.var_flags.is_ref, true);
 
-	MacroDecl* mac = mod.nodes[3].as(MacroDecl);
+	MacroDecl* mac = mod.nodes[5].as(MacroDecl);
 	test::eq(mac.params.len, 2);
 	VarDecl* param0 = mac.params[0].as(VarDecl);
 	test::eq(param0.var_kind, VarDeclKind.VAR_PARAM_EXPR);
-	test::eq(param0.name.text, "#Type");
+	test::eq(param0.name.text, "#type");
 
 	VarDecl* param1 = mac.params[1].as(VarDecl);
 	test::eq(param1.var_kind, VarDeclKind.VAR_PARAM_CT);
-	test::eq(param1.name.text, "$COUNT");
+	test::eq(param1.name.text, "$count");
 }
 
 
