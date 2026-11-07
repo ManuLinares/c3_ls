@@ -1,7 +1,5 @@
 module uri;
-
-import std::io;
-import std::core::ascii;
+import std::io, std::core::ascii;
 
 faultdef
 INVALID_SYNTAX,

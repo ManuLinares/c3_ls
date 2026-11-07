@@ -1,16 +1,5 @@
 module lsp::analysis::rename;
-
-import analyzer::core;
-import analyzer::cursor;
-
-import std::collections::list;
-import std::collections::map;
-import std::io;
-
-import lsp::core;
-import lsp;
-import lsp::analysis::references;
-import uri;
+import analyzer, lsp, uri, std;
 
 fn bool touches(Range r, Location loc)
 {
