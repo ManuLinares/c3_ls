@@ -2,28 +2,23 @@ module literal_suffix_tests;
 
 import analyzer::core;
 import std::collections::list;
+import diag_capture;
 
-List{Range} lit_errors;
-
-fn void record(SourceFile* file, Range range, DiagnosticLevel level, String message)
+<* Invalid-literal errors reported for `src`. *>
+fn Diag[] literal_errors(String src)
 {
-	if (level == ERROR && message.contains("valid literal")) lit_errors.push(range);
-}
-
-<* Number of invalid-literal errors reported for `src`. *>
-fn sz literal_errors(String src)
-{
-	lit_errors.tinit();
-	diagnostics::callback = &record;
-	defer diagnostics::callback = null;
-	AnalyzerContext* context = context::create(tmem);
-	context::process(context, src, "lit.c3");
-	return lit_errors.len();
+	List{Diag} out;
+	out.tinit();
+	foreach (d : diag_capture::errors_for(src))
+	{
+		if (d.message.contains("valid literal")) out.push(d);
+	}
+	return out.array_view();
 }
 
 fn void valid_suffixes_not_reported() @test
 {
-	sz n = literal_errors(`module t;
+	Diag[] errs = literal_errors(`module t;
 ulong a = 1u;
 ulong b = 1UL;
 ulong c = 1ull;
@@ -39,7 +34,7 @@ double l = 2e+10d;
 float m = 0x1.Ap-2F;
 double o = 1e5;
 `);
-	assert(n == 0, "%d", n);
+	assert(errs.len == 0, "%s", errs);
 }
 
 fn void invalid_suffixes_reported() @test
@@ -47,9 +42,9 @@ fn void invalid_suffixes_reported() @test
 	String[*] bad = { "3.14f32", "2e+10f64", "1.0f16", "1i32", "1u8", "1uz", "1fx", "1ulll" };
 	foreach (lit : bad)
 	{
-		sz n = literal_errors(string::tformat("module t;\ndouble v = (double)%s;\n", lit));
-		assert(n == 1, "%s: %d errors", lit, n);
-		Range r = lit_errors[0];
+		Diag[] errs = literal_errors(string::tformat("module t;\ndouble v = (double)%s;\n", lit));
+		assert(errs.len == 1, "%s: %s", lit, errs);
+		Range r = errs[0].range;
 		assert(r.start.line == 1 && r.start.column == 19 && r.end.column == 19 + lit.len,
 			"%s: range %s", lit, r);
 	}

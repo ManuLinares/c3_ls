@@ -436,8 +436,6 @@ fn Token lex_hex_array(Lexer* self)
 	char start_quote = self.peek();
 	advance(self, 2);
 
-	int digit_count = 0;
-
 	while (self.current != 0)
 	{
 		char c = self.current;
@@ -457,24 +455,10 @@ fn Token lex_hex_array(Lexer* self)
 		if (is_hex(c))
 		{
 			advance(self);
-			digit_count++;
 			continue;
 		}
 
 		diagnostics::error(self.ctx, { start, self.location }, "[Lexer]: Unexpected character '%c'", c);
-		return {
-			.kind = ERROR,
-			.value = self.get_string(start_index, self.index - start_index),
-			.range = {
-				.start = start,
-				.end = self.location
-			}
-		};
-	}
-
-	if (digit_count % 2 != 0)
-	{
-		diagnostics::error(self.ctx, { start, self.location }, "[Lexer]: The hexadecimal string is not an even length");
 		return {
 			.kind = ERROR,
 			.value = self.get_string(start_index, self.index - start_index),
