@@ -1202,7 +1202,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 <*
  faultdef_decl ::= (FAULTDEF CONST_IDENT (',' CONST_IDENT)* ','? ';')
-                 | (FAULTSET TYPE_IDENT? '{' CONST_IDENT (',' CONST_IDENT)* ','? '}' ';')
+                 | (FAULTDEF '{' CONST_IDENT (',' CONST_IDENT)* ','? '}')
  @require scope.ctx.current.kind == FAULTDEF || scope.ctx.current.kind == FAULTSET
 *>
 fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
@@ -1217,9 +1217,10 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 	List{Node*} faults;
 	faults.tinit();
 
-	// Tolerates legacy `faultset Name {` test if present
+	// A fault block takes no name; c3c reads it as a fault name.
 	if ((ctx.is(TYPE_IDENT) || ctx.is(IDENT)) && ctx.peek(1).kind == LBRACE)
 	{
+		diagnostics::error(ctx.context, ctx.current.range, "Names of faults must be all uppercase.");
 		advance(ctx);
 	}
 
@@ -1269,7 +1270,11 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 		}
 
 		expect(ctx, (Node*)node, RBRACE);
-		consume(ctx, EOS); // Trailing ';' is optional for blocks
+		if (ctx.is(EOS))
+		{
+			diagnostics::error(ctx.context, ctx.current.range, "';' wasn't expected here, try removing it.");
+			advance(ctx);
+		}
 
 		node.faults = alloc::clone_slice(ctx.allocator, faults.array_view());
 		return (Node*)node;

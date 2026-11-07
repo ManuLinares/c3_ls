@@ -643,17 +643,15 @@ fn void faultset_decl()
 	String source_code = `
 		module hello;
 
-		faultset
+		excuse
 		{
 			RESULT_ERROR,
 			RESULT_OK
 		}
 
-		faultset NamedSet
-		{
-			NAMED_ONE,
-			NAMED_TWO
-		};
+		excuse NAMED_ONE, NAMED_TWO;
+
+		faultdef SINGLE;
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -663,7 +661,7 @@ fn void faultset_decl()
 	Module* mod = context.modules.get("hello")!!;
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
-	test::eq(parser_tests::count_kind(mod, FAULTDEF_DECL), 2);
+	test::eq(parser_tests::count_kind(mod, FAULTDEF_DECL), 3);
 
 	FaultdefDecl* fd1 = mod.nodes[1].as(FaultdefDecl);
 	test::eq(fd1.faults.len, 2);
@@ -674,6 +672,10 @@ fn void faultset_decl()
 	test::eq(fd2.faults.len, 2);
 	test::eq(fd2.faults[0].as(FaultDecl).name.text, "NAMED_ONE");
 	test::eq(fd2.faults[1].as(FaultDecl).name.text, "NAMED_TWO");
+
+	FaultdefDecl* fd3 = mod.nodes[3].as(FaultdefDecl);
+	test::eq(fd3.faults.len, 1);
+	test::eq(fd3.faults[0].as(FaultDecl).name.text, "SINGLE");
 }
 
 fn void interface_decl()
