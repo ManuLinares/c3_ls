@@ -1719,6 +1719,65 @@ fn String designator_chain_type(AnalyzerContext* context, SourceFile* sf, String
 }
 
 <*
+ Declaration called by `call`, resolved through its name token.
+*>
+fn Node* callee_decl(AnalyzerContext* context, SourceFile* sf, CallExpr* call) @local
+{
+	Node* callee = call.callee;
+	if (callee && callee.kind == ACCESS_EXPR) callee = callee.as(AccessExpr).member;
+	if (!callee || callee.kind != IDENT_EXPR || !callee.as(IdentExpr).ident) return null;
+	Node* decl = resolve_symbol_at(context, sf, callee.as(IdentExpr).ident.range.start);
+	if (!decl || (decl.kind != FN_DECL && decl.kind != MACRO_DECL)) return null;
+	return decl;
+}
+
+<*
+ Type of the parameter receiving argument `arg` of `call`, or "".
+ `arg` is either a positional argument or the value of a named one.
+*>
+fn String call_param_type(AnalyzerContext* context, SourceFile* sf, CallExpr* call, Node* arg, String arg_name) @local
+{
+	Node* decl = callee_decl(context, sf, call);
+	if (!decl) return "";
+	NodeArray params;
+	bool is_method;
+	if (decl.kind == FN_DECL)
+	{
+		params = decl.as(FnDecl).params;
+		is_method = decl.as(FnDecl).associated_type != null;
+	}
+	else
+	{
+		params = decl.as(MacroDecl).params;
+		is_method = @ok(decl.as(MacroDecl).associated_type.get());
+	}
+
+	if (arg_name.len > 0)
+	{
+		foreach (p : params)
+		{
+			if (p && p.kind == VAR_DECL && p.as(VarDecl).name && p.as(VarDecl).name.text == arg_name)
+			{
+				return type_name_of(p.as(VarDecl).type);
+			}
+		}
+		return "";
+	}
+
+	// `obj.m(a)` passes `obj` as the first parameter; `Type.m(&obj, a)` does not.
+	bool receiver_implicit = is_method && call.callee.kind == ACCESS_EXPR
+		&& call.callee.as(AccessExpr).left && call.callee.as(AccessExpr).left.kind != TYPE_EXPR;
+	foreach (i, a : call.args)
+	{
+		if (a != arg) continue;
+		sz pi = receiver_implicit ? i + 1 : i;
+		if (pi >= params.len || !params[pi] || params[pi].kind != VAR_DECL) return "";
+		return type_name_of(params[pi].as(VarDecl).type);
+	}
+	return "";
+}
+
+<*
  Struct type initialized by the INITIALIZER_LIST_EXPR at `stack[idx]`, or "".
 *>
 fn String initializer_list_type(AnalyzerContext* context, SourceFile* sf, Node*[] stack, sz idx) @local
@@ -1743,6 +1802,16 @@ fn String initializer_list_type(AnalyzerContext* context, SourceFile* sf, Node*[
 			if (di.value != list || idx < 2 || stack[idx - 2].kind != INITIALIZER_LIST_EXPR) return "";
 			String owner = initializer_list_type(context, sf, stack, idx - 2);
 			return designator_chain_type(context, sf, owner, di.path);
+		case CALL_EXPR:
+			return call_param_type(context, sf, parent.as(CallExpr), list, "");
+		case NAMED_ARG_EXPR:
+			NamedArgExpr* na = parent.as(NamedArgExpr);
+			if (na.value != list || !na.name || idx < 2 || stack[idx - 2].kind != CALL_EXPR) return "";
+			return call_param_type(context, sf, stack[idx - 2].as(CallExpr), parent, na.name.text);
+		case BINARY_EXPR:
+			BinaryExpr* be = parent.as(BinaryExpr);
+			if (be.op != OP_ASSIGN || be.right != list || !be.left) return "";
+			return type_of(context, sf, be.left, list.range.start);
 		case RETURN_STMT:
 			for (sz i = idx; i > 0; i--)
 			{

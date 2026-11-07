@@ -262,7 +262,7 @@ fn void use() { compute(1); }
 import math_lib;
 fn void main()
 {
-	int r = compute(5);
+	int r = math_lib::compute(5);
 	int s = math_lib::compute(6);
 }
 `);
@@ -688,4 +688,76 @@ fn int g(Rec r) { return r.f + r.f; }
 	LspLocation[] without = references::find_references(&fx.proj, fx.uri("a.c3"), p, { .includeDeclaration = false })!!;
 	assert(with_decl.len == 3, "%d", with_decl.len);
 	assert(without.len == 2, "%d", without.len);
+}
+
+fn void designator_in_call_arguments() @test
+{
+	Fx fx;
+	fx.init();
+	defer fx.free();
+	fx.add("a.c3", `module t;
+struct Vec { int x; int y; }
+fn int draw(int n, Vec v) { return n + v.x; }
+fn int Vec.add(&self, Vec o) { return self.x + o.x; }
+macro int mdraw(Vec v) { return v.x; }
+fn void main()
+{
+	int x = 0;
+	Vec a;
+	draw(1, { .x = 1, .y = 2 });
+	draw(n: 2, v: { .x = 3 });
+	a.add({ .x = 4 });
+	Vec.add(&a, { .x = 5 });
+	mdraw({ .x = 6 });
+	a = { .x = 7 };
+	x = 8;
+}
+`);
+	// x: 0 field, 1 v.x, 2 self.x, 3 o.x, 4 macro v.x, 5 local,
+	// 6 positional arg, 7 named arg, 8 method call (receiver shifts params),
+	// 9 static-style method call (no shift), 10 macro arg, 11 assignment,
+	// 12 local.
+	WorkspaceEdit e = fx.rename("a.c3", "x", 0, "px")!!;
+	fx.expect(e, "x", "px", { "a.c3" }, { { 0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11 } });
+
+	// From each designator site.
+	int[6] sites = { 6, 7, 8, 9, 10, 11 };
+	foreach (n : sites)
+	{
+		e = fx.rename("a.c3", "x", n, "px")!!;
+		fx.expect(e, "x", "px", { "a.c3" }, { { 0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11 } });
+	}
+
+	// The local `x` excludes every designator.
+	e = fx.rename("a.c3", "x", 5, "lx")!!;
+	fx.expect(e, "x", "lx", { "a.c3" }, { { 5, 12 } });
+}
+
+fn void designator_in_assignment() @test
+{
+	Fx fx;
+	fx.init();
+	defer fx.free();
+	fx.add("a.c3", `module t;
+struct Inner { int v; }
+struct Outer { Inner in; int v; }
+fn void set(Outer* o)
+{
+	o.in = { .v = 1 };
+	o.v = 2;
+	*o = { .v = 3 };
+}
+fn void main()
+{
+	Outer o;
+	set(&o);
+}
+`);
+	// Inner.v: decl, `o.in = { .v }`.
+	WorkspaceEdit e = fx.rename("a.c3", "v", 2, "val")!!;
+	fx.expect(e, "v", "val", { "a.c3" }, { { 0, 2 } });
+
+	// Outer.v: decl, `o.v`, `*o = { .v }`.
+	e = fx.rename("a.c3", "v", 4, "val")!!;
+	fx.expect(e, "v", "val", { "a.c3" }, { { 1, 3, 4 } });
 }
