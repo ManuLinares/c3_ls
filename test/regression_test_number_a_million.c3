@@ -324,9 +324,11 @@ fn void test_builtin_globals_and_imported_types_hover_and_def()
 	defer proj.free();
 
 	String core_mem = `module std::core::mem;
-struct Allocator {}
-const Allocator mem = {};
-const Allocator tmem = {};
+struct Allocator { int id; }
+Allocator thread_allocator;
+Allocator current_temp;
+alias mem @builtin = thread_allocator;
+alias tmem @builtin = current_temp;
 `;
 	String io_path = `module std::io::path;
 typedef Path = inline String;

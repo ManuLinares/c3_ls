@@ -40,10 +40,10 @@ fn void module_private_test_weak_if()
 	test::eq(right_eq_expr.right.as(LiteralExpr).integer, 2u);
 }
 
-fn void module_tag_if()
+fn void module_link_if()
 {
 	String source_code = `
-		module hello @tag("my_tag", "my_value") @if($feature(MY_FEATURE));
+		module hello @link("my_lib", "my_other_lib") @if($feature(MY_FEATURE));
 	`;
 	AnalyzerContext* context = context::create(tmem);
 	bool success = context::process(context, source_code, "test");
@@ -54,19 +54,19 @@ fn void module_tag_if()
 	ModuleDecl* module_decl = mod.module_decls[0];
 	test::eq(module_decl.visibility, Visibility.PUBLIC);
 	test::eq(module_decl.attributes.len, 2);
-	// @tag("my_tag", "my_value")
+	// @link("my_lib", "my_other_lib")
 	AttributeDecl* attr = parser_tests::@attr(module_decl, 0);
-	test::eq(attr.attribute_kind, AttributeKind.TAG);
+	test::eq(attr.attribute_kind, AttributeKind.LINK);
 	test::eq(attr.exprs.len, 2);
-	// "my_tag"
+	// "my_lib"
 	LiteralExpr* lit_expr = attr.exprs[0].as(LiteralExpr);
 	test::eq(lit_expr.literal_kind, LiteralKind.STRING_LITERAL);
-	test::eq(lit_expr.string, "my_tag");
-	// "my_value"
+	test::eq(lit_expr.string, "my_lib");
+	// "my_other_lib"
 	lit_expr = attr.exprs[1].as(LiteralExpr);
 	test::eq(lit_expr.literal_kind, LiteralKind.STRING_LITERAL);
-	test::eq(lit_expr.string, "my_value");
-	// end @tag()
+	test::eq(lit_expr.string, "my_other_lib");
+	// end @link()
 	// @if($feature(MY_FEATURE))
 	attr = parser_tests::@attr(module_decl, 1);
 	test::eq(attr.attribute_kind, AttributeKind.IF);

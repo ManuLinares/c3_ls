@@ -66,7 +66,7 @@ fn void test_rename_function_cross_file()
 	defer proj.free();
 
 	String file1 = "module math_lib;\nfn int compute_val(int x) { return x * 2; }\n";
-	String file2 = "module main_app;\nimport math_lib;\nfn void main() {\n  int r = compute_val(5);\n}\n";
+	String file2 = "module main_app;\nimport math_lib;\nfn void main() {\n  int r = math_lib::compute_val(5);\n}\n";
 
 	proj.workspace.process_file("/virtual/lib.c3", file1);
 	proj.workspace.process_file("/virtual/app.c3", file2);

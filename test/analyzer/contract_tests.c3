@@ -17,10 +17,10 @@ fn void contract_with_expr_checks()
 		<*
 			Hello there
 			@param [in] a : "my param"
-			@require a > 0
+			@require *a > 0
 			@ensure return > 0
 		*>
-		fn int foo(int a) {}
+		fn int foo(int* a) { return *a; }
 	`;
 	AnalyzerContext* context = context::create(tmem);
 	bool success = context::process(context, source_code, "test");
@@ -42,7 +42,9 @@ fn void contract_with_expr_checks()
 		ContractExpr* expr = req_expr.as(ContractExpr);
 		ExprList* list     = expr.exprs.as(ExprList);
 		BinaryExpr* bin    = list.exprs[0].as(BinaryExpr);
-		test::eq(bin.left.as(IdentExpr).ident.text, "a");
+		UnaryExpr* deref   = bin.left.as(UnaryExpr);
+		test::eq(deref.operator, UnaryOpKind.UNARYOP_DEREF);
+		test::eq(deref.expr.as(IdentExpr).ident.text, "a");
 		test::eq(bin.op, OperatorKind.OP_GT);
 		test::eq(bin.right.as(LiteralExpr).integer, 0u);
 	}
@@ -158,7 +160,7 @@ fn void contract_with_param_modifiers_and_pinpoints()
 			@param [drop] temp : "Temporary"
 			@require [bytes] bytes.len > 0 : "Must not be empty"
 		*>
-		fn void process(char* bytes, char* out_buf, char* temp) {}
+		fn void process(char[] bytes, char* out_buf, char* temp) {}
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -183,12 +185,12 @@ fn void contract_with_deprecated()
 		<*
 			Hello there
 			@param [in] a : "my param"
-			@require a > 0
+			@require *a > 0
 			@ensure return > 0
 			@deprecated "This is deprecated!"
 			@pure
 		*>
-		fn int foo(int a) {}
+		fn int foo(int* a) { return *a; }
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -221,7 +223,9 @@ fn void contract_with_deprecated()
 		ContractExpr* expr = req_expr.as(ContractExpr);
 		ExprList* list     = expr.exprs.as(ExprList);
 		BinaryExpr* bin    = list.exprs[0].as(BinaryExpr);
-		test::eq(bin.left.as(IdentExpr).ident.text, "a");
+		UnaryExpr* deref   = bin.left.as(UnaryExpr);
+		test::eq(deref.operator, UnaryOpKind.UNARYOP_DEREF);
+		test::eq(deref.expr.as(IdentExpr).ident.text, "a");
 		test::eq(bin.op, OperatorKind.OP_GT);
 		test::eq(bin.right.as(LiteralExpr).integer, 0u);
 	}

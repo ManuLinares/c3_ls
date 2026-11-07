@@ -282,7 +282,7 @@ fn void constdef_backing_type_and_attributes()
 	String source_code = `
 	module hello;
 	constdef MyConstdef : uint @tag("decl_tag", 1) @if(true) {
-		AAA @tag("value_tag", 2) = 10
+		AAA @deprecated("old") = 10
 	}
 	`;
 
@@ -308,7 +308,7 @@ fn void constdef_backing_type_and_attributes()
 	VarDecl* var_decl = enum_decl.variants[0].as(VarDecl);
 	test::eq(var_decl.name.text, "AAA");
 	test::eq(var_decl.attributes.len, 1);
-	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.TAG);
+	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.DEPRECATED);
 	LiteralExpr* value = var_decl.init_expr.as(LiteralExpr);
 	test::eq(value.integer, 10u);
 }

@@ -118,8 +118,9 @@ fn void global_inferred_array_pointer()
 {
 	String source_code = `
 		module hello;
-		
-		const int[*]* FOO = null;
+
+		const int[*] FOO = { 1, 2, 3 };
+		int[3]* bar = null;
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -128,34 +129,24 @@ fn void global_inferred_array_pointer()
 
 	Module* mod = context.modules.get("hello")!!;
 
-	Node* target_node = mod.nodes[1];
-	VarDecl* decl     = target_node.as(VarDecl);
-	test::eq(decl.name.text, "FOO");
-	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	// Inferred-length array: TYPE_ARRAY with no length expression.
+	VarDecl* foo = mod.nodes[1].as(VarDecl);
+	test::eq(foo.name.text, "FOO");
+	test::eq(foo.var_kind, VarDeclKind.VAR_GLOBAL);
+	TypeExpr* foo_type = foo.type.as(TypeExpr);
+	test::eq(foo_type.type_kind, TypeExprKind.TYPE_ARRAY);
+	test::eq(foo_type.array.base.as(TypeExpr).type_kind, TypeExprKind.TYPE_IDENTIFIER);
+	test::eq(foo_type.array.len_expr, null);
 
-	switch (type_data.type_kind)
-	{
-		case TYPE_POINTER:
-			test::ne(type_data.modify.base, null);
-			TypeExpr* inner_type = type_data.modify.base.as(TypeExpr);
-			test::eq(inner_type.type_kind, TypeExprKind.TYPE_ARRAY);
-
-			switch (inner_type.type_kind)
-			{
-			case TYPE_ARRAY:
-				test::ne(inner_type.array.base, null);
-				test::eq(inner_type.array.base.as(TypeExpr).type_kind, TypeExprKind.TYPE_IDENTIFIER);
-				test::eq(inner_type.array.len_expr, null);
-				break;
-			default:
-				assert(false, "Expected TYPE_ARRAY directly wrapped under pointer modifier");
-		}
-		break;
-		default:
-			assert(false, "Expected root declaration type to be parsed as a TYPE_POINTER");
-	}
+	// Pointer to array: TYPE_POINTER wrapping TYPE_ARRAY with a length.
+	VarDecl* bar = mod.nodes[2].as(VarDecl);
+	test::eq(bar.name.text, "bar");
+	TypeExpr* bar_type = bar.type.as(TypeExpr);
+	test::eq(bar_type.type_kind, TypeExprKind.TYPE_POINTER);
+	TypeExpr* inner = bar_type.modify.base.as(TypeExpr);
+	test::eq(inner.type_kind, TypeExprKind.TYPE_ARRAY);
+	test::eq(inner.array.base.as(TypeExpr).type_kind, TypeExprKind.TYPE_IDENTIFIER);
+	test::ne(inner.array.len_expr, null);
 }
 
 fn void global_generic()

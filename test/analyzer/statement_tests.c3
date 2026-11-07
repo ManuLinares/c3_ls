@@ -17,22 +17,26 @@ fn void switch_stmt()
 		fn void foo()
 		{
 			int a = 5;
-			switch LABEL: (a)
+			while LOOP: (a > 0)
 			{
-				case 1: break;
-				case 2:
-					{
-					}
-				case 3:
-				case 4: continue LABEL;
-				case 5: break LABEL;
-				case 6: continue;
-				case 7: break;
-				case 8:
-					{
-					}
-					nextcase;
-				default:
+				a--;
+				switch LABEL: (a)
+				{
+					case 1: break;
+					case 2:
+						{
+						}
+					case 3:
+					case 4: continue LOOP;
+					case 5: break LABEL;
+					case 6: continue;
+					case 7: break;
+					case 8:
+						{
+						}
+						nextcase;
+					default:
+				}
 			}
 		}
 	`;
@@ -45,7 +49,9 @@ fn void switch_stmt()
 	FunctionInfo* func_info = context.registry.functions.get("hello::foo")!!;
 	FnDecl* fn_decl          = func_info.node.as(FnDecl);
 	CompoundStmt* fn_comp = fn_decl.body.as(CompoundStmt);
-	SwitchStmt* sw        = fn_comp.statements[1].as(SwitchStmt);
+	WhileStmt* loop       = fn_comp.statements[1].as(WhileStmt);
+	test::eq(loop.label.text, "LOOP");
+	SwitchStmt* sw        = loop.body.as(CompoundStmt).statements[1].as(SwitchStmt);
 	test::eq(sw.cases.len, 9);
 	CondExpr* cond = sw.cond.as(CondExpr);
 	test::eq(cond.exprs[0].as(IdentExpr).ident.text, "a");

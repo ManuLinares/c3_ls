@@ -102,7 +102,7 @@ fn void test_multifile_recursive_and_norecurse_imports()
 
 	String core_mod = "module net;\nstruct Socket { int fd; }\nfn void close_socket(Socket s) {}\n";
 	String sub_mod  = "module net::http;\nstruct Request { String url; }\nfn void send_req(Request r) {}\n";
-	String app_code = "module client;\nimport net @norecurse;\nfn void main() {\n  Socket sock;\n  close_socket(sock);\n}\n";
+	String app_code = "module client;\nimport net @norecurse;\nfn void main() {\n  Socket sock;\n  net::close_socket(sock);\n}\n";
 
 	proj.workspace.process_file("/virtual/net.c3", core_mod);
 	proj.workspace.process_file("/virtual/http.c3", sub_mod);
@@ -111,7 +111,7 @@ fn void test_multifile_recursive_and_norecurse_imports()
 	Uri app_uri = uri::from_file_path(mem, "/virtual/client.c3");
 	defer app_uri.free();
 	// 1. Resolve imported function from non-recursive parent module
-	LspPosition close_pos = {.line = 4,.character = 4 };
+	LspPosition close_pos = {.line = 4,.character = 9 };
 	LspLocation[] locs = definition::goto_definition(&proj, app_uri, close_pos)!!;
 	assert(locs.len > 0);
 	assert(locs[0].uri.contains("net.c3"));
