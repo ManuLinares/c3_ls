@@ -1878,6 +1878,36 @@ fn Node* node_at(SourceFile* sf, Location loc)
 	}
 }
 
+<*
+ Generic parameter list declared by a module or top-level declaration, or null.
+*>
+fn GenericDecl* generics_of(Node* node)
+{
+	if (!node) return null;
+	Node* g;
+	switch (node.kind)
+	{
+		case MODULE_DECL: g = node.as(ModuleDecl).generics;
+		case STRUCT_DECL: g = node.as(StructDecl).generics;
+		case TYPEDEF_DECL: g = node.as(TypedefDecl).generics;
+		case ALIAS_DECL: g = node.as(AliasDecl).generics;
+		case FN_DECL: g = node.as(FnDecl).generics;
+		case MACRO_DECL: g = node.as(MacroDecl).generics;
+		default: return null;
+	}
+	return g && g.kind == GENERIC_DECL ? g.as(GenericDecl) : null;
+}
+
+<*
+ Name a generic parameter is referenced by.
+*>
+fn String generic_param_name(Node* param)
+{
+	String name = cursor::spelling(param, tmem);
+	if (name.len == 0) name = cursor::raw_type_identifier(param) ?? "";
+	return name;
+}
+
 fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location loc)
 {
 	if (!sf) return null;
@@ -2106,15 +2136,12 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 			{
 				foreach (md : mod.module_decls)
 				{
-					if (md && md.generics && md.generics.kind == GENERIC_DECL)
+					if (GenericDecl* gd = generics_of((Node*)md))
 					{
-						GenericDecl* gd = md.generics.as(GenericDecl);
 						foreach (param : gd.params)
 						{
 							if (!param || param.kind == ERROR) continue;
-							String pname = cursor::spelling(param, tmem);
-							if (pname.len == 0) pname = cursor::raw_type_identifier(param) ?? "";
-							if (pname == symbol_name) return param;
+							if (generic_param_name(param) == symbol_name) return param;
 						}
 					}
 				}
@@ -2124,46 +2151,13 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 					if (!node || node.kind == ERROR) continue;
 					if (!is_symbol_accessible_at(context, sf, loc, node, mod_name)) continue;
 
-					GenericDecl* gd = null;
-					switch (node.kind)
-					{
-						case STRUCT_DECL:
-							if (node.as(StructDecl).generics && node.as(StructDecl).generics.kind == GENERIC_DECL)
-							{
-								gd = node.as(StructDecl).generics.as(GenericDecl);
-							}
-						case TYPEDEF_DECL:
-							if (node.as(TypedefDecl).generics && node.as(TypedefDecl).generics.kind == GENERIC_DECL)
-							{
-								gd = node.as(TypedefDecl).generics.as(GenericDecl);
-							}
-						case ALIAS_DECL:
-							if (node.as(AliasDecl).generics && node.as(AliasDecl).generics.kind == GENERIC_DECL)
-							{
-								gd = node.as(AliasDecl).generics.as(GenericDecl);
-							}
-						case FN_DECL:
-							if (node.as(FnDecl).generics && node.as(FnDecl).generics.kind == GENERIC_DECL)
-							{
-								gd = node.as(FnDecl).generics.as(GenericDecl);
-							}
-						case MACRO_DECL:
-							if (node.as(MacroDecl).generics && node.as(MacroDecl).generics.kind == GENERIC_DECL)
-							{
-								gd = node.as(MacroDecl).generics.as(GenericDecl);
-							}
-						default:
-							break;
-					}
-
+					GenericDecl* gd = generics_of(node);
 					if (gd)
 					{
 						foreach (param : gd.params)
 						{
 							if (!param || param.kind == ERROR) continue;
-							String pname = cursor::spelling(param, tmem);
-							if (pname.len == 0) pname = cursor::raw_type_identifier(param) ?? "";
-							if (pname == symbol_name) return param;
+							if (generic_param_name(param) == symbol_name) return param;
 						}
 					}
 				}
