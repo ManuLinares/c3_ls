@@ -41,6 +41,7 @@ fn void analyze_source_file(SemaContext* ctx, SourceFile* sf)
 	analyze_imports(ctx);
 
 	run_variable_pass(ctx);
+	run_type_reference_pass(ctx);
 }
 
 fn void analyze_imports(SemaContext* ctx)
