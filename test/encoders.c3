@@ -152,7 +152,7 @@ fn void test_encode_rename_response()
 	};
 	TextDocumentEdit[1] doc_edits = {
 		{
-			.textDocument = {.uri = "file:///app.c3",.version = 1 },
+			.textDocument = {.uri = "file:///app.c3",.version = null },
 			.edits = &edits
 		}
 	};
@@ -164,6 +164,7 @@ fn void test_encode_rename_response()
 	String encoded = translator::encode(resp, tmem);
 	assert(encoded.starts_with("Content-Length:"));
 	assert(encoded.contains(`"newText":"updated_name"`));
+	assert(encoded.contains(`"version":null`));
 }
 
 fn void test_encode_semantic_tokens_response()

@@ -1652,11 +1652,168 @@ fn ChildVisitResult find_access_callback(Node* c, Node* p, void* user_data)
 	return RECURSE;
 }
 
+struct AncestorSearch
+{
+	Node* target;
+	List{Node*} stack;
+	bool found;
+}
+
+fn ChildVisitResult ancestor_enter(Node* c, Node* p, void* user_data) @local
+{
+	AncestorSearch* s = (AncestorSearch*)user_data;
+	s.stack.push(c);
+	if (c == s.target)
+	{
+		s.found = true;
+		return BREAK;
+	}
+	if (!c || c.kind == ERROR || !c.range.contains_range(s.target.range)) return CONTINUE;
+	return RECURSE;
+}
+
+fn ChildVisitResult ancestor_exit(Node* c, Node* p, void* user_data) @local
+{
+	AncestorSearch* s = (AncestorSearch*)user_data;
+	s.stack.remove_last();
+	return CONTINUE;
+}
+
+<*
+ Path from a top-level statement down to `target` (inclusive), or empty.
+*>
+fn List{Node*} ancestors_of(SourceFile* sf, Node* target)
+{
+	AncestorSearch s = {.target = target };
+	s.stack.tinit();
+	foreach (stmt : sf.ast.statements)
+	{
+		if (!stmt || stmt.kind == ERROR) continue;
+		cursor::visit(stmt, null, {.on_enter = &ancestor_enter,.on_exit = &ancestor_exit }, &s);
+		if (s.found) return s.stack;
+	}
+	s.stack.clear();
+	return s.stack;
+}
+
+fn String type_name_of(Node* type_expr) @local
+{
+	if (!type_expr) return "";
+	return cursor::raw_type_identifier(type_expr) ?? cursor::spelling(type_expr, tmem);
+}
+
+<*
+ Type reached by applying a `.a.b` designator chain to `owner`.
+*>
+fn String designator_chain_type(AnalyzerContext* context, SourceFile* sf, String owner, Node* des) @local
+{
+	if (!des || des.kind != DESIGNATOR_EXPR || owner.len == 0) return "";
+	DesignatorExpr* d = des.as(DesignatorExpr);
+	if (d.designator_kind != PERIOD) return "";
+	String base = d.path ? designator_chain_type(context, sf, owner, d.path) : owner;
+	if (base.len == 0 || !d.data.field || d.data.field.kind != IDENT_EXPR) return "";
+	IdentExpr* ie = d.data.field.as(IdentExpr);
+	if (!ie.ident) return "";
+	Node* field = find_member_in_type(context, base, ie.ident.text, sf);
+	return type_of_symbol(context, sf, field);
+}
+
+<*
+ Struct type initialized by the INITIALIZER_LIST_EXPR at `stack[idx]`, or "".
+*>
+fn String initializer_list_type(AnalyzerContext* context, SourceFile* sf, Node*[] stack, sz idx) @local
+{
+	if (idx == 0) return "";
+	Node* list = stack[idx];
+	Node* parent = stack[idx - 1];
+	switch (parent.kind)
+	{
+		case VAR_DECL:
+			VarDecl* vd = parent.as(VarDecl);
+			if (vd.init_expr != list) return "";
+			return type_name_of(vd.type);
+		case COMPOUND_LITERAL_EXPR:
+			return type_name_of(parent.as(CompoundLiteralExpr).type_expr);
+		case CAST_EXPR:
+			// `(Type){ ... }` compound literal.
+			CastExpr* ce = parent.as(CastExpr);
+			return ce.operand == list ? type_name_of(ce.inner) : "";
+		case DESIGNATED_INITIALIZER_EXPR:
+			DesignatedInitializerExpr* di = parent.as(DesignatedInitializerExpr);
+			if (di.value != list || idx < 2 || stack[idx - 2].kind != INITIALIZER_LIST_EXPR) return "";
+			String owner = initializer_list_type(context, sf, stack, idx - 2);
+			return designator_chain_type(context, sf, owner, di.path);
+		case RETURN_STMT:
+			for (sz i = idx; i > 0; i--)
+			{
+				Node* n = stack[i - 1];
+				if (n.kind == FN_DECL) return type_name_of(n.as(FnDecl).ret_type);
+				if (n.kind == MACRO_DECL) return type_name_of(n.as(MacroDecl).ret_type.get() ?? null);
+			}
+			return "";
+		default:
+			return "";
+	}
+}
+
+<*
+ If `target` is the field identifier of a `.field` designator inside an
+ initializer list, set `is_designator` and return the field declaration
+ (null when the initialized type cannot be determined).
+*>
+fn Node* resolve_designator_field(AnalyzerContext* context, SourceFile* sf, Node* target, bool* is_designator)
+{
+	*is_designator = false;
+	if (!target || target.kind != IDENT_EXPR) return null;
+	List{Node*} stack = ancestors_of(sf, target);
+	sz n = stack.len();
+	if (n < 2 || stack[n - 2].kind != DESIGNATOR_EXPR) return null;
+	DesignatorExpr* d = stack[n - 2].as(DesignatorExpr);
+	if (d.designator_kind != PERIOD || d.data.field != target) return null;
+	*is_designator = true;
+
+	sz i = n - 2;
+	while (i > 0 && stack[i - 1].kind == DESIGNATOR_EXPR) i--;
+	if (i < 2 || stack[i - 1].kind != DESIGNATED_INITIALIZER_EXPR || stack[i - 2].kind != INITIALIZER_LIST_EXPR) return null;
+
+	Node*[] view = stack.array_view();
+	String owner = initializer_list_type(context, sf, view, i - 2);
+	String base = d.path ? designator_chain_type(context, sf, owner, d.path) : owner;
+	if (base.len == 0) return null;
+	return find_member_in_type(context, base, target.as(IdentExpr).ident.text, sf);
+}
+
+<*
+ Innermost node under `loc`. `find_at` treats range ends as inclusive, so
+ at the first character of `name` in `mod::name` it yields the `mod::`
+ PATH_EXPR; the cursor is then on the name, owned by the parent.
+*>
+fn Node* node_at(SourceFile* sf, Location loc)
+{
+	if (!sf) return null;
+	Node* node = cursor::find_at(sf.ast.statements.array_view(), {.start = loc,.end = loc });
+	if (!node || node.kind != PATH_EXPR || node.range.contains(loc)) return node;
+	List{Node*} stack = ancestors_of(sf, node);
+	sz n = stack.len();
+	if (n < 2) return node;
+	Node* parent = stack[n - 2];
+	switch (parent.kind)
+	{
+		case IDENT_EXPR:
+			return parent.as(IdentExpr).path_expr == node ? parent : node;
+		case TYPE_EXPR:
+			TypeExpr* te = parent.as(TypeExpr);
+			return te.type_kind == TYPE_IDENTIFIER && te.unresolved.path == node ? parent : node;
+		default:
+			return node;
+	}
+}
+
 fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location loc)
 {
 	if (!sf) return null;
 	Range target_range = {.start = loc,.end = loc };
-	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
+	Node* target_node = node_at(sf, loc);
 	if (!target_node || target_node.kind == ERROR) return null;
 
 	switch (target_node.kind)
@@ -1778,6 +1935,10 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 			return null;
 		}
 	}
+
+	bool is_designator;
+	Node* designated = resolve_designator_field(context, sf, target_node, &is_designator);
+	if (is_designator) return designated;
 
 	AccessSearchContext acc_ctx = {.target_range = target_range,.found_access = null };
 	foreach (stmt : sf.ast.statements)

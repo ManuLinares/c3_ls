@@ -23,15 +23,23 @@ struct RefCollectorContext
 	List{LspLocation} * locations;
 }
 
+<*
+ True for declarations visible only inside their enclosing function.
+*>
 fn bool is_local_decl(Node* node)
 {
 	if (!node) return false;
 	switch (node.kind)
 	{
 		case VAR_DECL:
+			switch (node.as(VarDecl).var_kind)
 			{
-				VarDecl* vd = node.as(VarDecl);
-				return vd.var_kind != VAR_GLOBAL;
+				case VAR_GLOBAL:
+				case VAR_FIELD:
+				case VAR_BITFIELD:
+					return false;
+				default:
+					return true;
 			}
 		case TRY_EXPR:
 		case CATCH_EXPR:
@@ -42,190 +50,122 @@ fn bool is_local_decl(Node* node)
 	}
 }
 
+<*
+ Name token introduced by a declaration node, or null.
+*>
+fn Ident* decl_name(Node* node)
+{
+	if (!node) return null;
+	switch (node.kind)
+	{
+		case VAR_DECL: return node.as(VarDecl).name;
+		case FN_DECL: return node.as(FnDecl).name;
+		case MACRO_DECL: return node.as(MacroDecl).name;
+		case STRUCT_DECL: return node.as(StructDecl).name;
+		case ENUM_DECL: return node.as(EnumDecl).name;
+		case TYPEDEF_DECL: return node.as(TypedefDecl).name;
+		case ALIAS_DECL: return node.as(AliasDecl).name;
+		case FAULT_DECL: return node.as(FaultDecl).name;
+		case INTERFACE_DECL: return node.as(InterfaceDecl).name;
+		case ATTRDEF_DECL: return node.as(AttrdefDecl).name;
+		default: return null;
+	}
+}
+
+<*
+ Name token through which a non-declaration node refers to a symbol, or null.
+*>
+fn Ident* ref_name(Node* node)
+{
+	if (!node) return null;
+	switch (node.kind)
+	{
+		case IDENT_EXPR:
+			return node.as(IdentExpr).ident;
+		case TYPE_EXPR:
+			TypeExpr* te = node.as(TypeExpr);
+			return te.type_kind == TYPE_IDENTIFIER ? te.unresolved.name : null;
+		case ATTRIBUTE_DECL:
+			return node.as(AttributeDecl).name;
+		default:
+			return null;
+	}
+}
+
 fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
 	RefCollectorContext* ctx = (RefCollectorContext*)user_data;
 
-	bool matched = false;
-	Range node_range = c.range;
-
-	switch (c.kind)
+	Ident* name = null;
+	if (c == ctx.decl_node)
 	{
-		case IDENT_EXPR:
-			{
-				IdentExpr* ie = c.as(IdentExpr);
-				if (ie.ident && ie.ident.text == ctx.symbol_name)
-				{
-					Node* resolved = null;
-					if (ie.path_expr && ie.path_expr.kind == PATH_EXPR)
-					{
-						String mod_name = ie.path_expr.as(PathExpr).path ? ie.path_expr.as(PathExpr).path.text.strip_suffix("::") : "";
-						Module* mod = analysis::find_module_by_identifier(&ctx.project.workspace, "", mod_name);
-						if (mod)
-						{
-							String qname = string::tformat("%s::%s", mod.name, ctx.symbol_name);
-							if (ctx.project.workspace.ctx && ctx.project.workspace.ctx.registry)
-							{
-								if (try fn_info = ctx.project.workspace.ctx.registry.functions.get(qname))
-								{
-									resolved = fn_info.node;
-								}
-								else if (try mac_info = ctx.project.workspace.ctx.registry.macros.get(qname))
-								{
-									resolved = mac_info.node;
-								}
-								else if (try ty_info = ctx.project.workspace.ctx.registry.types.get(qname))
-								{
-									resolved = ty_info.node;
-								}
-							}
-							if (!resolved)
-							{
-								foreach (node : mod.nodes)
-								{
-									if (!node || node.kind == ERROR) continue;
-									String sname = cursor::spelling(node, tmem);
-									if (sname == ctx.symbol_name)
-									{
-										resolved = node;
-										break;
-									}
-								}
-							}
-						}
-					}
-					else if (ctx.project.workspace.ctx)
-					{
-						resolved = query::resolve_symbol_at(ctx.project.workspace.ctx, ctx.sf, ie.ident.range.start);
-					}
-
-					if (resolved == ctx.decl_node)
-					{
-						matched = true;
-						node_range = ie.ident.range;
-					}
-					else if (!is_local_decl(ctx.decl_node) && resolved != null && ctx.decl_node != null && resolved.kind == ctx.decl_node.kind && !is_local_decl(resolved))
-					{
-						String rname = cursor::spelling(resolved, tmem);
-						if (rname.len > 0 && rname == ctx.symbol_name)
-						{
-							matched = true;
-							node_range = ie.ident.range;
-						}
-					}
-				}
-			}
-		case TYPE_EXPR:
-			{
-				TypeExpr* te = c.as(TypeExpr);
-				if (te.type_kind == TYPE_IDENTIFIER && te.unresolved.name && te.unresolved.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = te.unresolved.name.range;
-				}
-			}
-		case VAR_DECL:
-			{
-				VarDecl* vd = c.as(VarDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && vd.name && vd.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = vd.name.range;
-				}
-			}
-		case FN_DECL:
-			{
-				FnDecl* fd = c.as(FnDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && fd.name && fd.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = fd.name.range;
-				}
-			}
-		case MACRO_DECL:
-			{
-				MacroDecl* md = c.as(MacroDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && md.name && md.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = md.name.range;
-				}
-			}
-		case STRUCT_DECL:
-			{
-				StructDecl* sd = c.as(StructDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && sd.name && sd.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = sd.name.range;
-				}
-			}
-		case ENUM_DECL:
-			{
-				EnumDecl* ed = c.as(EnumDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && ed.name && ed.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = ed.name.range;
-				}
-			}
-		case TYPEDEF_DECL:
-			{
-				TypedefDecl* td = c.as(TypedefDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && td.name && td.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = td.name.range;
-				}
-			}
-		case ALIAS_DECL:
-			{
-				AliasDecl* ad = c.as(AliasDecl);
-				if (ctx.include_declaration && c == ctx.decl_node && ad.name && ad.name.text == ctx.symbol_name)
-				{
-					matched = true;
-					node_range = ad.name.range;
-				}
-			}
-		default:
-			break;
+		if (!ctx.include_declaration) return RECURSE;
+		name = decl_name(c) ?: ref_name(c);
 	}
-
-	if (matched)
+	else if (!decl_name(c))
 	{
-		LspLocation loc = {
-			.uri = ctx.file_uri,
-			.range = {
-				.start = {
-					.line = (uint)node_range.start.line,
-					.character = (uint)node_range.start.column
-				},
-				.end = {
-					.line = (uint)node_range.end.line,
-					.character = (uint)node_range.end.column
-				}
-			}
-		};
-
-		bool exists = false;
-		foreach (existing : *ctx.locations)
+		Ident* ref = ref_name(c);
+		if (ref && ref.text == ctx.symbol_name
+			&& query::resolve_symbol_at(ctx.project.workspace.ctx, ctx.sf, ref.range.start) == ctx.decl_node)
 		{
-			if (existing.uri == loc.uri &&
+			name = ref;
+		}
+	}
+	if (!name || name.text != ctx.symbol_name) return RECURSE;
+
+	LspLocation loc = {
+		.uri = ctx.file_uri,
+		.range = {
+			.start = {
+				.line = (uint)name.range.start.line,
+				.character = (uint)name.range.start.column
+			},
+			.end = {
+				.line = (uint)name.range.end.line,
+				.character = (uint)name.range.end.column
+			}
+		}
+	};
+
+	foreach (existing : *ctx.locations)
+	{
+		if (existing.uri == loc.uri &&
 			existing.range.start.line == loc.range.start.line &&
 			existing.range.start.character == loc.range.start.character)
-			{
-				exists = true;
-				break;
-			}
-		}
-		if (!exists)
 		{
-			ctx.locations.push(loc);
+			return RECURSE;
 		}
 	}
-
+	ctx.locations.push(loc);
 	return RECURSE;
+}
+
+fn void collect_in_file(LspProject* project, SourceFile* sf, String file_uri, Node* decl_node, String symbol_name, bool include_declaration, List{LspLocation}* results)
+{
+	RefCollectorContext ref_ctx = {
+		.project = project,
+		.sf = sf,
+		.decl_node = decl_node,
+		.symbol_name = symbol_name,
+		.file_uri = file_uri,
+		.include_declaration = include_declaration,
+		.locations = results
+	};
+	foreach (stmt : sf.ast.statements)
+	{
+		if (!stmt || stmt.kind == ERROR) continue;
+		cursor::visit(stmt, null, {.on_enter = &collect_references_callback }, &ref_ctx);
+	}
+}
+
+<*
+ Symbol name of a declaration as spelled at its use sites.
+*>
+fn String decl_symbol_name(Node* decl_node)
+{
+	if (Ident* name = decl_name(decl_node) ?: ref_name(decl_node)) return name.text;
+	return analysis::get_node_symbol_name(decl_node);
 }
 
 fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos, ReferenceContext context)
@@ -241,7 +181,7 @@ fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos,
 	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
 	if (!decl_node) return {};
 
-	String symbol_name = analysis::get_node_symbol_name(decl_node);
+	String symbol_name = decl_symbol_name(decl_node);
 	if (symbol_name.len == 0) return {};
 
 	List{LspLocation} results;
@@ -249,52 +189,18 @@ fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos,
 
 	if (is_local_decl(decl_node))
 	{
-		RefCollectorContext ref_ctx = {
-			.project = project,
-			.sf = sf,
-			.decl_node = decl_node,
-			.symbol_name = symbol_name,
-			.file_uri = uri.to_raw_string(tmem),
-			.include_declaration = context.includeDeclaration,
-			.locations = &results
-		};
-
-		foreach (stmt : sf.ast.statements)
-		{
-			if (!stmt || stmt.kind == ERROR) continue;
-			cursor::visit(stmt, null, {.on_enter = &collect_references_callback }, &ref_ctx);
-		}
-
+		collect_in_file(project, sf, uri.to_raw_string(tmem), decl_node, symbol_name, context.includeDeclaration, &results);
 		return results.array_view();
 	}
 
-	if (project.workspace.ctx)
+	project.workspace.ctx.files.@each(; file_path, target_sf)
 	{
-		project.workspace.ctx.files.@each(; file_path, target_sf)
+		if (target_sf)
 		{
-			if (target_sf)
-			{
-				Uri target_u = uri::from_file_path(tmem, file_path);
-				String raw_target_uri = target_u.to_raw_string(tmem);
-
-				RefCollectorContext ref_ctx = {
-					.project = project,
-					.sf = target_sf,
-					.decl_node = decl_node,
-					.symbol_name = symbol_name,
-					.file_uri = raw_target_uri,
-					.include_declaration = context.includeDeclaration,
-					.locations = &results
-				};
-
-				foreach (stmt : target_sf.ast.statements)
-				{
-					if (!stmt || stmt.kind == ERROR) continue;
-					cursor::visit(stmt, null, {.on_enter = &collect_references_callback }, &ref_ctx);
-				}
-			}
-		};
-	}
+			String raw_target_uri = uri::from_file_path(tmem, file_path).to_raw_string(tmem);
+			collect_in_file(project, target_sf, raw_target_uri, decl_node, symbol_name, context.includeDeclaration, &results);
+		}
+	};
 
 	return results.array_view();
 }

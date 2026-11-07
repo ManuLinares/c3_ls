@@ -123,9 +123,18 @@ struct TextEdit
 	String newText;
 }
 
+<*
+ `version` is null when the server does not know the document version.
+*>
+struct OptionalVersionedTextDocumentIdentifier
+{
+	DocumentUri uri;
+	Object* version;
+}
+
 struct TextDocumentEdit
 {
-	VersionedTextDocumentIdentifier textDocument;
+	OptionalVersionedTextDocumentIdentifier textDocument;
 	TextEdit[] edits;
 }
 

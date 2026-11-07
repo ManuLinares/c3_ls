@@ -1225,7 +1225,7 @@ fn Node* parse_designator_expr(ContextScope scope)
 		{
 			case DOT:
 				{
-					Range start = ctx.current.range;
+					Range start = path ? path.range : ctx.current.range;
 					advance(ctx);
 
 					Node* field = null;
