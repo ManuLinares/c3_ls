@@ -152,9 +152,9 @@ fn void global_inferred_array_pointer()
 fn void global_generic()
 {
 	String source_code = `
-		module hello;
+		module hello; import std;
 		
-		const List{String} CHANNELS = null;
+		const List{String} CHANNELS = {};
 	`;
 
 	AnalyzerContext* context = context::create(tmem);
@@ -163,7 +163,7 @@ fn void global_generic()
 
 	Module* mod = context.modules.get("hello")!!;
 
-	VarDecl* decl = mod.nodes[1].as(VarDecl);
+	VarDecl* decl = mod.nodes[2].as(VarDecl);
 	test::eq(decl.name.text, "CHANNELS");
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
 	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);

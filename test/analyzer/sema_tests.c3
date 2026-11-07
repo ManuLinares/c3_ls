@@ -200,7 +200,7 @@ fn void test_distinct_generic_module_sections_no_conflict()
 fn void test_typeid_member_access_in_ct_if()
 {
 	String source_code = `
-		module path_mod;
+		module path_mod; import std;
 		fn void check()
 		{
 			$if Path::typeid == PathWin:

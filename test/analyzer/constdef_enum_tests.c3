@@ -165,7 +165,7 @@ fn void assoc_param_values()
 fn void interfaces()
 {
 	String source_code = `
-	module hello;
+	module hello; import std;
 	enum MyEnum (Printable, OutStream) { AAA, BBB }
 	`;
 
@@ -177,7 +177,7 @@ fn void interfaces()
 
 	test::eq(parser_tests::count_kind(mod, ENUM_DECL), 1);
 
-	Node* enum_node     = mod.nodes[1];
+	Node* enum_node     = mod.nodes[2];
 	EnumDecl* enum_decl = enum_node.as(EnumDecl);
 	test::eq(enum_decl.name.text, "MyEnum");
 
@@ -200,9 +200,9 @@ fn void interfaces()
 fn void constdef_interfaces_inline_backing()
 {
 	String source_code = `
-	module hello;
+	module hello; import std;
 	constdef MyConstdef (Printable, OutStream) : inline uint {
-		AAA @tag("constdef_member_tag", 420) = 69
+		AAA @deprecated("old") = 69
 	}
 	`;
 
@@ -214,7 +214,7 @@ fn void constdef_interfaces_inline_backing()
 
 	test::eq(parser_tests::count_kind(mod, ENUM_DECL), 1);
 
-	Node* enum_node     = mod.nodes[1];
+	Node* enum_node     = mod.nodes[2];
 	EnumDecl* enum_decl = enum_node.as(EnumDecl);
 	test::eq(enum_decl.name.text, "MyConstdef");
 	test::eq(enum_decl.interfaces.len, 2);
@@ -232,7 +232,7 @@ fn void constdef_interfaces_inline_backing()
 	VarDecl* var_decl = enum_decl.variants[0].as(VarDecl);
 	test::eq(var_decl.name.text, "AAA");
 	test::eq(var_decl.attributes.len, 1);
-	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.TAG);
+	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.DEPRECATED);
 	test::ne(var_decl.init_expr, null);
 	LiteralExpr* enum_value = var_decl.init_expr.as(LiteralExpr);
 	test::eq(enum_value.literal_kind, LiteralKind.INT_LITERAL);
@@ -316,9 +316,9 @@ fn void constdef_backing_type_and_attributes()
 fn void enum_interfaces_backing_type()
 {
 	String source_code = `
-	module hello;
+	module hello; import std;
 	enum MyEnum (Printable, OutStream) : uint {
-		BBB @tag("enum_member_tag", 240)
+		BBB @deprecated("old")
 	}
 	`;
 
@@ -330,7 +330,7 @@ fn void enum_interfaces_backing_type()
 
 	test::eq(parser_tests::count_kind(mod, ENUM_DECL), 1);
 
-	Node* enum_node     = mod.nodes[1];
+	Node* enum_node     = mod.nodes[2];
 	EnumDecl* enum_decl = enum_node.as(EnumDecl);
 	test::eq(enum_decl.name.text, "MyEnum");
 	test::eq(enum_decl.interfaces.len, 2);
@@ -348,7 +348,7 @@ fn void enum_interfaces_backing_type()
 	VarDecl* var_decl = enum_decl.variants[0].as(VarDecl);
 	test::eq(var_decl.name.text, "BBB");
 	test::eq(var_decl.attributes.len, 1);
-	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.TAG);
+	test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.DEPRECATED);
 	test::eq(var_decl.init_expr == null, true);
 }
 
@@ -421,10 +421,10 @@ fn void values_if_attribute()
 fn void complex()
 {
 	String source_code = `
-	module hello;
-	enum MyEnum (Printable, OutStream) : char (int a, String b @tag("enum_member_tag", 1)) @tag("tag_key", "tag_value") @if(true) {
-		AAA @tag("tag_key", "AAA") @if(true) {0, "a"},
-		BBB @tag("tag_key", "BBB") @if(true) {1, "b"} ,
+	module hello; import std;
+	enum MyEnum (Printable, OutStream) : char (int a, String b) @tag("tag_key", "tag_value") @if(true) {
+		AAA @deprecated("AAA") @if(true) {0, "a"},
+		BBB @deprecated("BBB") @if(true) {1, "b"} ,
 	}
 	`;
 
@@ -436,7 +436,7 @@ fn void complex()
 
 	test::eq(parser_tests::count_kind(mod, ENUM_DECL), 1);
 
-	Node* enum_node     = mod.nodes[1];
+	Node* enum_node     = mod.nodes[2];
 	EnumDecl* enum_decl = enum_node.as(EnumDecl);
 
 	test::eq(enum_decl.name.text, "MyEnum");
@@ -472,7 +472,7 @@ fn void complex()
 		assert(variant_description == "AAA" || variant_description == "BBB", "Failed to parse variant description");
 
 		test::eq(var_decl.attributes.len, 2);
-		test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.TAG);
+		test::eq(parser_tests::@attr(var_decl, 0).attribute_kind, AttributeKind.DEPRECATED);
 		test::eq(parser_tests::@attr(var_decl, 1).attribute_kind, AttributeKind.IF);
 	}
 }

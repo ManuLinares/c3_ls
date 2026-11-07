@@ -39,7 +39,7 @@ fn void test_format_generic_instantiations_stay_inline()
 	proj.init(mem);
 	defer proj.free();
 
-	String unformatted = "module app; fn void main() { List{int} items; HashMap{String, List{int}} map; }";
+	String unformatted = "module app; import std; fn void main() { List{int} items; } macro void m() { HashMap{String, List{int}} map; }";
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/fmt_gen.c3");
 	defer doc_uri.free();
 

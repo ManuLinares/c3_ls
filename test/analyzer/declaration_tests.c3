@@ -227,13 +227,13 @@ fn void alias_declarations_parse()
 
 fn void typedef_declarations_parse()
 {
-	String source_code = `module hello;
+	String source_code = `module hello; import std;
 		typedef MyId = int;
 		typedef MyId2 @constinit = int;
 		typedef Bcd @constinit = inline int;
 		typedef IntAlign2 = int @align(2);
 		typedef Float4 = float[<4>] @simd;
-		typedef EnumSet (Printable) = EnumSetType;
+		typedef EnumSet (Printable) = uint;
 		typedef Option<Type> = Type*;
 	`;
 
@@ -243,9 +243,9 @@ fn void typedef_declarations_parse()
 
 	Module* mod = context.modules.get("hello")!!;
 
-	test::eq(mod.nodes.len(), 8);
+	test::eq(mod.nodes.len(), 9);
 
-	TypedefDecl* my_id = mod.nodes[1].as(TypedefDecl);
+	TypedefDecl* my_id = mod.nodes[2].as(TypedefDecl);
 	test::eq(my_id.name.text, "MyId");
 	test::eq(my_id.is_inline, false);
 	test::eq(my_id.attributes.len, 0);
@@ -253,35 +253,35 @@ fn void typedef_declarations_parse()
 	test::eq(my_id_base.type_kind, TypeExprKind.TYPE_IDENTIFIER);
 	test::eq(my_id_base.unresolved.name.text, "int");
 
-	TypedefDecl* my_id2 = mod.nodes[2].as(TypedefDecl);
+	TypedefDecl* my_id2 = mod.nodes[3].as(TypedefDecl);
 	test::eq(my_id2.name.text, "MyId2");
 	test::eq(my_id2.attributes.len, 1);
 
-	TypedefDecl* bcd = mod.nodes[3].as(TypedefDecl);
+	TypedefDecl* bcd = mod.nodes[4].as(TypedefDecl);
 	test::eq(bcd.name.text, "Bcd");
 	test::eq(bcd.is_inline, true);
 	test::eq(bcd.attributes.len, 1);
 
-	TypedefDecl* int_align = mod.nodes[4].as(TypedefDecl);
+	TypedefDecl* int_align = mod.nodes[5].as(TypedefDecl);
 	test::eq(int_align.name.text, "IntAlign2");
 	test::eq(int_align.attributes.len, 1);
 
-	TypedefDecl* float4 = mod.nodes[5].as(TypedefDecl);
+	TypedefDecl* float4 = mod.nodes[6].as(TypedefDecl);
 	test::eq(float4.name.text, "Float4");
 	test::eq(float4.attributes.len, 1);
 	TypeExpr* float4_base = float4.base_type.as(TypeExpr);
 	test::eq(float4_base.type_kind, TypeExprKind.TYPE_VECTOR);
 	test::eq(float4_base.array.len_expr.kind, NodeKind.LITERAL_EXPR);
 
-	TypedefDecl* enum_set = mod.nodes[6].as(TypedefDecl);
+	TypedefDecl* enum_set = mod.nodes[7].as(TypedefDecl);
 	test::eq(enum_set.name.text, "EnumSet");
 	test::eq(enum_set.interfaces.len, 1);
 	TypeExpr* interface_type = enum_set.interfaces[0].as(TypeExpr);
 	test::eq(interface_type.unresolved.name.text, "Printable");
 	TypeExpr* enum_set_base = enum_set.base_type.as(TypeExpr);
-	test::eq(enum_set_base.unresolved.name.text, "EnumSetType");
+	test::eq(enum_set_base.unresolved.name.text, "uint");
 
-	TypedefDecl* option = mod.nodes[7].as(TypedefDecl);
+	TypedefDecl* option = mod.nodes[8].as(TypedefDecl);
 	test::eq(option.name.text, "Option");
 	GenericDecl* option_generics = option.generics.as(GenericDecl);
 	test::eq(option_generics.params.len, 1);

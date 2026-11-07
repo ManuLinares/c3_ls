@@ -219,7 +219,7 @@ fn void test_hover_on_typedef_and_alias()
 	proj.init(mem);
 	defer proj.free();
 
-	String source = "module my_mod;\ntypedef UserId = ulong;\nalias StringList = List{String};\n";
+	String source = "module my_mod; import std;\ntypedef UserId = ulong;\nalias StringList = List{String};\n";
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/typedefs.c3");
 	defer doc_uri.free();
 
