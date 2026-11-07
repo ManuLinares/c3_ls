@@ -47,7 +47,6 @@ fn bool Token.is_eof(&self) @inline => self.kind == EOF;
 fn bool is_digit(char c) @inline => c.is_digit();
 fn bool is_alpha(char c) @inline => c.is_alpha();
 fn bool is_ident(char c) @inline => is_alpha(c) || is_digit(c) || c == '_';
-fn bool is_hex(char c) @inline => ascii::is_xdigit(c);
 fn bool Lexer.eof(&self) => self.current == 0;
 
 fn bool is_all_upper(String text)
@@ -436,37 +435,12 @@ fn Token lex_hex_array(Lexer* self)
 	char start_quote = self.peek();
 	advance(self, 2);
 
+	// Digits are validated when the parser decodes the literal.
 	while (self.current != 0)
 	{
-		char c = self.current;
-
-		if (c == start_quote)
-		{
-			advance(self);
-			break;
-		}
-
-		if (c.is_space())
-		{
-			advance(self);
-			continue;
-		}
-
-		if (is_hex(c))
-		{
-			advance(self);
-			continue;
-		}
-
-		diagnostics::error(self.ctx, { start, self.location }, "[Lexer]: Unexpected character '%c'", c);
-		return {
-			.kind = ERROR,
-			.value = self.get_string(start_index, self.index - start_index),
-			.range = {
-				.start = start,
-				.end = self.location
-			}
-		};
+		bool closing = self.current == start_quote;
+		advance(self);
+		if (closing) break;
 	}
 
 	return {

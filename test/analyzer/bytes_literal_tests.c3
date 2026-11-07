@@ -42,3 +42,17 @@ fn void invalid_chunk_reported_at_its_token() @test
 		assert(errs[0].range.start.line == 1 && errs[0].range.start.column == second_chunk_col[i], "%s", errs);
 	}
 }
+
+fn void invalid_digit_reported_once() @test
+{
+	String[2] srcs = {
+		"module t;\nchar[*] a = x\"1g\";\nint b = 1;\n",
+		"module t;\nchar[*] a = b64\"S!Vs\";\nint b = 1;\n",
+	};
+	foreach (src : srcs)
+	{
+		Diag[] errs = diag_capture::errors_for(src);
+		assert(errs.len == 1, "%s", errs);
+		assert(errs[0].range.start.line == 1 && errs[0].range.start.column == 12, "%s", errs);
+	}
+}
