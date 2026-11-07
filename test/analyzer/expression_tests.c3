@@ -803,8 +803,8 @@ fn void test_adjacent_bytes_literal_concatenation() @test
 			x'AABB'
 			x'CCDD';
 		const char[] C =
-			b64"SGV"
-			b64"sbG8=";
+			b64"SGVs"
+			b64"bG8=";
 	`;
 	AnalyzerContext* context = context::create(tmem);
 	bool success = context::process(context, source_code, "test_bytes.c3");
