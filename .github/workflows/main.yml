@@ -43,14 +43,6 @@ jobs:
         run: echo "month=$(/bin/date -u '+%Y-%m')" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Cache APT packages
-        uses: actions/cache@v6
-        with:
-          path: /var/cache/apt/archives
-          key: apt-deps-${{ runner.os }}-${{ steps.get-date.outputs.month }}
-          restore-keys: |
-            apt-deps-${{ runner.os }}-
-
       - name: Install Toolchains & Wine
         run: |
           sudo apt-get update
