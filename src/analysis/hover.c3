@@ -429,6 +429,14 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
 	if (!decl_node) return "";
 
+	if (decl_node.kind == TYPE_EXPR)
+	{
+		if (try pt = constants::PrimitiveType::lookup_field(name, cursor::raw_type_identifier(decl_node) ?? ""))
+		{
+			return string::tformat("```c3\n%s\n```\n\n%s", pt.name, pt.doc);
+		}
+	}
+
 	String symbol_name = analysis::get_node_symbol_name(decl_node);
 	if (symbol_name.len == 0 && decl_node.kind != MODULE_DECL && decl_node.kind != PATH_EXPR) return "";
 

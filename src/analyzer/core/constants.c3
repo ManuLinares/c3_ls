@@ -18,36 +18,37 @@ enum PrimitiveKind : char
 	BOOL,
 	INT,
 	FLOAT,
-	SPECIAL
+	SPECIAL,
+	COMPILE_TIME
 }
 
-enum PrimitiveType : int (String name, TokenKind token, sz size, PrimitiveKind kind, bool is_signed)
+enum PrimitiveType : int (String name, TokenKind token, sz size, PrimitiveKind kind, bool is_signed, String doc)
 {
-	VOID     { "void",     VOID_TYPE,     0, VOID,    false },
-	BOOL     { "bool",     BOOL_TYPE,     1, BOOL,    false },
-	CHAR     { "char",     CHAR_TYPE,     1, INT,     false },
-	ICHAR    { "ichar",    ICHAR_TYPE,    1, INT,     true  },
-	SHORT    { "short",    SHORT_TYPE,    2, INT,     true  },
-	USHORT   { "ushort",   USHORT_TYPE,   2, INT,     false },
-	INT      { "int",      INT_TYPE,      4, INT,     true  },
-	UINT     { "uint",     UINT_TYPE,     4, INT,     false },
-	LONG     { "long",     LONG_TYPE,     8, INT,     true  },
-	ULONG    { "ulong",    ULONG_TYPE,    8, INT,     false },
-	INT128   { "int128",   INT128_TYPE,  16, INT,     true  },
-	UINT128  { "uint128",  UINT128_TYPE, 16, INT,     false },
-	FLOAT16  { "float16",  FLOAT16_TYPE,  2, FLOAT,   true  },
-	BFLOAT   { "bfloat",   BFLOAT_TYPE,   2, FLOAT,   true  },
-	FLOAT    { "float",    FLOAT_TYPE,    4, FLOAT,   true  },
-	DOUBLE   { "double",   DOUBLE_TYPE,   8, FLOAT,   true  },
-	FLOAT128 { "float128", FLOAT128_TYPE,16, FLOAT,   true  },
-	IPTR     { "iptr",     IPTR_TYPE,     0, INT,     true  },
-	UPTR     { "uptr",     UPTR_TYPE,     0, INT,     false },
-	SZ       { "sz",       SZ_TYPE,       0, INT,     true  },
-	USZ      { "usz",      USZ_TYPE,      0, INT,     false },
-	ANY      { "any",      ANY_TYPE,     16, SPECIAL, false },
-	TYPEID   { "typeid",   TYPEID_TYPE,   0, SPECIAL, false },
-	FAULT    { "fault",    FAULT_TYPE,    0, SPECIAL, false },
-	UNTYPEDLIST { "untypedlist", UNTYPEDLIST_TYPE, 0, SPECIAL, false }
+	VOID     { "void",     VOID_TYPE,     0, VOID,    false, "No value. `void*` is a wildcard pointer that implicitly converts to any other pointer." },
+	BOOL     { "bool",     BOOL_TYPE,     1, BOOL,    false, "`true` or `false`, stored in a byte." },
+	CHAR     { "char",     CHAR_TYPE,     1, INT,     false, "Unsigned 8-bit integer (0 to 255)." },
+	ICHAR    { "ichar",    ICHAR_TYPE,    1, INT,     true,  "Signed 8-bit integer (-128 to 127)." },
+	SHORT    { "short",    SHORT_TYPE,    2, INT,     true,  "Signed 16-bit integer." },
+	USHORT   { "ushort",   USHORT_TYPE,   2, INT,     false, "Unsigned 16-bit integer." },
+	INT      { "int",      INT_TYPE,      4, INT,     true,  "Signed 32-bit integer. Decimal literals are `int` unless they do not fit." },
+	UINT     { "uint",     UINT_TYPE,     4, INT,     false, "Unsigned 32-bit integer. Literal suffix `u`." },
+	LONG     { "long",     LONG_TYPE,     8, INT,     true,  "Signed 64-bit integer. Literal suffix `l`." },
+	ULONG    { "ulong",    ULONG_TYPE,    8, INT,     false, "Unsigned 64-bit integer. Literal suffix `ul`." },
+	INT128   { "int128",   INT128_TYPE,  16, INT,     true,  "Signed 128-bit integer. Literal suffix `ll`." },
+	UINT128  { "uint128",  UINT128_TYPE, 16, INT,     false, "Unsigned 128-bit integer. Literal suffix `ull`." },
+	FLOAT16  { "float16",  FLOAT16_TYPE,  2, FLOAT,   true,  "16-bit floating point, widened to `float` before arithmetic. Support is incomplete; not all systems have native support." },
+	BFLOAT   { "bfloat",   BFLOAT_TYPE,   2, FLOAT,   true,  "16-bit floating point in bfloat16 format. Support is incomplete; not all systems have native support." },
+	FLOAT    { "float",    FLOAT_TYPE,    4, FLOAT,   true,  "32-bit floating point. Literal suffix `f`." },
+	DOUBLE   { "double",   DOUBLE_TYPE,   8, FLOAT,   true,  "64-bit floating point. Floating point literals are `double` by default; suffix `d`." },
+	FLOAT128 { "float128", FLOAT128_TYPE,16, FLOAT,   true,  "128-bit floating point. Support is incomplete; not all systems have native support." },
+	IPTR     { "iptr",     IPTR_TYPE,     0, INT,     true,  "Signed integer with as many bits as a `void*`." },
+	UPTR     { "uptr",     UPTR_TYPE,     0, INT,     false, "Unsigned integer with as many bits as a `void*`." },
+	SZ       { "sz",       SZ_TYPE,       0, INT,     true,  "Signed integer with as many bits as the maximum difference between two pointers. Usually 64 bits on 64-bit targets." },
+	USZ      { "usz",      USZ_TYPE,      0, INT,     false, "Unsigned counterpart of `sz`. Usually 64 bits on 64-bit targets." },
+	ANY      { "any",      ANY_TYPE,     16, SPECIAL, false, "Variant: a `typeid` plus a `void*` to a value. Read the type with `.type`; convert with `anycast`." },
+	TYPEID   { "typeid",   TYPEID_TYPE,   0, SPECIAL, false, "Runtime representation of a type, obtained with `Type::typeid`. Pointer-sized." },
+	FAULT    { "fault",    FAULT_TYPE,    0, SPECIAL, false, "Why an Optional is empty. Values are defined with `excuse`, are pointer-sized and globally unique; `.description` gives the name." },
+	UNTYPEDLIST { "untypedlist", UNTYPEDLIST_TYPE, 0, COMPILE_TIME, false, "Type of an untyped initializer list such as `{ 1, 2 }`. Compile-time only: usable in type checks like `$Typeof(x) == untypedlist`; no value can have this type." }
 }
 
 fn bool PrimitiveType.is_int(self) => self.kind == PrimitiveKind.INT;

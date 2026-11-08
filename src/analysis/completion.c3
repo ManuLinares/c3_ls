@@ -486,14 +486,19 @@ fn void provide_builtin_types(Context* ctx, List{CompletionItem}* items)
 	{
 		if (fuzzy_match(pt.name, ctx.prefix))
 		{
+			bool compile_time = pt.kind == COMPILE_TIME;
 			items.push(
 			{
 				.label = pt.name,
 				.kind = CLASS,
-				.detail = "built-in type",
+				.detail = compile_time ? "compile-time type" : "built-in type",
+				.documentation = {
+					.kind = MARKDOWN,
+					.value = pt.doc
+				},
 				.insertText = pt.name,
 				.filterText = pt.name,
-				.sortText = string::tformat("%s_%s", sort_prefix, pt.name),
+				.sortText = string::tformat("%s%s_%s", sort_prefix, compile_time ? "z" : "", pt.name),
 				.data = "property"
 			}
 			);
