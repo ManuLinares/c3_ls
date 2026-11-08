@@ -5,6 +5,7 @@ import lsp::analysis::semantic_tokens;
 import lsp;
 import uri;
 import std::io;
+import analyzer::core::constants;
 
 fn void test_semantic_tokens_generation()
 {
@@ -101,4 +102,53 @@ fn void test_semantic_tokens_readonly_modifier_on_constants()
 		}
 	}
 	assert(found_readonly_const);
+}
+
+fn void test_semantic_tokens_base_types_and_numbers()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	DString src = dstring::temp();
+	src.append("module t;\nfn void main()\n{\n");
+	foreach (i, p : PrimitiveType::values)
+	{
+		if (p != VOID) src.appendf("\t%s v%d;\n", p.name, i);
+	}
+	src.append("\tint a = 10;\n\tint b = 0x1F;\n\tint c = 0o17;\n\tint d = 0b101;\n\tdouble e = 1.5;\n\tdouble g = 0x1.8p1;\n}\n");
+	String source = src.str_view();
+	Uri doc_uri = uri::from_file_path(tmem, "/virtual/base_types.c3");
+	proj.workspace.process_file("/virtual/base_types.c3", source);
+
+	SemanticTokensResult res = semantic_tokens::compute_semantic_tokens(&proj, doc_uri)!!;
+	String[] lines = source.tsplit("\n");
+	uint line = 0;
+	uint col = 0;
+	int types = 0;
+	int numbers = 0;
+	for (usz k = 0; k < res.data.len; k += 5)
+	{
+		if (res.data[k] != 0) col = 0;
+		line += res.data[k];
+		col += res.data[k + 1];
+		String text = lines[line][col : res.data[k + 2]];
+		uint kind = res.data[k + 3];
+		if (text == "fn") assert(kind == 15, "fn: %d", kind);
+		if (text[0].is_digit())
+		{
+			assert(kind == 19, "%s: %d", text, kind);
+			numbers++;
+		}
+		foreach (p : PrimitiveType::values)
+		{
+			if (text == p.name)
+			{
+				assert(kind == 1, "%s: %d", text, kind);
+				types++;
+			}
+		}
+	}
+	assert(numbers == 6, "%d numbers", numbers);
+	assert(types == PrimitiveType::values.len + 6, "%d types", types);
 }

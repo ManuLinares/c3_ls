@@ -99,42 +99,9 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 				t_type = 18;  // string
 				break;
 
-			case INT_DECIMAL_LITERAL:
-			case INT_HEX_LITERAL:
-			case INT_OCTAL_LITERAL:
-			case INT_BIN_LITERAL:
-			case FLOAT_DECIMAL_LITERAL:
-			case FLOAT_HEX_LITERAL:
-				t_type = 19;  // number
-				break;
-
 			case TYPE_IDENT:
 			case AT_TYPE_IDENT:
 			case CT_TYPE_IDENT:
-			case VOID_TYPE:
-			case BOOL_TYPE:
-			case CHAR_TYPE:
-			case DOUBLE_TYPE:
-			case FLOAT_TYPE:
-			case FLOAT16_TYPE:
-			case BFLOAT_TYPE:
-			case INT128_TYPE:
-			case ICHAR_TYPE:
-			case INT_TYPE:
-			case IPTR_TYPE:
-			case SZ_TYPE:
-			case LONG_TYPE:
-			case SHORT_TYPE:
-			case UINT128_TYPE:
-			case UINT_TYPE:
-			case ULONG_TYPE:
-			case UPTR_TYPE:
-			case USHORT_TYPE:
-			case USZ_TYPE:
-			case FLOAT128_TYPE:
-			case ANY_TYPE:
-			case FAULT_TYPE:
-			case TYPEID_TYPE:
 				t_type = 1;  // type
 				break;
 
@@ -217,15 +184,18 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 				break;
 
 			default:
-				if (tok.kind.is_keyword())
+				switch
 				{
-					t_type = 15;  // keyword
+					case tok.kind.is_int_literal():
+					case tok.kind.is_float_literal():
+						t_type = 19;  // number
+					case tok.kind.is_base_type():
+						t_type = 1;  // type
+					case tok.kind.is_keyword():
+						t_type = 15;  // keyword
+					default:
+						continue;
 				}
-				else
-				{
-					continue;
-				}
-				break;
 		}
 
 		uint delta_line = line - prev_line;

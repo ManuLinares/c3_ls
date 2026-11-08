@@ -65,24 +65,12 @@ fn BraceKind pop_brace(FormatterContext* ctx)
 
 fn bool is_word_token(TokenKind k)
 {
-	if (k.is_keyword() || k.is_base_type())
+	if (k.is_keyword() || k.is_base_type() || k.is_identifier() || k.is_int_literal() || k.is_float_literal())
 	{
 		return true;
 	}
 	switch (k)
 	{
-		case IDENT:
-		case TYPE_IDENT:
-		case CONST_IDENT:
-		case AT_IDENT:
-		case AT_TYPE_IDENT:
-		case AT_CONST_IDENT:
-		case CT_IDENT:
-		case CT_TYPE_IDENT:
-		case CT_CONST_IDENT:
-		case HASH_IDENT:
-		case HASH_TYPE_IDENT:
-		case HASH_CONST_IDENT:
 		case CT_FOR:
 		case CT_IF:
 		case CT_ELSE:
@@ -103,12 +91,6 @@ fn bool is_word_token(TokenKind k)
 		case CT_TYPEFROM:
 		case CT_VAARG:
 		case CT_FEATURE:
-		case INT_DECIMAL_LITERAL:
-		case INT_HEX_LITERAL:
-		case INT_OCTAL_LITERAL:
-		case INT_BIN_LITERAL:
-		case FLOAT_DECIMAL_LITERAL:
-		case FLOAT_HEX_LITERAL:
 		case STRING_LITERAL:
 		case CHAR_LITERAL:
 		case BYTES_LITERAL:
