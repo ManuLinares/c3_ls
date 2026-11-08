@@ -34,6 +34,10 @@ fn void f()
 }
 fn void Outer.method(&self) {}
 macro void Outer.mac(&self) {}
+<*
+ @require x > 0
+*>
+fn int g(int x) => x;
 `;
 	AnalyzerContext* context = context::create(tmem);
 	assert(context::process(context, src, "visit.c3"));
@@ -66,4 +70,60 @@ fn void f() @Hot {}
 	}
 	assert(!sf.mentions("int"));
 	assert(!sf.mentions("1"));
+}
+
+fn ChildVisitResult collect_visit(Node* node, Node* parent, void* user_data)
+{
+	if (!node) return CONTINUE;
+	((List{Node*}*)user_data).push(node);
+	return RECURSE;
+}
+
+fn void every_parsed_node_reachable() @test
+{
+	String src = `module t;
+faultdef BAD @deprecated;
+attrdef @Hot(x) = @inline;
+$assert 1 + 1 == 2;
+<*
+ @require a > 0
+ @ensure return > 0
+*>
+fn int pos(int a) { return a; }
+macro int @sum(...)
+{
+	int total = 0;
+	$for var $i = 0; $i < $vaarg.len; $i++:
+		total += $vaarg[$i];
+	$endfor
+	return total;
+}
+fn void main()
+{
+	int v = 3;
+	assert(v > 0, "v is %d", v);
+	$assert int::size == 4 : "size";
+	$if false:
+		$error "never";
+	$endif
+	int s = @sum(1, 2);
+	int line = $$LINE;
+}
+`;
+	AnalyzerContext* context = context::create(tmem);
+	assert(context::process(context, src, "reach.c3"));
+	SourceFile* sf = context.files.get("reach.c3")!!;
+
+	List{Node*} visited;
+	visited.tinit();
+	foreach (stmt : sf.ast.statements)
+	{
+		if (stmt) cursor::visit(stmt, null, { .on_enter = &collect_visit }, &visited);
+	}
+	DString missing = dstring::temp();
+	foreach (node : sf.ast.nodes)
+	{
+		if (node.kind != ERROR && !visited.contains(node)) missing.appendf("%s@%d:%d ", node.kind, node.range.start.line, node.range.start.column);
+	}
+	assert(missing.len() == 0, "unreachable: %s", missing);
 }

@@ -88,6 +88,8 @@ fn Ident* ref_name(Node* node)
 			return te.type_kind == TYPE_IDENTIFIER ? te.unresolved.name : null;
 		case ATTRIBUTE_DECL:
 			return node.as(AttributeDecl).name;
+		case CONTRACT_PARAM:
+			return node.as(ContractParam).ident;
 		default:
 			return null;
 	}

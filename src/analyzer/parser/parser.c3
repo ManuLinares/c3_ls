@@ -331,7 +331,13 @@ fn bool parse(ParseContext* ctx, SourceFile* source_file) => @pool()
 		ctx.ast.statements.push(node);
 		if (ctx.contract && node.kind != CONTRACT_DECL)
 		{
-			attach_contract(ctx, node, ctx.contract);
+			// An attached contract belongs to its declaration: it is reached
+			// through the declaration, whose range covers it.
+			if (attach_contract(ctx, node, ctx.contract))
+			{
+				ctx.ast.statements.remove_last_item(ctx.contract);
+				node.range.start = ctx.contract.range.start;
+			}
 			ctx.contract = null;
 		}
 	}
@@ -519,7 +525,10 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 	return node;
 }
 
-fn void attach_contract(ParseContext* ctx, Node* node, Node* contract)
+<*
+ @return "false when `node` cannot carry a contract"
+*>
+fn bool attach_contract(ParseContext* ctx, Node* node, Node* contract)
 {
 	switch (node.kind)
 	{
@@ -554,8 +563,9 @@ fn void attach_contract(ParseContext* ctx, Node* node, Node* contract)
 			TypedefDecl* td = node.as(TypedefDecl);
 			td.contract.set(contract);
 		default:
-			break;
+			return false;
 	}
+	return true;
 }
 
 fn void error_node(ParseContext* ctx, Node* node)

@@ -761,3 +761,24 @@ fn void main()
 	e = fx.rename("a.c3", "v", 4, "val")!!;
 	fx.expect(e, "v", "val", { "a.c3" }, { { 1, 3, 4 } });
 }
+
+fn void parameter_rename_includes_contract() @test
+{
+	Fx fx;
+	fx.init();
+	defer fx.free();
+	fx.add("a.c3", `module t;
+<*
+ @param count : "how many"
+ @require count > 0
+ @ensure return >= count
+*>
+fn int twice(int count)
+{
+	assert(count < 1000);
+	return count * 2;
+}
+`);
+	WorkspaceEdit e = fx.rename("a.c3", "count", 3, "n")!!;
+	fx.expect(e, "count", "n", { "a.c3" }, { { 0, 1, 2, 3, 4, 5 } });
+}

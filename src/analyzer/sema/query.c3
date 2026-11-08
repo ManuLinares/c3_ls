@@ -1909,6 +1909,38 @@ fn String generic_param_name(Node* param)
 }
 
 <*
+ Top-level statement containing `loc`. A declaration's range covers its doc
+ contract.
+*>
+fn Node* enclosing_top_level(SourceFile* sf, Location loc)
+{
+	foreach (stmt : sf.ast.statements)
+	{
+		if (stmt && stmt.range.contains(loc)) return stmt;
+	}
+	return null;
+}
+
+<*
+ Parameter `name` of the function or macro `decl`, or null.
+*>
+fn Node* find_param(Node* decl, String name) @local
+{
+	NodeArray params;
+	switch (decl.kind)
+	{
+		case FN_DECL: params = decl.as(FnDecl).params;
+		case MACRO_DECL: params = decl.as(MacroDecl).params;
+		default: return null;
+	}
+	foreach (p : params)
+	{
+		if (p && p.kind == VAR_DECL && p.as(VarDecl).name && p.as(VarDecl).name.text == name) return p;
+	}
+	return null;
+}
+
+<*
  Resolves unqualified type names in one file without walking the AST.
  Call `enter` for each top-level statement, in order: visibility only
  changes at module sections, so lookups are cached per section.
@@ -2023,6 +2055,13 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 			break;
 	}
 
+	if (target_node.kind == CONTRACT_PARAM)
+	{
+		Ident* ident = target_node.as(ContractParam).ident;
+		Node* decl = enclosing_top_level(sf, loc);
+		return ident && decl ? find_param(decl, ident.text) : null;
+	}
+
 	if (target_node.kind == PATH_EXPR)
 	{
 		PathExpr* path_expr = target_node.as(PathExpr);
@@ -2119,15 +2158,7 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 
 	if (!symbol_name.starts_with("@"))
 	{
-		Node* enclosing_func = null;
-		foreach (stmt : sf.ast.statements)
-		{
-			if (stmt && stmt.range.contains(loc))
-			{
-				enclosing_func = stmt;
-				break;
-			}
-		}
+		Node* enclosing_func = enclosing_top_level(sf, loc);
 
 		Node* local_decl = null;
 		if (enclosing_func)

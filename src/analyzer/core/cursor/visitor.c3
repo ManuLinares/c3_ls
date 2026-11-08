@@ -50,6 +50,39 @@ fn bool visit_var_decl_parts(VarDecl* vardecl, bool with_type, Node* parent, Vis
 }
 
 <*
+ Doc contract attached to a declaration, or null.
+*>
+fn Node* decl_contract(Node* node)
+{
+	NullableNode contract;
+	switch (node.kind)
+	{
+		case MODULE_DECL: contract = node.as(ModuleDecl).contract;
+		case FN_DECL: contract = node.as(FnDecl).contract;
+		case MACRO_DECL: contract = node.as(MacroDecl).contract;
+		case STRUCT_DECL: contract = node.as(StructDecl).contract;
+		case INTERFACE_DECL: contract = node.as(InterfaceDecl).contract;
+		case FAULTDEF_DECL: contract = node.as(FaultdefDecl).contract;
+		case FAULT_DECL: contract = node.as(FaultDecl).contract;
+		case VAR_DECL: contract = node.as(VarDecl).contract;
+		case ENUM_DECL: contract = node.as(EnumDecl).contract;
+		case ALIAS_DECL: contract = node.as(AliasDecl).contract;
+		case TYPEDEF_DECL: contract = node.as(TypedefDecl).contract;
+		default: return null;
+	}
+	return contract.get() ?? null;
+}
+
+fn bool visit_all(NodeArray nodes, Node* parent, VisitorHooks hooks, void* data) @local
+{
+	foreach (n : nodes)
+	{
+		if (n && !visit(n, parent, hooks, data)) return false;
+	}
+	return true;
+}
+
+<*
  Visit children
  returns false if a break was requested
  @param parent : "The Cursor to visit children on"
@@ -81,6 +114,10 @@ fn bool visit_children(Node* parent, VisitorHooks hooks, void* data)
 
 fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @private
 {
+	if (Node* contract = decl_contract(node))
+	{
+		if (!visit(contract, parent, hooks, data)) return false;
+	}
 	switch (node.kind)
 	{
 		case MODULE_DECL:
@@ -92,10 +129,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 					if (!visit(attr, parent, hooks, data)) return false;
 				}
 				if (md.generics && !visit(md.generics, parent, hooks, data)) return false;
-				if (try contract = md.contract.get())
-				{
-					if (!visit(contract, parent, hooks, data)) return false;
-				}
 				break;
 			}
 		case IMPORT_DECL:
@@ -125,10 +158,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				{
 					if (!visit(attr, parent, hooks, data)) return false;
 				}
-				if (try contract = fndecl.contract.get())
-				{
-					if (!visit(contract, parent, hooks, data)) return false;
-				}
 				if (fndecl.body && !visit(fndecl.body, parent, hooks, data)) return false;
 				break;
 			}
@@ -152,10 +181,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				foreach (attr : mac.attributes)
 				{
 					if (!visit(attr, parent, hooks, data)) return false;
-				}
-				if (try contract = mac.contract.get())
-				{
-					if (!visit(contract, parent, hooks, data)) return false;
 				}
 				if (mac.body && !visit(mac.body, parent, hooks, data)) return false;
 				break;
@@ -241,10 +266,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case TYPEDEF_DECL:
 			{
 				TypedefDecl* td = node.as(TypedefDecl);
-				if (try contract = td.contract.get())
-				{
-					if (!visit(contract, parent, hooks, data)) return false;
-				}
 				if (td.generics && !visit(td.generics, parent, hooks, data)) return false;
 				if (td.base_type && !visit(td.base_type, parent, hooks, data)) return false;
 				foreach (inter : td.interfaces)
@@ -260,10 +281,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case ALIAS_DECL:
 			{
 				AliasDecl* ad = node.as(AliasDecl);
-				if (try contract = ad.contract.get())
-				{
-					if (!visit(contract, parent, hooks, data)) return false;
-				}
 				if (ad.generics && !visit(ad.generics, parent, hooks, data)) return false;
 				if (ad.target && !visit(ad.target, parent, hooks, data)) return false;
 				foreach (attr : ad.attributes)
@@ -314,6 +331,44 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				{
 					if (!visit(val, parent, hooks, data)) return false;
 				}
+				break;
+			}
+		case FAULT_DECL:
+			{
+				FaultDecl* fd = node.as(FaultDecl);
+				if (!visit_all(fd.attributes, parent, hooks, data)) return false;
+				break;
+			}
+		case ATTRDEF_DECL:
+			{
+				AttrdefDecl* ad = node.as(AttrdefDecl);
+				if (!visit_all(ad.params, parent, hooks, data)) return false;
+				if (!visit_all(ad.attributes, parent, hooks, data)) return false;
+				if (!visit_all(ad.defined_attributes, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_ASSERT_DECL:
+			{
+				CtAssertDecl* ca = node.as(CtAssertDecl);
+				if (ca.stmt && !visit(ca.stmt, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_EXPAND_DECL:
+			{
+				CtExpandDecl* ce = node.as(CtExpandDecl);
+				if (ce.expr && !visit(ce.expr, parent, hooks, data)) return false;
+				if (!visit_all(ce.attributes, parent, hooks, data)) return false;
+				break;
+			}
+		case CONTRACT_DECL:
+			{
+				ContractDecl* cd = node.as(ContractDecl);
+				if (!visit_all(cd.params, parent, hooks, data)) return false;
+				if (!visit_all(cd.requires, parent, hooks, data)) return false;
+				if (!visit_all(cd.ensures, parent, hooks, data)) return false;
+				if (!visit_all(cd.returns, parent, hooks, data)) return false;
+				if (cd.return_desc && !visit(cd.return_desc, parent, hooks, data)) return false;
+				if (cd.deprecated && !visit(cd.deprecated, parent, hooks, data)) return false;
 				break;
 			}
 		default:
@@ -508,6 +563,37 @@ fn bool visit_stmts(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case CT_EXPAND_STMT:
 			{
 				CtExpandStmt* st = node.as(CtExpandStmt);
+				if (st.expr && !visit(st.expr, parent, hooks, data)) return false;
+				break;
+			}
+		case ASSERT_STMT:
+			{
+				AssertStmt* st = node.as(AssertStmt);
+				if (st.expr && !visit(st.expr, parent, hooks, data)) return false;
+				if (st.message && !visit(st.message, parent, hooks, data)) return false;
+				if (!visit_all(st.args, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_ASSERT_STMT:
+			{
+				CtAssertStmt* st = node.as(CtAssertStmt);
+				if (st.expr && !visit(st.expr, parent, hooks, data)) return false;
+				if (try msg = st.msg_expr.get())
+				{
+					if (!visit(msg, parent, hooks, data)) return false;
+				}
+				if (!visit_all(st.args, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_ERROR_STMT:
+			{
+				CtErrorStmt* st = node.as(CtErrorStmt);
+				if (st.expr && !visit(st.expr, parent, hooks, data)) return false;
+				break;
+			}
+		case CT_ECHO_STMT:
+			{
+				CtEchoStmt* st = node.as(CtEchoStmt);
 				if (st.expr && !visit(st.expr, parent, hooks, data)) return false;
 				break;
 			}
@@ -824,6 +910,18 @@ fn bool visit_exprs(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				ContractExpr* ce = node.as(ContractExpr);
 				if (ce.exprs && !visit(ce.exprs, parent, hooks, data)) return false;
 				if (ce.expr_string && !visit(ce.expr_string, parent, hooks, data)) return false;
+				break;
+			}
+		case VASPLAT_EXPR:
+			{
+				VasplatExpr* ve = node.as(VasplatExpr);
+				if (ve.range_expr && !visit(ve.range_expr, parent, hooks, data)) return false;
+				break;
+			}
+		case VAARG_EXPR:
+			{
+				VaargExpr* ve = node.as(VaargExpr);
+				if (ve.expr && !visit(ve.expr, parent, hooks, data)) return false;
 				break;
 			}
 		default:
