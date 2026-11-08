@@ -194,21 +194,7 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 
 				if (params.len == 0) break;
 
-				sz param_offset = 0;
-				bool is_method = false;
-				if (callee_node.kind == FN_DECL && callee_node.as(FnDecl).associated_type != null)
-				{
-					is_method = true;
-				}
-				else if (callee_node.kind == MACRO_DECL && @ok(callee_node.as(MacroDecl).associated_type.get()))
-				{
-					is_method = true;
-				}
-
-				if (call.callee.kind == ACCESS_EXPR && is_method && params.len > 0)
-				{
-					param_offset = 1;
-				}
+				sz param_offset = query::receiver_is_implicit(call, callee_node) ? 1 : 0;
 
 				for (sz i = 0; i < call.args.len; i++)
 				{

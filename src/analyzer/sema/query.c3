@@ -1732,6 +1732,24 @@ fn Node* callee_decl(AnalyzerContext* context, SourceFile* sf, CallExpr* call) @
 }
 
 <*
+ True when `call` passes its receiver as the first parameter of method
+ `decl`: `obj.m(a)` does, `Type.m(&obj, a)` and plain calls do not.
+*>
+fn bool receiver_is_implicit(CallExpr* call, Node* decl)
+{
+	bool is_method;
+	switch (decl.kind)
+	{
+		case FN_DECL: is_method = decl.as(FnDecl).associated_type != null;
+		case MACRO_DECL: is_method = @ok(decl.as(MacroDecl).associated_type.get());
+		default: return false;
+	}
+	if (!is_method || !call.callee || call.callee.kind != ACCESS_EXPR) return false;
+	Node* left = call.callee.as(AccessExpr).left;
+	return left && left.kind != TYPE_EXPR;
+}
+
+<*
  Type of the parameter receiving argument `arg` of `call`, or "".
  `arg` is either a positional argument or the value of a named one.
 *>
@@ -1739,18 +1757,7 @@ fn String call_param_type(AnalyzerContext* context, SourceFile* sf, CallExpr* ca
 {
 	Node* decl = callee_decl(context, sf, call);
 	if (!decl) return "";
-	NodeArray params;
-	bool is_method;
-	if (decl.kind == FN_DECL)
-	{
-		params = decl.as(FnDecl).params;
-		is_method = decl.as(FnDecl).associated_type != null;
-	}
-	else
-	{
-		params = decl.as(MacroDecl).params;
-		is_method = @ok(decl.as(MacroDecl).associated_type.get());
-	}
+	NodeArray params = decl.kind == FN_DECL ? decl.as(FnDecl).params : decl.as(MacroDecl).params;
 
 	if (arg_name.len > 0)
 	{
@@ -1764,9 +1771,7 @@ fn String call_param_type(AnalyzerContext* context, SourceFile* sf, CallExpr* ca
 		return "";
 	}
 
-	// `obj.m(a)` passes `obj` as the first parameter; `Type.m(&obj, a)` does not.
-	bool receiver_implicit = is_method && call.callee.kind == ACCESS_EXPR
-		&& call.callee.as(AccessExpr).left && call.callee.as(AccessExpr).left.kind != TYPE_EXPR;
+	bool receiver_implicit = receiver_is_implicit(call, decl);
 	foreach (i, a : call.args)
 	{
 		if (a != arg) continue;

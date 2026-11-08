@@ -34,7 +34,13 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 	List{ParameterInformation} params;
 	params.tinit();
 
-	bool is_method_call = target_info.callee_name.contains(".");
+	// `obj.m(...)` passes `obj` as the first parameter; `Type.m(&obj, ...)` does not.
+	bool is_method_call = false;
+	if (try dot_idx = target_info.callee_name.rindex_of_char('.'))
+	{
+		String receiver = target_info.callee_name[:dot_idx];
+		is_method_call = !query::find_type_node_in_context(project.workspace.ctx, sf, receiver, loc);
+	}
 	bool is_method_decl = false;
 	if (callee_node.kind == FN_DECL && callee_node.as(FnDecl).associated_type != null)
 	{

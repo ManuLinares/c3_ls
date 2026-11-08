@@ -111,3 +111,22 @@ fn void test_signature_help_multiline_call()
 	assert(res.signatures[0].label.contains("configure"));
 	assert(res.signatures[0].activeParameter == 1);
 }
+
+fn void test_signature_help_method_called_through_type()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module my_app;\nstruct Canvas { int id; }\nfn void Canvas.blit(&self, int src_x, int src_y, int dest_x, int dest_y) {}\nfn void main()\n{\n\tCanvas c;\n\tCanvas.blit(&c, 0, 0, 100, 200);\n}\n";
+	Uri doc_uri = uri::from_file_path(tmem, "/virtual/sig_static.c3");
+	proj.workspace.process_file("/virtual/sig_static.c3", source);
+
+	// `Canvas.blit(&c, |0, ...)`: the receiver is explicit, so all 5 parameters apply.
+	LspPosition pos = { .line = 6, .character = 17 };
+	SignatureHelpResult res = signature_help::signature_help(&proj, doc_uri, pos)!!;
+	assert(res.signatures.len == 1);
+	SignatureInformation sig = res.signatures[0];
+	assert(sig.parameters.len == 5, "%d parameters", sig.parameters.len);
+	assert(sig.activeParameter == 1, "active %d", sig.activeParameter);
+}

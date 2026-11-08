@@ -181,3 +181,35 @@ fn void main()
 	}
 	assert(found == 6, "%d hints", found);
 }
+
+fn void test_inlay_hints_method_receiver()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+struct Canvas { int id; }
+fn void Canvas.blit(&self, int x, int y) {}
+fn void main()
+{
+	Canvas c;
+	c.blit(1, 2);
+	Canvas.blit(&c, 3, 4);
+}
+`;
+	proj.workspace.process_file("/virtual/receiver_hints.c3", source);
+	Uri doc_uri = uri::from_file_path(tmem, "/virtual/receiver_hints.c3");
+	InlayHint[] hints = inlay_hints::get_inlay_hints(&proj, doc_uri, { .start = { 0, 0 }, .end = { 20, 0 } })!!;
+
+	DString instance = dstring::temp();
+	DString through_type = dstring::temp();
+	foreach (hint : hints)
+	{
+		if (hint.kind != PARAMETER) continue;
+		if (hint.position.line == 6) instance.append(hint.label);
+		if (hint.position.line == 7) through_type.append(hint.label);
+	}
+	assert(instance.str_view() == "x:y:", "%s", instance);
+	assert(through_type.str_view() == "self:x:y:", "%s", through_type);
+}
