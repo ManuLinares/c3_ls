@@ -81,7 +81,7 @@ jobs:
       - name: Build Linux x86_64 (Static musl)
         run: |
           MUSL_PATH=$(find /usr/lib -maxdepth 3 -name 'crt1.o' -path '*musl*' | head -1 | xargs dirname)
-          c3c build -g0 -O3 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" -z "-static" -z "-s"
+          c3c build -g0 -O3 --linux-libc=musl --linux-crt "$MUSL_PATH" --linux-crtbegin "$MUSL_PATH" --linker=builtin -z "-static" -z "-no-pie" -z "--no-dynamic-linker" -z "-s"
           mkdir -p dist
           tar -czvf dist/c3_ls-linux-x86_64.tar.gz -C build c3_ls
 
