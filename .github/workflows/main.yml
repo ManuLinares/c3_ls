@@ -36,7 +36,7 @@ jobs:
       - name: Run Linux Test Suite
         env:
           C3C_UNIT_TEST_DIR: ${{ github.workspace }}/../c3c/test/unit
-        run: c3c test
+        run: c3c test -O1
 
       - name: Get current month
         id: get-date
@@ -73,7 +73,7 @@ jobs:
 
       - name: Run Windows Test Suite (Wine)
         run: |
-          c3c test --target windows-x64 --suppress-run
+          c3c test -O1 --target windows-x64 --suppress-run
           wine ./build/testrun.exe
 
       # 1. Linux x86_64 (musl static & stripped)
