@@ -21,7 +21,7 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.identifiers.init(&source_file.arena);
 	foreach (tok : lexer.tokens)
 	{
-		if (tok.kind.ordinal < TokenKind.IDENT.ordinal || tok.kind.ordinal > TokenKind.CT_CONST_IDENT.ordinal || tok.kind == AT) continue;
+		if (!tok.kind.is_identifier()) continue;
 		sz offset = tok.value.ptr - lexer.buffer.ptr;
 		source_file.identifiers.add(source_file.content[offset : tok.value.len]);
 	}
