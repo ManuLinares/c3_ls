@@ -2871,3 +2871,44 @@ fn void test_bitfield_struct_emission() @test
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 	assert(code.contains("bitstruct"));
 }
+
+fn void test_completing_opaque_struct_survives_struct_list_growth()
+{
+	DString json;
+	json.tinit();
+	json.append(`{ "kind": "TranslationUnitDecl", "inner": [
+		{ "kind": "RecordDecl", "name": "Ctx", "tagUsed": "struct", "completeDefinition": false, "loc": { "file": "test.h" } },`);
+	for (int i = 0; i < 15; i++)
+	{
+		json.appendf(`
+		{ "kind": "RecordDecl", "name": "Filler%d", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+			"inner": [ { "kind": "FieldDecl", "name": "x", "type": { "qualType": "int" } } ] },`, i);
+	}
+	json.append(`
+		{ "kind": "RecordDecl", "name": "Ctx", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+			"inner": [
+				{ "kind": "RecordDecl", "id": "0x1", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+					"inner": [ { "kind": "FieldDecl", "name": "y", "type": { "qualType": "int" } } ] },
+				{ "kind": "FieldDecl", "name": "inner", "type": { "qualType": "struct (unnamed struct at test.h:1:1)" } }
+			] }
+	] }`);
+
+	Object* root_obj = json::tparse(json.str_view())!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test",
+		.type_prefix = ""
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	test::eq(tu.structs.len(), 17);
+	test::eq(tu.structs.get(0).c3_name, "Ctx");
+	test::eq(tu.structs.get(0).is_opaque, false);
+	test::eq(tu.structs.get(0).fields.len(), 1);
+	test::eq(tu.structs.get(16).c3_name, "CtxInner");
+}

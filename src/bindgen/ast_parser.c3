@@ -1199,17 +1199,16 @@ fn void parse_record_decl_with_name(
 	uint alignment = 0;
 	parse_record_attributes(node, &is_packed, &alignment);
 
-	CStruct* existing = null;
-	foreach (&st : tu.structs)
+	String record_c_name;
+	sz? existing_idx = find_struct_index(tu, c3_name, c_name);
+	if (try existing_idx)
 	{
-		if (st.c3_name == c3_name || st.c_name == c_name)
-		{
-			existing = st;
-			break;
-		}
+		CStruct* existing = &tu.structs[existing_idx];
+		if (!existing.is_opaque || !is_complete) return;
+		record_c_name = existing.c_name;
+		c3_name = existing.c3_name;
 	}
-
-	if (!existing)
+	else
 	{
 		HashSet{String} seen_type_names;
 		seen_type_names.tinit();
@@ -1218,41 +1217,10 @@ fn void parse_record_decl_with_name(
 			seen_type_names.add(e.c3_name);
 		}
 		c3_name = deduplicate_name(&seen_type_names, c3_name, allocator);
+		seen_names.add(c_name);
+		target_types.add(c_name);
+		record_c_name = c_name.copy(allocator);
 	}
-	else
-	{
-		if (existing.is_opaque && is_complete)
-		{
-			List{CField} fields;
-			fields.init(allocator);
-
-			is_complete = parse_record_fields(allocator, tu, node, c_name, &fields, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
-
-			bool is_all_bitfields = compute_record_bitfields(&fields);
-			if (!is_packed)
-			{
-				foreach (f : fields)
-				{
-					if (f.bit_width >= 0)
-					{
-						uint align_bytes = (uint)(type_bit_capacity(f.c3_type) / 8);
-						if (align_bytes > alignment) alignment = align_bytes;
-					}
-				}
-			}
-
-			existing.is_opaque = !is_complete;
-			existing.is_union = is_union;
-			existing.is_bitfield = is_all_bitfields;
-			existing.is_packed = is_packed;
-			existing.alignment = alignment;
-			existing.fields = fields;
-		}
-		return;
-	}
-
-	seen_names.add(c_name);
-	target_types.add(c_name);
 
 	List{CField} fields;
 	fields.init(allocator);
@@ -1275,17 +1243,34 @@ fn void parse_record_decl_with_name(
 		}
 	}
 
-	tu.structs.push({
-		.c_name = c_name.copy(allocator),
+	CStruct record = {
+		.c_name = record_c_name,
 		.c3_name = c3_name,
 		.is_union = is_union,
 		.is_opaque = !is_complete,
 		.is_bitfield = is_all_bitfields,
 		.is_packed = is_packed,
 		.alignment = alignment,
-		.fields = fields,
-		.comment = ""
-	});
+		.fields = fields
+	};
+
+	if (try existing_idx)
+	{
+		tu.structs[existing_idx] = record;
+	}
+	else
+	{
+		tu.structs.push(record);
+	}
+}
+
+fn sz? find_struct_index(CTranslationUnit* tu, String c3_name, String c_name) @local
+{
+	foreach (sz i, &st : tu.structs)
+	{
+		if (st.c3_name == c3_name || st.c_name == c_name) return i;
+	}
+	return NOT_FOUND~;
 }
 
 <*
