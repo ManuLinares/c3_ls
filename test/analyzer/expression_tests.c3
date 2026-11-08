@@ -835,3 +835,27 @@ fn void test_adjacent_bytes_literal_concatenation() @test
 	test::eq(lit_c.bytes.len, 5);
 	test::eq((String)lit_c.bytes, "Hello");
 }
+fn void negative_int_literal_keeps_sign()
+{
+	String source_code = `
+		module neg;
+		const int A = -5;
+		const int B = -5 + 3;
+	`;
+	AnalyzerContext* context = context::create(tmem);
+	test::eq(context::process(context, source_code, "neg.c3"), true);
+	Module* mod = context.modules.get("neg")!!;
+
+	VarDecl* a = mod.nodes[1].as(VarDecl);
+	UnaryExpr* neg = a.init_expr.as(UnaryExpr);
+	test::eq(neg.operator, UnaryOpKind.UNARYOP_NEG);
+	test::eq(neg.expr.as(LiteralExpr).integer, 5u);
+	test::eq(neg.range.start.column, a.init_expr.range.start.column);
+	test::eq(neg.range.start.column, 16);
+
+	VarDecl* b = mod.nodes[2].as(VarDecl);
+	BinaryExpr* sum = b.init_expr.as(BinaryExpr);
+	test::eq(sum.op, OperatorKind.OP_ADD);
+	test::eq(sum.left.as(UnaryExpr).operator, UnaryOpKind.UNARYOP_NEG);
+	test::eq(sum.right.as(LiteralExpr).integer, 3u);
+}

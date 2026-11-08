@@ -647,14 +647,6 @@ fn Node* parse_unary_expr(ContextScope scope)
 	ParseContext* ctx = scope.ctx;
 	diagnostics::log_debug("parse_unary_expr");
 	Range start = ctx.current.range;
-	if (ctx.is(MINUS))
-	{
-		if (ctx.peek(1).kind.is_int_literal())
-		{
-			advance(ctx);
-			return parse_expr(scope);
-		}
-	}
 	bool is_bang_bang = ctx.is(BANGBANG);
 	UnaryExpr* node = ctx.ast.alloc_node(UnaryExpr, start);
 	defer node.range.end = ctx.peek(-1).range.end;

@@ -146,3 +146,38 @@ fn void main() {
 	assert(hints[1].position.line == 8);
 	assert(hints[1].position.character == 4);
 }
+fn void test_inlay_hints_before_prefix_operators()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+fn void take(int a, bool b, int c, int* d, int e, int f) {}
+fn void main()
+{
+	int v = 1;
+	int* p = &v;
+	float f = 2.0;
+	take(-5, !true, ~v, &v, *p, (int)f);
+}
+`;
+	proj.workspace.process_file("/virtual/prefix_hints.c3", source);
+	Uri doc_uri = uri::from_file_path(tmem, "/virtual/prefix_hints.c3");
+	InlayHint[] hints = inlay_hints::get_inlay_hints(&proj, doc_uri, { .start = { 0, 0 }, .end = { 20, 0 } })!!;
+
+	String call_line = source.tsplit("\n")[7];
+	String[6] args = { "-5", "!true", "~v", "&v", "*p", "(int)f" };
+	String[6] labels = { "a:", "b:", "c:", "d:", "e:", "f:" };
+	sz found = 0;
+	foreach (hint : hints)
+	{
+		if (hint.kind != PARAMETER || hint.position.line != 7) continue;
+		assert(found < 6, "extra hint %s", hint.label);
+		assert(hint.label == labels[found], "%s != %s", hint.label, labels[found]);
+		uint want = (uint)call_line.index_of(args[found])!!;
+		assert(hint.position.character == want, "%s at %d, %s starts at %d", hint.label, hint.position.character, args[found], want);
+		found++;
+	}
+	assert(found == 6, "%d hints", found);
+}
