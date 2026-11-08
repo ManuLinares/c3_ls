@@ -46,7 +46,8 @@ enum PrimitiveType : int (String name, TokenKind token, sz size, PrimitiveKind k
 	USZ      { "usz",      USZ_TYPE,      0, INT,     false },
 	ANY      { "any",      ANY_TYPE,     16, SPECIAL, false },
 	TYPEID   { "typeid",   TYPEID_TYPE,   0, SPECIAL, false },
-	FAULT    { "fault",    FAULT_TYPE,    0, SPECIAL, false }
+	FAULT    { "fault",    FAULT_TYPE,    0, SPECIAL, false },
+	UNTYPEDLIST { "untypedlist", UNTYPEDLIST_TYPE, 0, SPECIAL, false }
 }
 
 fn bool PrimitiveType.is_int(self) => self.kind == PrimitiveKind.INT;

@@ -114,8 +114,9 @@ fn void test_semantic_tokens_base_types_and_numbers()
 	src.append("module t;\nfn void main()\n{\n");
 	foreach (i, p : PrimitiveType::values)
 	{
-		if (p != VOID) src.appendf("\t%s v%d;\n", p.name, i);
+		if (p.name != "void" && p.name != "untypedlist") src.appendf("\t%s v%d;\n", p.name, i);
 	}
+	src.append("\t$assert $Typeof({ 1, 2 }) == untypedlist;\n");
 	src.append("\tint a = 10;\n\tint b = 0x1F;\n\tint c = 0o17;\n\tint d = 0b101;\n\tdouble e = 1.5;\n\tdouble g = 0x1.8p1;\n}\n");
 	String source = src.str_view();
 	Uri doc_uri = uri::from_file_path(tmem, "/virtual/base_types.c3");
@@ -127,6 +128,7 @@ fn void test_semantic_tokens_base_types_and_numbers()
 	uint col = 0;
 	int types = 0;
 	int numbers = 0;
+	bool untyped_list_seen;
 	for (usz k = 0; k < res.data.len; k += 5)
 	{
 		if (res.data[k] != 0) col = 0;
@@ -135,6 +137,11 @@ fn void test_semantic_tokens_base_types_and_numbers()
 		String text = lines[line][col : res.data[k + 2]];
 		uint kind = res.data[k + 3];
 		if (text == "fn") assert(kind == 15, "fn: %d", kind);
+		if (text == "untypedlist")
+		{
+			assert(kind == 1, "untypedlist: %d", kind);
+			untyped_list_seen = true;
+		}
 		if (text[0].is_digit())
 		{
 			assert(kind == 19, "%s: %d", text, kind);
@@ -149,6 +156,7 @@ fn void test_semantic_tokens_base_types_and_numbers()
 			}
 		}
 	}
-	assert(numbers == 6, "%d numbers", numbers);
+	assert(untyped_list_seen);
+	assert(numbers == 8, "%d numbers", numbers);
 	assert(types == PrimitiveType::values.len + 6, "%d types", types);
 }
