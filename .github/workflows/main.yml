@@ -74,7 +74,8 @@ jobs:
       - name: Run Windows Test Suite (Wine)
         run: |
           c3c test -O1 --target windows-x64 --suppress-run
-          wine ./build/testrun.exe
+          STDLIB=$(c3c compile --build-env | sed -n 's/^Stdlib *: *//p')
+          C3C_STDLIB_DIR="$(winepath -w "$STDLIB")" wine ./build/testrun.exe
 
       # 1. Linux x86_64 (musl static & stripped)
       - name: Build Linux x86_64 (Static musl)
