@@ -29,67 +29,39 @@ fn LspPosition pos_of(String src, String needle)
 	return { .line = line, .character = (uint)(idx - line_start) };
 }
 
-fn void with_stdlib(LspProject* proj)
-{
-	proj.init(mem);
-	proj.process_stdlib();
-	proj.update();
-	proj.workspace.process_file(APP_PATH, APP);
-}
-
-macro @stdlib_path_scope(;@body)
-{
-	if (server::std_path.len == 0) server::setup_stdlib_path();
-	defer
-	{
-		if (server::is_std_path_alloc)
-		{
-			server::std_path.free(mem);
-			server::is_std_path_alloc = false;
-			server::std_path = "";
-		}
-	};
-	assert(server::std_path.len > 0, "stdlib path not found");
-	@body();
-}
-
 fn void stdlib_symbol_not_renameable_from_workspace_file() @test
 {
-	@stdlib_path_scope()
+	stdlib_fixture::@with_stdlib_project(; LspProject* proj)
 	{
-		LspProject proj;
-		with_stdlib(&proj);
-		defer proj.free();
+		proj.workspace.process_file(APP_PATH, APP);
 		Uri app = uri::from_file_path(tmem, APP_PATH);
 
 		LspPosition at_string = pos_of(APP, "String");
-		assert(@catch(rename::prepare_rename(&proj, app, at_string)) == NOT_FOUND);
-		assert(@catch(rename::rename(&proj, app, at_string, "Text")) == NOT_FOUND);
+		assert(@catch(rename::prepare_rename(proj, app, at_string)) == NOT_FOUND);
+		assert(@catch(rename::rename(proj, app, at_string, "Text")) == NOT_FOUND);
 
 		LspPosition at_fn = pos_of(APP, "temp_directory");
-		assert(@catch(rename::prepare_rename(&proj, app, at_fn)) == NOT_FOUND);
+		assert(@catch(rename::prepare_rename(proj, app, at_fn)) == NOT_FOUND);
 	};
 }
 
 fn void stdlib_symbol_renameable_from_stdlib_file() @test
 {
-	@stdlib_path_scope()
+	stdlib_fixture::@with_stdlib_project(; LspProject* proj)
 	{
-		LspProject proj;
-		with_stdlib(&proj);
-		defer proj.free();
+		proj.workspace.process_file(APP_PATH, APP);
 
-		String std_file = string::tformat("%s/std/io/path.c3", (String)path::tnew(server::std_path)!!);
+		String std_file = ((String)path::tnew(server::std_path)!!.tappend("std/io/path.c3")!!).treplace("\\", "/");
 		SourceFile* sf = proj.workspace.get_source_file_by_path(std_file);
 		assert(sf != null, "%s not loaded", std_file);
 		Uri std_uri = uri::from_file_path(tmem, std_file);
 		LspPosition decl = pos_of(sf.content, "fn Path? temp_directory");
 		decl.character += 9;
 
-		LspRange r = rename::prepare_rename(&proj, std_uri, decl)!!;
+		LspRange r = rename::prepare_rename(proj, std_uri, decl)!!;
 		assert(r.start.line == decl.line && r.end.character - r.start.character == 14);
 
-		WorkspaceEdit e = rename::rename(&proj, std_uri, decl, "tmp_dir")!!;
+		WorkspaceEdit e = rename::rename(proj, std_uri, decl, "tmp_dir")!!;
 		String app_raw = uri::from_file_path(tmem, APP_PATH).to_raw_string(tmem);
 		String std_raw = std_uri.to_raw_string(tmem);
 		bool in_app;

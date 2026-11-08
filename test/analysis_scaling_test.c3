@@ -47,30 +47,15 @@ fn NanoDuration time_processing(LspProject* proj, String src, int runs = 3)
 
 fn void analysis_time_grows_linearly() @test
 {
-	if (server::std_path.len == 0) server::setup_stdlib_path();
-	defer
+	stdlib_fixture::@with_stdlib_project(; LspProject* proj)
 	{
-		if (server::is_std_path_alloc)
-		{
-			server::std_path.free(mem);
-			server::is_std_path_alloc = false;
-			server::std_path = "";
-		}
+		NanoDuration small = time_processing(proj, generate_source(150));
+		NanoDuration large = time_processing(proj, generate_source(600));
+
+		// 4x the input: linear work gives a ratio near 4, quadratic near 16.
+		double ratio = (double)large / (double)small;
+		assert(ratio < 8.0, "4x input took %.1fx time (%s -> %s)", ratio, small, large);
 	};
-	assert(server::std_path.len > 0, "stdlib path not found");
-
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	proj.process_stdlib();
-	proj.update();
-
-	NanoDuration small = time_processing(&proj, generate_source(150));
-	NanoDuration large = time_processing(&proj, generate_source(600));
-
-	// 4x the input: linear work gives a ratio near 4, quadratic near 16.
-	double ratio = (double)large / (double)small;
-	assert(ratio < 8.0, "4x input took %.1fx time (%s -> %s)", ratio, small, large);
 }
 
 <* Valid C3 declaring `Item` and using it as a type `n` times. *>

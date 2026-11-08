@@ -800,7 +800,12 @@ fn bool is_stdlib_file(String path)
 	Path? root = path::tnew(std_path);
 	if (catch root) return false;
 	String r = (String)root;
-	return path.starts_with(r) && (path.len == r.len || path[r.len] == '/' || path[r.len] == '\\');
+	$if env::WIN32:
+		// File keys use '/' (URI form) while normalized paths use '\\'.
+		r = r.treplace("\\", "/");
+		path = path.treplace("\\", "/");
+	$endif
+	return path.starts_with(r) && (path.len == r.len || path[r.len] == '/');
 }
 
 fn void setup_stdlib_path() => @pool()
