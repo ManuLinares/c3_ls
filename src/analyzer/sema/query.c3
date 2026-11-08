@@ -1908,6 +1908,59 @@ fn String generic_param_name(Node* param)
 	return name;
 }
 
+<*
+ Resolves unqualified type names in one file without walking the AST.
+ Call `enter` for each top-level statement, in order: visibility only
+ changes at module sections, so lookups are cached per section.
+*>
+struct TypeNameScope
+{
+	AnalyzerContext* context;
+	SourceFile* sf;
+	HashMap{String, Node*} visible; // name -> visible declaration, or null
+	GenericDecl* section_generics;
+	GenericDecl* decl_generics;
+}
+
+fn void TypeNameScope.init(&self, AnalyzerContext* context, SourceFile* sf)
+{
+	*self = { .context = context, .sf = sf };
+	self.visible.tinit();
+}
+
+fn void TypeNameScope.enter(&self, Node* stmt)
+{
+	if (stmt.kind == MODULE_DECL)
+	{
+		self.visible.clear();
+		self.section_generics = generics_of(stmt);
+	}
+	self.decl_generics = generics_of(stmt);
+}
+
+fn Node* find_generic_param(GenericDecl* gd, String name) @local
+{
+	if (!gd) return null;
+	foreach (param : gd.params)
+	{
+		if (param && param.kind != ERROR && generic_param_name(param) == name) return param;
+	}
+	return null;
+}
+
+<*
+ Declaration `name` refers to at its position: a generic parameter in
+ scope, else the visible type declaration, else null.
+*>
+fn Node* TypeNameScope.resolve(&self, Ident* name)
+{
+	if (Node* param = find_generic_param(self.decl_generics, name.text) ?: find_generic_param(self.section_generics, name.text)) return param;
+	if (try cached = self.visible.get(name.text)) return cached;
+	Node* decl = find_type_node_in_context(self.context, self.sf, name.text, name.range.start);
+	self.visible.set(name.text, decl);
+	return decl;
+}
+
 fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location loc)
 {
 	if (!sf) return null;

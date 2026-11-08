@@ -187,7 +187,6 @@ struct StructDecl
 	NodeArray fields;
 	Node* generics;
 	Node* type;
-	Node* next;
 	Ident* name;
 	bool is_union;
 	bool is_bitstruct;

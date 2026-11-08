@@ -15,7 +15,13 @@ struct SourceFile
 	Ast ast;
 	NodeID min_node_id;
 	NodeID max_node_id;
+	HashSet{String} identifiers; // Every identifier spelled in `content`.
 }
+
+<*
+ False when `name` is never spelled as an identifier in this file.
+*>
+fn bool SourceFile.mentions(&self, String name) @inline => self.identifiers.contains(name);
 
 fn bool SourceFile.contains_node(&self, Node* node) @inline
 {

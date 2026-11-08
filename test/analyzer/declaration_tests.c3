@@ -518,7 +518,6 @@ fn void struct_decl()
 		if (n && n.kind == STRUCT_DECL && n.as(StructDecl).name.text == "Foo") head = n.as(StructDecl);
 	}
 	test::ne(head, null);
-	test::ne(head.next, null);
 
 	// b, a, sub, anonymous struct, anonymous union, bits
 	test::eq(head.fields.len, 6);

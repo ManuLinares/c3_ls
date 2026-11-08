@@ -36,6 +36,10 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 	if (decl.kind == TYPE_EXPR && constants::is_primitive(name.text)) return NOT_FOUND~;
 	if (references::decl_symbol_name(decl) != name.text) return NOT_FOUND~;
 
+	// Stdlib symbols are only renamed while editing the stdlib itself.
+	SourceFile* decl_file = source_file::file_of(project.workspace.ctx, decl);
+	if (decl_file && server::is_stdlib_file(decl_file.path) && !server::is_stdlib_file(uri.path)) return NOT_FOUND~;
+
 	return {
 		.start = {
 			.line = (uint)name.range.start.line,

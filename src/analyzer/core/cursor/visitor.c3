@@ -38,6 +38,17 @@ fn bool visit(Node* child, Node* parent, VisitorHooks hooks, void* data)
 	return true;
 }
 
+fn bool visit_var_decl_parts(VarDecl* vardecl, bool with_type, Node* parent, VisitorHooks hooks, void* data) @local
+{
+	if (with_type && vardecl.type && !visit(vardecl.type, parent, hooks, data)) return false;
+	if (vardecl.init_expr && !visit(vardecl.init_expr, parent, hooks, data)) return false;
+	foreach (attr : vardecl.attributes)
+	{
+		if (!visit(attr, parent, hooks, data)) return false;
+	}
+	return true;
+}
+
 <*
  Visit children
  returns false if a break was requested
@@ -165,10 +176,6 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				{
 					if (!visit(attr, parent, hooks, data)) return false;
 				}
-				if (structdecl.next)
-				{
-					if (!visit(structdecl.next, parent, hooks, data)) return false;
-				}
 				if (structdecl.type)
 				{
 					if (!visit(structdecl.type, parent, hooks, data)) return false;
@@ -218,13 +225,17 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case VAR_DECL:
 			{
 				VarDecl* vardecl = node.as(VarDecl);
-				if (vardecl.type && !visit(vardecl.type, parent, hooks, data)) return false;
-				if (vardecl.init_expr && !visit(vardecl.init_expr, parent, hooks, data)) return false;
-				foreach (attr : vardecl.attributes)
+				// An implicit self parameter's type is the method's associated type node.
+				if (!visit_var_decl_parts(vardecl, !vardecl.var_flags.is_self, parent, hooks, data)) return false;
+				// `int a, b;` chains `b` through `next`; all share the head's type node.
+				for (Node* n = vardecl.next; n; n = n.as(VarDecl).next)
 				{
-					if (!visit(attr, parent, hooks, data)) return false;
+					VarDecl* chained = n.as(VarDecl);
+					ChildVisitResult res = hooks.on_enter(n, parent, data);
+					if (res == BREAK) return false;
+					if (res == RECURSE && !visit_var_decl_parts(chained, chained.type != vardecl.type, parent, hooks, data)) return false;
+					if (hooks.on_exit) hooks.on_exit(n, parent, data);
 				}
-				if (vardecl.next && !visit(vardecl.next, parent, hooks, data)) return false;
 				break;
 			}
 		case TYPEDEF_DECL:

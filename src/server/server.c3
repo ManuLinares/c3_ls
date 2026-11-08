@@ -791,6 +791,18 @@ fn void dispatch(LspMessage* message)
 	}
 }
 
+<*
+ True when `path` lies inside the stdlib directory.
+*>
+fn bool is_stdlib_file(String path)
+{
+	if (std_path.len == 0) return false;
+	Path? root = path::tnew(std_path);
+	if (catch root) return false;
+	String r = (String)root;
+	return path.starts_with(r) && (path.len == r.len || path[r.len] == '/' || path[r.len] == '\\');
+}
+
 fn void setup_stdlib_path() => @pool()
 {
 	char[4096] buf;

@@ -1,6 +1,6 @@
 module lsp::analysis_scaling_test;
 
-import lsp, std::io, std::time;
+import lsp, uri, std::io, std::time;
 
 <*
  Valid C3 with `n` declarations per kind: struct and function type
@@ -71,4 +71,83 @@ fn void analysis_time_grows_linearly() @test
 	// 4x the input: linear work gives a ratio near 4, quadratic near 16.
 	double ratio = (double)large / (double)small;
 	assert(ratio < 8.0, "4x input took %.1fx time (%s -> %s)", ratio, small, large);
+}
+
+<* Valid C3 declaring `Item` and using it as a type `n` times. *>
+fn String generate_item_uses(int n)
+{
+	DString out = dstring::temp();
+	out.append("module refs;\nstruct Item { int x; }\n");
+	for (int i = 0; i < n; i++)
+	{
+		out.appendf("fn Item f%d(Item a) { Item b = a; return b; }\n", i);
+	}
+	return out.str_view();
+}
+
+<* Best of 3 timings of find_references on `Item`; asserts every use is found. *>
+fn NanoDuration time_references(int n)
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String path = "/virtual/refs.c3";
+	proj.workspace.process_file(path, generate_item_uses(n));
+	Uri u = uri::from_file_path(tmem, path);
+
+	NanoDuration best = (NanoDuration)long::max;
+	for (int r = 0; r < 3; r++)
+	{
+		Clock start = clock::now();
+		LspLocation[] locs = references::find_references(&proj, u, { .line = 1, .character = 8 }, { .includeDeclaration = true })!!;
+		NanoDuration elapsed = start.mark();
+		assert(locs.len == (sz)3 * n + 1, "%d references for n=%d", locs.len, n);
+		if (elapsed < best) best = elapsed;
+	}
+	return best;
+}
+
+fn void references_time_grows_linearly() @test
+{
+	NanoDuration small = time_references(150);
+	NanoDuration large = time_references(600);
+	double ratio = (double)large / (double)small;
+	assert(ratio < 8.0, "4x uses took %.1fx time (%s -> %s)", ratio, small, large);
+}
+
+<* Best of 3 timings of find_references on `Item` with `others` files that never mention it. *>
+fn NanoDuration time_references_with_unrelated_files(int others)
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String path = "/virtual/refs.c3";
+	proj.workspace.process_file(path, generate_item_uses(150));
+	for (int i = 0; i < others; i++)
+	{
+		DString src = dstring::temp();
+		src.appendf("module other%d;\n", i);
+		for (int j = 0; j < 40; j++) src.appendf("struct Thing%d { int x; }\nfn Thing%d g%d(Thing%d t) { return t; }\n", j, j, j, j);
+		proj.workspace.process_file(string::tformat("/virtual/other%d.c3", i), src.str_view());
+	}
+	Uri u = uri::from_file_path(tmem, path);
+
+	NanoDuration best = (NanoDuration)long::max;
+	for (int r = 0; r < 3; r++)
+	{
+		Clock start = clock::now();
+		LspLocation[] locs = references::find_references(&proj, u, { .line = 1, .character = 8 }, { .includeDeclaration = true })!!;
+		NanoDuration elapsed = start.mark();
+		assert(locs.len == 451, "%d references", locs.len);
+		if (elapsed < best) best = elapsed;
+	}
+	return best;
+}
+
+fn void references_time_ignores_unrelated_files() @test
+{
+	NanoDuration small = time_references_with_unrelated_files(50);
+	NanoDuration large = time_references_with_unrelated_files(200);
+	double ratio = (double)large / (double)small;
+	assert(ratio < 2.5, "4x unrelated files took %.1fx time (%s -> %s)", ratio, small, large);
 }

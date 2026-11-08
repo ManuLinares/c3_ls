@@ -21,6 +21,7 @@ struct RefCollectorContext
 	String file_uri;
 	bool include_declaration;
 	List{LspLocation} * locations;
+	TypeNameScope types;
 }
 
 <*
@@ -92,6 +93,15 @@ fn Ident* ref_name(Node* node)
 	}
 }
 
+<*
+ Declaration `ref`, the name token of non-declaration `node`, refers to.
+*>
+fn Node* resolve_ref(RefCollectorContext* ctx, Node* node, Ident* ref) @local
+{
+	if (node.kind == TYPE_EXPR && !node.as(TypeExpr).unresolved.path) return ctx.types.resolve(ref);
+	return query::resolve_symbol_at(ctx.project.workspace.ctx, ctx.sf, ref.range.start);
+}
+
 fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
@@ -106,11 +116,7 @@ fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_dat
 	else if (!decl_name(c))
 	{
 		Ident* ref = ref_name(c);
-		if (ref && ref.text == ctx.symbol_name
-			&& query::resolve_symbol_at(ctx.project.workspace.ctx, ctx.sf, ref.range.start) == ctx.decl_node)
-		{
-			name = ref;
-		}
+		if (ref && ref.text == ctx.symbol_name && resolve_ref(ctx, c, ref) == ctx.decl_node) name = ref;
 	}
 	if (!name || name.text != ctx.symbol_name) return RECURSE;
 
@@ -128,15 +134,6 @@ fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_dat
 		}
 	};
 
-	foreach (existing : *ctx.locations)
-	{
-		if (existing.uri == loc.uri &&
-			existing.range.start.line == loc.range.start.line &&
-			existing.range.start.character == loc.range.start.character)
-		{
-			return RECURSE;
-		}
-	}
 	ctx.locations.push(loc);
 	return RECURSE;
 }
@@ -152,9 +149,11 @@ fn void collect_in_file(LspProject* project, SourceFile* sf, String file_uri, No
 		.include_declaration = include_declaration,
 		.locations = results
 	};
+	ref_ctx.types.init(project.workspace.ctx, sf);
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR) continue;
+		ref_ctx.types.enter(stmt);
 		cursor::visit(stmt, null, {.on_enter = &collect_references_callback }, &ref_ctx);
 	}
 }
@@ -195,7 +194,7 @@ fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos,
 
 	project.workspace.ctx.files.@each(; file_path, target_sf)
 	{
-		if (target_sf)
+		if (target_sf && target_sf.mentions(symbol_name))
 		{
 			String raw_target_uri = uri::from_file_path(tmem, file_path).to_raw_string(tmem);
 			collect_in_file(project, target_sf, raw_target_uri, decl_node, symbol_name, context.includeDeclaration, &results);

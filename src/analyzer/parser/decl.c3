@@ -1002,7 +1002,6 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 	List{Node*} fields;
 	fields.tinit();
 
-	Node* tail_node = node;
 
 	while (!ctx.is(RBRACE) && !ctx.eof())
 	{
@@ -1039,11 +1038,6 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 					sub_decl.as(StructDecl).contract.set(member_contract);
 				}
 				fields.push(sub_decl);
-				tail_node.as(StructDecl).next = sub_decl;
-				while (tail_node.as(StructDecl).next != null)
-				{
-					tail_node = tail_node.as(StructDecl).next;
-				}
 			}
 		}
 		else

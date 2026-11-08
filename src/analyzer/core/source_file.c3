@@ -18,6 +18,14 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.content = lexer.buffer.copy(&source_file.arena);
 	source_file.lexer = lexer;
 
+	source_file.identifiers.init(&source_file.arena);
+	foreach (tok : lexer.tokens)
+	{
+		if (tok.kind.ordinal < TokenKind.IDENT.ordinal || tok.kind.ordinal > TokenKind.CT_CONST_IDENT.ordinal || tok.kind == AT) continue;
+		sz offset = tok.value.ptr - lexer.buffer.ptr;
+		source_file.identifiers.add(source_file.content[offset : tok.value.len]);
+	}
+
 	context.files.set(path, source_file);
 
 	source_file.ast.allocator = &source_file.arena;
@@ -27,6 +35,19 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.min_node_id = ast::next_node_id;
 
 	return source_file;
+}
+
+<*
+ File whose AST owns `node`, or null.
+*>
+fn SourceFile* file_of(AnalyzerContext* context, Node* node)
+{
+	SourceFile* found = null;
+	context.files.@each(; path, sf)
+	{
+		if (!found && sf && sf.contains_node(node)) found = sf;
+	};
+	return found;
 }
 
 fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
