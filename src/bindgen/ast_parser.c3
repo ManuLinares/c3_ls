@@ -648,7 +648,10 @@ fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
 	return is_c3_type(name) || constants::is_primitive(name) || tu.has_type_name(name);
 }
 
-fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, List{CField}* fields)
+<*
+ @param c_object : "C expression of an object of the record, or empty if it cannot be named."
+*>
+fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, String c_object, List{CField}* fields)
 {
 	Object*? last_anon_rec = NOT_FOUND~;
 
@@ -660,7 +663,7 @@ fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, Lis
 			String sub_c_name = child.get_string("name") ?? "";
 			if (sub_c_name.len > 0)
 			{
-				self.parse_record_decl_with_name(child, sub_c_name);
+				self.parse_record_decl_with_name(child, sub_c_name, record_c_object(self.allocator, child, sub_c_name));
 			}
 			else
 			{
@@ -715,7 +718,7 @@ fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, Lis
 			String synth_name = string::format(self.allocator, "%s_%s", c_name, f_name);
 			if (try anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? last_anon_rec)
 			{
-				self.parse_record_decl_with_name(anon_rec, synth_name);
+				self.parse_record_decl_with_name(anon_rec, synth_name, member_c_object(self.allocator, c_object, raw_f_name, f_type_c));
 				f_type_c3 = sanitize_c3_type_name(self.allocator, synth_name, self.options.type_prefix);
 				if (try open_b = f_type_c.index_of_char('['))
 				{
@@ -812,6 +815,48 @@ fn bool compute_record_bitfields(List{CField}* fields) @local
 }
 
 <*
+ C expression of an object of the record named `c_name`, spelled with its tag when `c_name` is the
+ tag and as a typedef otherwise.
+*>
+fn String record_c_object(Allocator allocator, Object* node, String c_name) @local
+{
+	if ((node.get_string("name") ?? "") != c_name) return string::format(allocator, "(*(%s*)0)", c_name);
+	return string::format(allocator, "(*(%s %s*)0)", node.get_string("tagUsed") ?? "struct", c_name);
+}
+
+<*
+ C expression of the record held by member `field_name` of `parent_object`, an object of the parent
+ record, or the parent object itself for an anonymous member, whose fields belong to the parent.
+ @param field_type : "C type of the member: the record, a pointer to it, or an array of it."
+*>
+fn String member_c_object(Allocator allocator, String parent_object, String field_name, String field_type) @local
+{
+	if (parent_object.len == 0 || field_name.len == 0) return parent_object;
+	if (field_type.ends_with("*")) return string::format(allocator, "(*%s.%s)", parent_object, field_name);
+	DString out;
+	out.init(allocator);
+	out.appendf("%s.%s", parent_object, field_name);
+	out.append_repeat("[0]", field_type.count("["));
+	return out.str_view();
+}
+
+<*
+ Whether a FieldDecl of the RecordDecl carries an aligned attribute.
+*>
+fn bool has_aligned_field(Object* node) @local
+{
+	foreach (child : inner_nodes(node))
+	{
+		if ((child.get_string("kind") ?? "") != "FieldDecl") continue;
+		foreach (attr : inner_nodes(child))
+		{
+			if ((attr.get_string("kind") ?? "") == "AlignedAttr") return true;
+		}
+	}
+	return false;
+}
+
+<*
  Extracts packed and alignment attributes from a RecordDecl node.
 *>
 fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_alignment) @local
@@ -838,8 +883,9 @@ fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_ali
  Core RecordDecl parser with explicit name parameter to support typedef wrapping.
  Synthesizes named sub-records for anonymous union/struct fields.
  Emits all C structs as regular C3 structs, preventing invalid bitstructs.
+ @param c_object : "C expression of an object of the record, or empty if it cannot be named."
 *>
-fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_name)
+fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_name, String c_object)
 {
 	if (c_name.len == 0)
 	{
@@ -880,7 +926,7 @@ fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_n
 
 	if (is_complete)
 	{
-		is_complete = self.parse_record_fields(node, c_name, &fields);
+		is_complete = self.parse_record_fields(node, c_name, c_object, &fields);
 	}
 
 	bool is_all_bitfields = compute_record_bitfields(&fields);
@@ -903,7 +949,9 @@ fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_n
 		.is_opaque = !is_complete,
 		.is_bitfield = is_all_bitfields,
 		.is_packed = is_packed,
+		.has_aligned_field = has_aligned_field(node),
 		.alignment = alignment,
+		.c_object = c_object,
 		.fields = fields
 	};
 
@@ -1182,7 +1230,7 @@ fn String ParseContext.unnamed_record_tag(&self, Object* record, String c_name)
 	String tag = c_name.copy(self.allocator);
 	self.unnamed_record_names.set(id, tag);
 	self.tu.underscored_tags.add(tag);
-	self.parse_record_decl_with_name(record, tag);
+	self.parse_record_decl_with_name(record, tag, "");
 	return tag;
 }
 
@@ -1221,7 +1269,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 			if (is_anonymous_tag_name(tag_name) || (tag_name.starts_with("_") && !is_ptr))
 			{
 				if (tag_name.len > 0) self.seen_names.add(tag_name);
-				self.parse_record_decl_with_name(full_rec, c_name);
+				self.parse_record_decl_with_name(full_rec, c_name, record_c_object(self.allocator, full_rec, c_name));
 				return;
 			}
 		}
@@ -1400,7 +1448,7 @@ fn void parse_clang_ast_json(
 					}
 					else
 					{
-						ctx.parse_record_decl_with_name(node, c_name);
+						ctx.parse_record_decl_with_name(node, c_name, record_c_object(allocator, node, c_name));
 					}
 				}
 			case "EnumDecl":
@@ -1440,7 +1488,8 @@ fn void parse_clang_ast_json(
 		if (try rec_node = find_external_tag(ext_name, &ctx.external_records, &ctx.external_typedefs))
 		{
 			sz prev_count = ctx.used_external_types.count;
-			ctx.parse_record_decl_with_name(resolve_complete_decl(rec_node, &ctx.anon_records), ext_name);
+			Object* ext_record = resolve_complete_decl(rec_node, &ctx.anon_records);
+			ctx.parse_record_decl_with_name(ext_record, ext_name, record_c_object(allocator, ext_record, ext_name));
 			if (ctx.used_external_types.count > prev_count)
 			{
 				ctx.used_external_types.@each(; newly_added)

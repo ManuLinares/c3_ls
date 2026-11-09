@@ -641,7 +641,9 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 					ftype = string::format(tmem, "%s*", ftype[:ftype.len - 3]);
 				}
 
-				sb.appendf("\t%s %s;\n", ftype, fname);
+				sb.appendf("\t%s %s", ftype, fname);
+				if (f.alignment > 0) sb.appendf(" @align(%d)", f.alignment);
+				sb.append(";\n");
 				continue;
 			}
 

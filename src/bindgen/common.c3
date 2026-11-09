@@ -59,6 +59,7 @@ struct CField
 	String c3_type;
 	int bit_width;
 	int bit_offset;
+	uint alignment; // Emitted as the member's @align; 0 when the C3 default matches C.
 	String comment;
 }
 
@@ -73,7 +74,9 @@ struct CStruct
 	bool is_opaque;
 	bool is_bitfield;
 	bool is_packed;
+	bool has_aligned_field;
 	uint alignment;
+	String c_object; // C expression of an object of this record, naming its fields in clang probes; empty if unnameable.
 	List{CField} fields;
 	String comment;
 }

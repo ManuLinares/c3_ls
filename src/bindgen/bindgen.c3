@@ -358,20 +358,22 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		return 1;
 	}
 	MacroDefinition[] macros = collect_macro_definitions(tmem, &tu, macro_dump, options);
-	if (macros.len > 0)
+	String layout_probe = build_layout_probe(&tu);
+	if (macros.len > 0 || layout_probe.len > 0)
 	{
-		String? probe_json = run_clang_macro_probe(tmem, options, macros);
+		String? probe_json = run_clang_probe(tmem, options, { layout_probe, build_macro_probe(macros) });
 		if (catch err = probe_json)
 		{
-			report_error(is_cli, "Failed to evaluate macros with clang (%s).", err);
+			report_error(is_cli, "Failed to evaluate macros and field alignments with clang (%s).", err);
 			return 1;
 		}
 		Object*? probe_root = json::tparse(probe_json);
 		if (catch err = probe_root)
 		{
-			report_error(is_cli, "Failed to parse the macro probe's AST JSON (%s).", err);
+			report_error(is_cli, "Failed to parse the probe's AST JSON (%s).", err);
 			return 1;
 		}
+		parse_layout_probe(&tu, probe_root);
 		parse_macro_probe(tmem, &tu, macros, probe_root, options);
 	}
 

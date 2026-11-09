@@ -60,16 +60,16 @@ fn MacroDefinition[] collect_macro_definitions(Allocator allocator, CTranslation
 }
 
 <*
- C source that includes the header and declares one `__auto_type` variable per macro, so clang
- reports each macro's type and value. Macros that are not expressions produce invalid declarations.
- The declarations are repeated under another file name and line numbers, so values that depend on
- where the macro expands, such as `__FILE__`, `__LINE__` or `__COUNTER__`, differ between the passes.
+ Probe section declaring one `__auto_type` variable per macro, so clang reports each macro's type
+ and value. Macros that are not expressions produce invalid declarations. The declarations are
+ repeated under another file name and line numbers, so values that depend on where the macro
+ expands, such as `__FILE__`, `__LINE__` or `__COUNTER__`, differ between the passes. Must be the
+ last section, since it relocates the lines after it.
 *>
-fn String build_macro_probe(String header_path, MacroDefinition[] macros)
+fn String build_macro_probe(MacroDefinition[] macros)
 {
 	DString out;
 	out.tinit();
-	out.appendf("#include \"%s\"\n", header_path);
 	foreach (i, prefix : MACRO_PROBE_PASSES)
 	{
 		if (i > 0) out.appendf("#line 1 \"%s\"\n", MACRO_PROBE_RELOCATED_FILE);

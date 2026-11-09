@@ -190,14 +190,26 @@ fn String? run_clang_macro_dump(Allocator allocator, BindgenOptions options)
 }
 
 <*
- Runs clang on a probe source that includes the header and evaluates `macros`, returning the AST JSON.
+ C source that includes the header once, followed by each probe section.
+*>
+fn String build_probe(String header_path, String[] sections)
+{
+	DString out;
+	out.tinit();
+	out.appendf("#include \"%s\"\n", header_path);
+	foreach (section : sections) out.append(section);
+	return out.str_view();
+}
+
+<*
+ Runs clang on a probe source that includes the header followed by `sections`, returning the AST JSON.
  Invalid probes are expected, so the error limit is lifted.
 *>
-fn String? run_clang_macro_probe(Allocator allocator, BindgenOptions options, MacroDefinition[] macros)
+fn String? run_clang_probe(Allocator allocator, BindgenOptions options, String[] sections)
 {
 	Path probe = path::temp_directory(tmem)!.tappend(string::tformat("c3_bindgen_probe_%d.c", (int)datetime::now().sec))!;
 	String header = (String)options.header_path.to_absolute_path(tmem)!;
-	file::save(probe, build_macro_probe(header, macros))!;
+	file::save(probe, build_probe(header, sections))!;
 	defer (void)file::delete(probe);
 
 	options.header_path = (String)probe;

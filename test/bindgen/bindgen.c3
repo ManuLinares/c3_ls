@@ -3194,7 +3194,7 @@ fn void test_object_like_macros_are_collected_for_probing()
 	test::eq(macros[2].name, "MU_REAL");
 	test::eq(macros[3].name, "MU_TEXT");
 
-	String probe = bindgen::build_macro_probe("/inc/test.h", macros);
+	String probe = bindgen::build_probe("/inc/test.h", { bindgen::build_macro_probe(macros) });
 	assert(probe.starts_with("#include \"/inc/test.h\"\n"));
 	assert(probe.contains("static const __auto_type __c3_probe_a_MU_MAX_WIDTHS = (MU_MAX_WIDTHS);\n"));
 	assert(probe.contains("\n#line 1 \"c3_probe_b.c\"\n"));
@@ -3600,6 +3600,37 @@ fn void test_clang_output_with_large_stderr_does_not_block() @feat(POSIX)
 	assert(out.stdout_str.starts_with("{"));
 	assert(out.stdout_str.contains("good_2999"));
 	json::tparse(out.stdout_str)!!;
+}
+
+fn void test_field_alignment_matches_pragma_pack_and_aligned_fields()
+{
+	String source = `
+#pragma pack(push, 4)
+struct pack4 { char c; double d; short s; };
+#pragma pack(pop)
+#pragma pack(push, 8)
+typedef struct { void* p; int x; } noop8;
+#pragma pack(pop)
+#pragma pack(push, 2)
+struct pack2 { char c; struct { char a; int b; } in; };
+#pragma pack(pop)
+struct over { unsigned char data[64] __attribute__((aligned(8))); };
+`;
+	Path dir = path::temp_directory(tmem)!!;
+	String header = (String)dir.tappend("c3_ls_field_align.h")!!;
+	String output = (String)dir.tappend("c3_ls_field_align.c3")!!;
+	file::save(header, source)!!;
+	defer (void)file::delete(header);
+	defer (void)file::delete(output);
+
+	BindgenOptions opts = { .header_path = header, .output_path = output, .module_name = "field_align" };
+	test::eq(bindgen::run_bindgen(opts), 0);
+	String code = (String)file::load_temp(output)!!;
+
+	assert(code.contains("struct Pack4 @packed\n{\n\tchar c;\n\tdouble d @align(4);\n\tshort s @align(2);\n}"), "%s", code);
+	assert(code.contains("struct Noop8\n{\n\tvoid* p;\n\tint x;\n}"), "%s", code);
+	assert(code.contains("\tchar a;\n\tint b @align(2);\n}"), "%s", code);
+	assert(code.contains("struct Over\n{\n\tchar[64] data @align(8);\n}"), "%s", code);
 }
 
 fn void test_external_typedef_to_underscored_tag()
