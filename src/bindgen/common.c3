@@ -19,6 +19,7 @@ struct BindgenOptions
 	String strip_func_prefix;
 	String clang_path;
 	String target;
+	String vfs_overlay;
 	String[] include_dirs;
 	String[] defines;
 }

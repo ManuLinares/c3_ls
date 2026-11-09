@@ -186,8 +186,8 @@ fn String deduce_package_dir(BindgenOptions options)
 }
 
 <*
- Auto-discovers peer include directories under the target's parent directory
- (e.g. Windows SDK: um/ -> shared/, km/, ucrt/).
+ Auto-discovers peer include directories under the target's parent directory.
+ Windows Kits headers are configured by configure_windows_kit instead.
 *>
 fn void auto_discover_peer_includes(BindgenOptions* options)
 {
@@ -268,9 +268,29 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		return 1;
 	}
 
-	auto_discover_peer_includes(&options);
-
 	options.target_dir = deduce_package_dir(options);
+
+	if (try kit_root = find_windows_kit(options))
+	{
+		if (catch err = configure_windows_kit(&options, kit_root))
+		{
+			String hint = windows_sdk_hint(err);
+			if (hint.len > 0)
+			{
+				report_error(is_cli, "%s", hint);
+			}
+			else
+			{
+				report_error(is_cli, "Failed to set up the Windows Kits headers (%s).", err);
+			}
+			return 1;
+		}
+	}
+	else
+	{
+		auto_discover_peer_includes(&options);
+	}
+	defer if (options.vfs_overlay.len > 0) (void)file::delete(options.vfs_overlay);
 
 	String temp_wrapper_path = "";
 	if (file::is_dir(options.header_path))
@@ -334,7 +354,15 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 	String? json_ast = run_clang_ast_dump(tmem, &options);
 	if (catch err = json_ast)
 	{
-		report_error(is_cli, "Failed to run clang AST dump (%s). Ensure 'clang' is installed and in PATH.", err);
+		String hint = windows_sdk_hint(err);
+		if (hint.len > 0)
+		{
+			report_error(is_cli, "%s", hint);
+		}
+		else
+		{
+			report_error(is_cli, "Failed to run clang AST dump (%s). Ensure 'clang' is installed and in PATH.", err);
+		}
 		return 1;
 	}
 

@@ -41,6 +41,12 @@ fn ClangOutput? run_clang_raw(Allocator allocator, BindgenOptions options, Strin
 		cmd.push(options.target);
 	}
 
+	if (options.vfs_overlay.len > 0)
+	{
+		cmd.push("-ivfsoverlay");
+		cmd.push(options.vfs_overlay);
+	}
+
 	foreach (inc : options.include_dirs)
 	{
 		if (inc.len > 0)
@@ -144,6 +150,11 @@ fn String? run_clang_ast_dump(Allocator allocator, BindgenOptions* options)
 		String stderr_str = out.stderr_str;
 
 		String missing = extract_missing_header_from_stderr(stderr_str);
+		if (options.target.len == 0 && missing.to_lower_tcopy() == "windows.h")
+		{
+			configure_windows_kit(options, find_msvc_sdk_windows_kit()!)!;
+			continue;
+		}
 		if (missing.len > 0)
 		{
 			sz prev_count = options.include_dirs.len;

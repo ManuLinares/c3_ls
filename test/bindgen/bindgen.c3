@@ -3602,8 +3602,149 @@ fn void test_clang_output_with_large_stderr_does_not_block() @feat(POSIX)
 	json::tparse(out.stdout_str)!!;
 }
 
+<*
+ Whether clang can be started, which the tests that run the full bindgen need.
+*>
+macro bool clang_available() @local
+{
+	Process? proc = process::spawn({ "clang", "--version" });
+	if (catch proc) return false;
+	defer (void)proc.destroy();
+	return (proc.join() ?? 1) == 0;
+}
+
+macro void save_test_file(Path dir, String name, String content) @local
+{
+	path::mkdir(dir, recursive: true)!!;
+	file::save(dir.tappend(name)!!, content)!!;
+}
+
+<*
+ A minimal Windows Kits layout: `um_name` in um/, shared/WinApiFamily.h, and ucrt/corecrt.h, which
+ includes the MSVC CRT's vcruntime.h.
+*>
+macro void save_fake_kit(Path kit, String um_name, String um_header) @local
+{
+	save_test_file(kit.tappend("um")!!, um_name, um_header);
+	save_test_file(kit.tappend("shared")!!, "WinApiFamily.h", "#define KIT_FAMILY 1\n");
+	save_test_file(kit.tappend("ucrt")!!, "corecrt.h", "#include <vcruntime.h>\n");
+}
+
+<*
+ Runs the body with C3_MSVC_SDK pointing at an SDK whose include/crt holds vcruntime.h.
+*>
+macro void @with_fake_msvc_sdk(Path sdk; @body) @local
+{
+	save_test_file(sdk.tappend("include", "crt")!!, "vcruntime.h", "typedef unsigned long long kit_size_t;\n");
+	String? old_sdk = env::tget_var("C3_MSVC_SDK");
+	env::set_var("C3_MSVC_SDK", (String)sdk);
+	defer
+	{
+		if (try old_sdk) env::set_var("C3_MSVC_SDK", old_sdk);
+		if (catch old_sdk) env::clear_var("C3_MSVC_SDK");
+	}
+	@body();
+}
+
+<*
+ Bindings generated for `header`, with `include_dirs`, by the full bindgen.
+*>
+macro String generate_bindings(Path root, Path header, String[] include_dirs = {}) @local
+{
+	String output = (String)root.tappend("bindings.c3")!!;
+	BindgenOptions opts = { .header_path = (String)header, .output_path = output, .module_name = "bindings", .include_dirs = include_dirs };
+	test::eq(bindgen::run_bindgen(opts), 0);
+	return (String)file::load_temp(output)!!;
+}
+
+const String MSVC_ONLY_RECORD = `
+typedef struct {
+	long l;
+#ifdef _MSC_VER
+	int msvc_only;
+#endif
+} UserRecord;
+`;
+const String MSVC_ONLY_RECORD_C3 = "struct UserRecord\n{\n\tCLong l;\n\tint msvc_only;\n}";
+
+fn void test_windows_kit_header_uses_msvc_target_and_kit_includes()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_kit")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path kit = root.tappend("Include", "10.0.1.0")!!;
+	save_test_file(kit.tappend("um")!!, "KitPeer.h", "typedef struct { int a; } KitPeer;\n");
+	save_fake_kit(kit, "Kit.h", `
+#include <KitPeer.h>
+#include <winapifamily.h>
+#include <corecrt.h>
+typedef struct {
+	long l;
+	kit_size_t n;
+#ifdef _MSC_VER
+	int msvc_only;
+#endif
+} KitRecord;
+`);
+
+	@with_fake_msvc_sdk(root.tappend("msvc_sdk")!!)
+	{
+		String code = generate_bindings(root, kit.tappend("um", "Kit.h")!!);
+		assert(code.contains("struct KitRecord\n{\n\tCLong l;\n\tulong n;\n\tint msvc_only;\n}"), "%s", code);
+		assert(code.contains("struct KitPeer\n{\n\tint a;\n}"), "%s", code);
+	};
+}
+
+fn void test_windows_kit_found_through_include_dir()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_kit_include_dir")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path kit = root.tappend("Include", "10.0.1.0")!!;
+	save_fake_kit(kit, "Kit.h", "#include <corecrt.h>\n");
+	save_test_file(root.tappend("user")!!, "user.h", "#include <kit.h>\n" +++ MSVC_ONLY_RECORD);
+
+	@with_fake_msvc_sdk(root.tappend("msvc_sdk")!!)
+	{
+		String code = generate_bindings(root, root.tappend("user", "user.h")!!, { (String)kit.tappend("um")!! });
+		assert(code.contains(MSVC_ONLY_RECORD_C3), "%s", code);
+	};
+}
+
+fn void test_missing_windows_h_falls_back_to_c3c_msvc_sdk()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_h_fallback")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path sdk = root.tappend("msvc_sdk")!!;
+	save_fake_kit(sdk.tappend("include", "x64")!!, "Windows.h", "#include <corecrt.h>\n");
+	save_test_file(root.tappend("user")!!, "user.h", "#include <windows.h>\n" +++ MSVC_ONLY_RECORD);
+
+	@with_fake_msvc_sdk(sdk)
+	{
+		String code = generate_bindings(root, root.tappend("user", "user.h")!!);
+		assert(code.contains(MSVC_ONLY_RECORD_C3), "%s", code);
+	};
+}
+
+fn void test_msvc_crt_dir_requires_vcruntime_header()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_msvc_sdk_without_crt")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	path::mkdir(root.tappend("include/crt")!!, recursive: true)!!;
+
+	assert(@catch(bindgen::find_msvc_crt_dir({ (String)root })) == bindgen::MSVC_CRT_NOT_FOUND);
+	file::save(root.tappend("include/crt/vcruntime.h")!!, "")!!;
+	test::eq(bindgen::find_msvc_crt_dir({ (String)root })!!, (String)root.tappend("include/crt")!!);
+}
+
 fn void test_field_alignment_matches_pragma_pack_and_aligned_fields()
 {
+	if (!clang_available()) return;
 	String source = `
 #pragma pack(push, 4)
 struct pack4 { char c; double d; short s; };
