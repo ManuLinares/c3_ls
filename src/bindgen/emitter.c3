@@ -45,7 +45,7 @@ fn void emit_typedefs(DString* sb, CTranslationUnit* tu) @local
 	sb.append("// Type Aliases & Callbacks\n");
 	foreach (td : tu.typedefs)
 	{
-		sb.appendf("alias %s = %s;\n", td.c3_name, td.underlying_c3);
+		sb.appendf(td.is_simd ? "typedef %s = %s @simd;\n" : "alias %s = %s;\n", td.c3_name, td.underlying_c3);
 	}
 	sb.append_char('\n');
 }

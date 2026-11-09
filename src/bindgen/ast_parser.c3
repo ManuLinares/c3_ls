@@ -341,34 +341,6 @@ fn String ParseContext.format_function_proto_from_ast(&self, Object* fpt)
 }
 
 <*
- Formats a C3 vector type directly from a Clang VectorType AST node.
-*>
-fn String ParseContext.format_vector_type_from_ast(&self, Object* vt)
-{
-	sz count = (sz)(vt.get_int("numElements") ?? (long)DEFAULT_VECTOR_COUNT);
-
-	String elem_qual = "";
-	if (try elem = first_inner(vt))
-	{
-		elem_qual = extract_type_info(elem).qual_type;
-	}
-
-	if (elem_qual.len == 0)
-	{
-		RawTypeInfo vt_info = extract_type_info(vt);
-		elem_qual = vt_info.qual_type;
-	}
-
-	String elem_c3 = self.map_type(elem_qual, "");
-	if (elem_c3.len == 0)
-	{
-		elem_c3 = "float";
-	}
-
-	return string::format(self.allocator, "%s[<%d>]", elem_c3, (int)count);
-}
-
-<*
  Registers an alias named `<Owner><Member>Fn` for an inline function pointer type and returns that name.
 *>
 fn String ParseContext.push_callback_alias(&self, String owner_name, String member_name, String c_type)
@@ -421,18 +393,18 @@ fn String ParseContext.parse_function_pointer_type(&self, String qual_type)
 }
 
 <*
- Maps a C type to C3, ignoring the desugared type when `c_type` names a typedef declared in the
- target header so the emitted alias is kept. Bitfields always map to the underlying type, which sizes their storage.
+ Maps a C type to C3, ignoring the desugared type when `c_type` names a typedef declared in the target header
+ or a SIMD vector, so the emitted alias is kept. Bitfields always map to the underlying type, which sizes their storage.
  External types are tracked only when the result refers to them by name. A function typedef already
  maps to a C3 function pointer, so one pointer level is dropped.
 *>
 fn String ParseContext.map_type(&self, String c_type, String desugared_type, bool is_param = false, bool is_field = false, bool is_bitfield = false, bool* out_is_noalias = null)
 {
 	String base = extract_base_type_name(c_type);
-	if (!is_bitfield && self.target_types.contains(base)) desugared_type = "";
+	if (!is_bitfield && (self.target_types.contains(base) || @ok(simd_vector_shape(desugared_type)))) desugared_type = "";
 	if (desugared_type.len == 0 || !is_fundamental_c_type(extract_base_type_name(desugared_type))) self.track_external_type_usage(c_type);
 	if (self.function_types.contains(base)) c_type = c_type[:c_type.rindex_of_char('*') ?? c_type.len];
-	return map_c_type_to_c3(self.allocator, c_type, self.options.type_prefix, &self.tu.underscored_tags, is_param, desugared_type, out_is_noalias, is_field);
+	return map_c_type_to_c3(self.allocator, c_type, self.options.type_prefix, self.tu, is_param, desugared_type, out_is_noalias, is_field);
 }
 
 <*
@@ -446,7 +418,7 @@ fn void ParseContext.track_external_type_usage(&self, String qual_type)
 		return;
 	}
 
-	String c3_mapped = map_c_type_to_c3(tmem, base, "", &self.tu.underscored_tags);
+	String c3_mapped = map_c_type_to_c3(tmem, base, "", self.tu);
 	if (is_c3_type(c3_mapped) || is_c3_type(base))
 	{
 		return;
@@ -1217,7 +1189,7 @@ fn String ParseContext.unnamed_record_tag(&self, Object* record, String c_name)
 <*
  Parses a TypedefDecl into either an alias (function pointers) or struct/type alias.
  Resolves anonymous RecordDecl / EnumDecl references by ID.
- Dispatches structured types (FunctionProtoType, VectorType) directly from Clang's AST.
+ Formats function prototypes directly from Clang's FunctionProtoType node.
 *>
 fn void ParseContext.parse_typedef_decl(&self, Object* node)
 {
@@ -1284,10 +1256,6 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 	{
 		c3_underlying = self.format_function_proto_from_ast(fpt);
 		is_func_ptr = true;
-	}
-	else if (try vt = find_descendant_by_kind(node, "VectorType"))
-	{
-		c3_underlying = self.format_vector_type_from_ast(vt);
 	}
 	else
 	{
@@ -1489,7 +1457,7 @@ fn void parse_clang_ast_json(
 		else if (try desugared_c = ctx.external_typedefs.get(ext_name))
 		{
 			String c3_name = sanitize_c3_type_name(allocator, ext_name, options.type_prefix);
-			String c3_underlying = map_c_type_to_c3(allocator, desugared_c, options.type_prefix, &tu.underscored_tags);
+			String c3_underlying = map_c_type_to_c3(allocator, desugared_c, options.type_prefix, tu);
 
 			if (ctx.seen_names.add(ext_name))
 			{

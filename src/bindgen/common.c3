@@ -114,6 +114,7 @@ struct CTypedef
 	String underlying_c;
 	String underlying_c3;
 	bool is_func_ptr;
+	bool is_simd;
 	String comment;
 }
 
@@ -193,6 +194,24 @@ fn void CTranslationUnit.add_type_names(&self, HashSet{String}* names, bool stru
 	{
 		foreach (&td : self.typedefs) names.add(td.c3_name);
 	}
+}
+
+<*
+ Name of the shared SIMD typedef for `count` elements of `element_c3`, registering it on first use.
+*>
+fn String CTranslationUnit.simd_type(&self, Allocator allocator, String element_c3, sz count, String type_prefix)
+{
+	String name = sanitize_c3_type_name(allocator, string::tformat("Simd%sx%d", capitalize_ascii(tmem, element_c3), count), type_prefix);
+	if (!self.has_type_name(name))
+	{
+		self.typedefs.push({
+			.c_name = name,
+			.c3_name = name,
+			.underlying_c3 = string::format(allocator, "%s[<%d>]", element_c3, count),
+			.is_simd = true
+		});
+	}
+	return name;
 }
 
 fn bool CTranslationUnit.has_type_name(&self, String c3_name)
@@ -910,7 +929,7 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 *>
 fn String extract_base_type_name(String qual_type)
 {
-	String s = qual_type.trim();
+	String s = strip_clang_attributes(qual_type.trim());
 	while (true)
 	{
 		s = s.trim();
@@ -952,7 +971,6 @@ fn String extract_base_type_name(String qual_type)
 	return clean_words.get(clean_words.len() - 1);
 }
 
-const sz DEFAULT_VECTOR_COUNT = 4;
 
 <*
  Longest trailing run of `words` naming a standard C type, e.g. "unsigned int" in "const unsigned int".
@@ -973,7 +991,7 @@ fn String? standard_type_suffix(String[] words) @local
 *>
 fn bool is_c_function_pointer(String c_type)
 {
-	String s = c_type.trim();
+	String s = strip_clang_attributes(c_type.trim());
 	foreach (String marker : { "(*)", "(^)" })
 	{
 		if (try idx = s.index_of(marker))
@@ -999,7 +1017,7 @@ fn String map_c_type_to_c3(
 	Allocator allocator,
 	String c_type,
 	String type_prefix,
-	HashSet{String}* underscored_tags,
+	CTranslationUnit* tu,
 	bool is_param = false,
 	String desugared_type = "",
 	bool* out_is_noalias = null,
@@ -1065,6 +1083,13 @@ fn String map_c_type_to_c3(
 	int elem_pointer_depth = strip_pointer_depth(&s);
 	if (elem_pointer_depth > 0 && s.ends_with("__va_list_tag")) elem_pointer_depth--;
 
+	if (try shape = simd_vector_shape(s))
+	{
+		String element_c3 = map_c_type_to_c3(allocator, shape.element, type_prefix, tu);
+		String vector = tu.simd_type(allocator, element_c3, shape.count, type_prefix);
+		return with_type_suffix(allocator, vector, elem_pointer_depth, trailing_dims, arr_dims, is_ptr_to_array);
+	}
+
 	// 4. Extract C99 complex qualifier (as standalone token)
 	bool is_complex = false;
 	String[] raw_words = s.tsplit(" ");
@@ -1113,7 +1138,7 @@ fn String map_c_type_to_c3(
 		{
 			if ((w == "struct" || w == "union" || w == "enum") && i + 1 < clean_words.len())
 			{
-				base_c3 = tag_c3_name(allocator, clean_words[i + 1], type_prefix, underscored_tags);
+				base_c3 = tag_c3_name(allocator, clean_words[i + 1], type_prefix, &tu.underscored_tags);
 				break;
 			}
 		}
@@ -1171,27 +1196,54 @@ fn String map_c_type_to_c3(
 		}
 	}
 
+	return with_type_suffix(allocator, base_c3, elem_pointer_depth, trailing_dims, arr_dims, is_ptr_to_array);
+}
+
+<*
+ `base` followed by its pointer levels, array dimensions and pointer-to-array marker.
+*>
+fn String with_type_suffix(Allocator allocator, String base, int pointer_depth, String trailing_dims, String arr_dims, bool is_ptr_to_array) @local
+{
 	DString res;
 	res.init(allocator);
-	res.append(base_c3);
-	for (int p = 0; p < elem_pointer_depth; p++)
-	{
-		res.append_char('*');
-	}
-	if (trailing_dims.len > 0)
-	{
-		res.append(trailing_dims);
-	}
-	if (arr_dims.len > 0)
-	{
-		res.append(arr_dims);
-	}
-	if (is_ptr_to_array)
-	{
-		res.append_char('*');
-	}
+	res.append(base);
+	for (int p = 0; p < pointer_depth; p++) res.append_char('*');
+	res.append(trailing_dims);
+	res.append(arr_dims);
+	if (is_ptr_to_array) res.append_char('*');
+	return res.str_view();
+}
 
-	return res.str_view().copy(allocator);
+struct SimdShape
+{
+	String element;
+	sz count;
+}
+
+<*
+ Element type and length of a C SIMD vector type as clang spells it: `__attribute__((__vector_size__(N * sizeof(T)))) T`,
+ `T __attribute__((ext_vector_type(N)))` or `__attribute__((neon_vector_type(N))) T`. Clang lays out N elements as the next
+ power of two, as OpenCL's `cl_float3` does with `cl_float4`, so the length is rounded up to match C3's @simd vectors.
+*>
+fn SimdShape? simd_vector_shape(String s) @private
+{
+	long count;
+	if (try at = s.index_of("__vector_size__("))
+	{
+		ParenSpan span = find_paren_span(s, at)!;
+		String size = s[span.open + 1 : span.close - span.open - 1];
+		count = size[:size.index_of_char('*')!].trim().to_long()!;
+	}
+	else
+	{
+		sz at = s.index_of("ext_vector_type(") ?? s.index_of("neon_vector_type(")!;
+		ParenSpan span = find_paren_span(s, at)!;
+		count = s[span.open + 1 : span.close - span.open - 1].trim().to_long()!;
+	}
+	if (count < 1) return NOT_FOUND~;
+	sz length = 1;
+	while (length < count) length <<= 1;
+	return { strip_clang_attributes(s).trim(), length };
 }
 
 <*

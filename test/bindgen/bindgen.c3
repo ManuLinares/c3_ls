@@ -43,25 +43,25 @@ fn void test_type_sanitization_and_prefix()
 
 fn void test_c_type_mapping()
 {
-	HashSet{String} tags;
-	tags.tinit();
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tags, true), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tags, false), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *", "", &tags, false), "char*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "long", "", &tags, false), "CLong");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "unsigned long", "", &tags, false), "CULong");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "int *", "", &tags, false), "int*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "void **", "", &tags, false), "void**");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "void *[2]", "", &tags, false), "void*[2]");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "int *[10]", "", &tags, false), "int*[10]");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char **", "", &tags, true), "ZString*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *const *", "", &tags, true), "ZString*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const *", "", &tags, true), "char**");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const", "", &tags, true), "char*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "struct __va_list_tag *", "", &tags, true), "CVaList");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "va_list", "", &tags, true), "CVaList");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "png_const_charp", "", &tags, true, "const char *"), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "png_charp", "", &tags, true, "char *"), "char*");
+	CTranslationUnit tu;
+	tu.init(tmem);
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tu, true), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tu, false), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *", "", &tu, false), "char*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "long", "", &tu, false), "CLong");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "unsigned long", "", &tu, false), "CULong");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "int *", "", &tu, false), "int*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "void **", "", &tu, false), "void**");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "void *[2]", "", &tu, false), "void*[2]");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "int *[10]", "", &tu, false), "int*[10]");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char **", "", &tu, true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *const *", "", &tu, true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const *", "", &tu, true), "char**");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const", "", &tu, true), "char*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "struct __va_list_tag *", "", &tu, true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "va_list", "", &tu, true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_const_charp", "", &tu, true, "const char *"), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_charp", "", &tu, true, "char *"), "char*");
 }
 
 fn void test_clang_ast_json_mock_emission()
@@ -668,9 +668,9 @@ fn void test_module_name_length_limit_and_zero_length_array()
 	assert(sanitized_mod.len <= 31);
 	test::eq(sanitized_mod, "libvirt_gconfig_domain_graphics");
 
-	HashSet{String} tags;
-	tags.tinit();
-	String code_zero_arr = bindgen::map_c_type_to_c3(tmem, "char[0]", "", &tags, is_field: true);
+	CTranslationUnit tu;
+	tu.init(tmem);
+	String code_zero_arr = bindgen::map_c_type_to_c3(tmem, "char[0]", "", &tu, is_field: true);
 	test::eq(code_zero_arr, "char[*]");
 }
 
@@ -874,13 +874,13 @@ fn void test_vector_attribute_ast_and_fallback_parsing()
 				"name": "v4sf",
 				"loc": { "file": "test_vec.h" },
 				"type": {
-					"qualType": "float __attribute__((__vector_size__(16)))"
+					"qualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float"
 				},
 				"inner": [
 					{
 						"kind": "VectorType",
 						"numElements": 4,
-						"type": { "qualType": "float __attribute__((__vector_size__(16)))" },
+						"type": { "qualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float" },
 						"inner": [
 							{ "kind": "BuiltinType", "type": { "qualType": "float" } }
 						]
@@ -905,7 +905,8 @@ fn void test_vector_attribute_ast_and_fallback_parsing()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("alias V4sf = float[<4>];"));
+	assert(code.contains("alias V4sf = SimdFloatx4;"));
+	assert(code.contains("typedef SimdFloatx4 = float[<4>] @simd;"));
 	assert(!code.contains(")))"));
 }
 
@@ -3623,6 +3624,86 @@ fn void test_pointer_typedef_to_unnamed_struct_names_the_struct()
 	assert(code.contains("alias OtherPtr = _PrivPtr*;\n"));
 	assert(code.contains("extern fn int priv_fd(PrivPtr p)"));
 	assert(!code.contains("Void"));
+}
+
+fn void test_simd_vector_types_map_to_simd_typedefs()
+{
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((__vector_size__(4 * sizeof(float)))) float", "", &tu), "SimdFloatx4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "float __attribute__((ext_vector_type(4)))", "", &tu), "SimdFloatx4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((neon_vector_type(4))) float", "", &tu), "SimdFloatx4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((__vector_size__(4 * sizeof(int)))) int *", "", &tu, true), "SimdIntx4*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((__vector_size__(2 * sizeof(__int128)))) __int128", "", &tu), "SimdInt128x2");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((__vector_size__(2 * sizeof(unsigned __int128)))) unsigned __int128", "", &tu), "SimdUint128x2");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "float __attribute__((ext_vector_type(3)))", "", &tu), "SimdFloatx4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "__attribute__((__vector_size__(3 * sizeof(float)))) float", "", &tu), "SimdFloatx4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "double __attribute__((ext_vector_type(3)))", "", &tu), "SimdDoublex4");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char __attribute__((ext_vector_type(5)))", "", &tu), "SimdCharx8");
+	assert(!bindgen::is_c_function_pointer("float __attribute__((ext_vector_type(4)))"));
+	test::eq(bindgen::extract_base_type_name("float __attribute__((ext_vector_type(4)))"), "float");
+
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "TypedefDecl", "name": "__m128", "loc": { "file": "/usr/include/xmmintrin.h" },
+				"type": { "qualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float" },
+				"inner": [ { "kind": "VectorType", "type": { "qualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float" }, "numElements": 4,
+					"inner": [ { "kind": "BuiltinType", "type": { "qualType": "float" } } ] } ] },
+			{ "kind": "TypedefDecl", "name": "float4", "loc": { "file": "test.h" },
+				"type": { "qualType": "float __attribute__((ext_vector_type(4)))" },
+				"inner": [ { "kind": "ExtVectorType", "type": { "qualType": "float __attribute__((ext_vector_type(4)))" }, "numElements": 4,
+					"inner": [ { "kind": "BuiltinType", "type": { "qualType": "float" } } ] } ] },
+			{ "kind": "TypedefDecl", "name": "i128x2", "loc": { "file": "test.h" },
+				"type": { "qualType": "__attribute__((__vector_size__(2 * sizeof(__int128)))) __int128" },
+				"inner": [ { "kind": "VectorType", "type": { "qualType": "__attribute__((__vector_size__(2 * sizeof(__int128)))) __int128" }, "numElements": 2,
+					"inner": [ { "kind": "BuiltinType", "type": { "qualType": "__int128" } } ] } ] },
+			{
+				"kind": "RecordDecl", "name": "Particle", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "tag", "type": { "qualType": "char" } },
+					{ "kind": "FieldDecl", "name": "pos", "type": { "desugaredQualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float", "qualType": "__m128" } },
+					{ "kind": "FieldDecl", "name": "vel", "type": { "desugaredQualType": "float __attribute__((ext_vector_type(4)))", "qualType": "float4" } },
+					{ "kind": "FieldDecl", "name": "raw", "type": { "qualType": "__attribute__((__vector_size__(2 * sizeof(float)))) float" } }
+				]
+			},
+			{
+				"kind": "FunctionDecl", "name": "scale", "loc": { "file": "test.h" }, "type": { "qualType": "__m128 (__m128, float)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "v", "type": { "desugaredQualType": "__attribute__((__vector_size__(4 * sizeof(float)))) float", "qualType": "__m128" } },
+					{ "kind": "ParmVarDecl", "name": "k", "type": { "qualType": "float" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit parsed;
+	parsed.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &parsed, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &parsed, opts);
+
+	assert(code.contains("typedef SimdFloatx4 = float[<4>] @simd;\n"));
+	assert(code.contains("typedef SimdFloatx2 = float[<2>] @simd;\n"));
+	assert(code.contains("typedef SimdInt128x2 = int128[<2>] @simd;\n"));
+	assert(code.contains("alias M128_t = SimdFloatx4;\n"));
+	assert(code.contains("alias Float4 = SimdFloatx4;\n"));
+	assert(code.contains("alias I128x2 = SimdInt128x2;\n"));
+	assert(code.contains("\tM128_t pos;\n\tFloat4 vel;\n\tSimdFloatx2 raw;\n"));
+	assert(code.contains("extern fn M128_t scale(M128_t v, float k)"));
+	assert(!code.contains("SimdVoid"));
+	test::eq(code.index_of("typedef SimdFloatx4") ?? 0, code.rindex_of("typedef SimdFloatx4") ?? 1);
 }
 
 module lsp::bindgen_test::posix_signal;
