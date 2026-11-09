@@ -421,6 +421,60 @@ fn void test_c3_types_not_emitted_as_aliases()
 	assert(code.contains("extern fn void process_data(ulong id, CULong flags, usz len, OffT offset) @cname(\"process_data\");"));
 }
 
+fn void test_target_typedef_named_like_c3_builtin_is_dropped()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "TypedefDecl",
+				"name": "u_short",
+				"loc": { "file": "winsock.h" },
+				"type": { "qualType": "unsigned short" }
+			},
+			{
+				"kind": "RecordDecl",
+				"name": "sockaddr_in",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "winsock.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "sin_port", "type": { "qualType": "u_short" } }
+				]
+			},
+			{
+				"kind": "RecordDecl",
+				"name": "addrs",
+				"tagUsed": "struct",
+				"completeDefinition": true,
+				"loc": { "file": "winsock.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "list", "type": { "qualType": "struct sockaddr_in[4]" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "winsock.h",
+		.module_name = "winsock",
+		.type_prefix = ""
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+	foreach (td : tu.typedefs) assert(td.c3_name != "ushort", "typedef %s kept as ushort", td.c_name);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("ushort sin_port;"), "%s", code);
+}
+
 fn void test_function_prefix_stripping_with_versioned_module()
 {
 	String mock_json = `
@@ -3161,6 +3215,13 @@ fn void test_macro_probe_emits_typed_constants()
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "493" } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_MASK", "type": { "qualType": "const unsigned int" },
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "255" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_WIDE", "type": { "qualType": "const unsigned long long" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned long long" }, "value": "129067776000000000" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_RESERVED", "type": { "qualType": "const unsigned int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "unsigned int" }, "opcode": "&", "inner": [
+					{ "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "4278190080" },
+					{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned int" }, "castKind": "IntegralCast", "inner": [
+						{ "kind": "UnaryOperator", "type": { "qualType": "int" }, "opcode": "~", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16777216" } ] } ] } ] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_PI", "type": { "qualType": "const float" },
 				"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_DEG2RAD", "type": { "qualType": "const float" },
@@ -3208,6 +3269,13 @@ fn void test_macro_probe_emits_typed_constants()
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "493" } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_b_MASK", "type": { "qualType": "const unsigned int" },
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "255" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_WIDE", "type": { "qualType": "const unsigned long long" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned long long" }, "value": "129067776000000000" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_RESERVED", "type": { "qualType": "const unsigned int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "unsigned int" }, "opcode": "&", "inner": [
+					{ "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "4278190080" },
+					{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned int" }, "castKind": "IntegralCast", "inner": [
+						{ "kind": "UnaryOperator", "type": { "qualType": "int" }, "opcode": "~", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16777216" } ] } ] } ] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_b_PI", "type": { "qualType": "const float" },
 				"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_b_DEG2RAD", "type": { "qualType": "const float" },
@@ -3259,6 +3327,8 @@ fn void test_macro_probe_emits_typed_constants()
 		{ "FLAG_A", "0x4000" },
 		{ "PERMS", "0755" },
 		{ "MASK", "0xFFu" },
+		{ "WIDE", "0x01CA8A755C6E0000ui64" },
+		{ "RESERVED", "(0xFF000000 & (~0x01000000))" },
 		{ "PI", "3.14159265358979323846f" },
 		{ "DEG2RAD", "(PI/180.0f)" },
 		{ "BIG", "(1ULL << 40)" },
@@ -3292,6 +3362,8 @@ fn void test_macro_probe_emits_typed_constants()
 	assert(code.contains("const int FLAG_A = 0x4000;\n"));
 	assert(code.contains("const int PERMS = 0o755;\n"));
 	assert(code.contains("const uint MASK = 0xFF;\n"));
+	assert(code.contains("const ulong WIDE = 0x01CA8A755C6E0000;\n"), "%s", code);
+	assert(code.contains("const uint RESERVED = ((uint)4278190080 & (uint)(~16777216));\n"), "%s", code);
 	assert(code.contains("const float PI = 3.14159265358979323846;\n"));
 	assert(code.contains("const float DEG2RAD = (3.14159274f / 180.0f);\n"));
 	assert(code.contains("const ulong BIG = ((ulong)1 << 40);\n"));

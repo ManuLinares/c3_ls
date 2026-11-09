@@ -1238,6 +1238,8 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 		}
 	}
 
+	if (is_fundamental_c_type(c_name)) return;
+
 	if (!self.seen_names.add(c_name) && !self.tu.underscored_tags.contains(c_name))
 	{
 		return;

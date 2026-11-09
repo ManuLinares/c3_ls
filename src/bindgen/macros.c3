@@ -197,6 +197,10 @@ fn String? c3_number_literal(Allocator allocator, String body) @local
 	bool is_hex = s.starts_with("0x") || s.starts_with("0X");
 	if (is_hex && (s.contains("p") || s.contains("P"))) return UNSUPPORTED_MACRO_VALUE~;
 	bool is_float = !is_hex && (s.contains(".") || s.contains("e") || s.contains("E"));
+	if (!is_float)
+	{
+		if (try msvc_suffix = s.index_of_char('i') ?? s.index_of_char('I')) s = s[:msvc_suffix];
+	}
 	s = s.trim_right(is_float ? "fFlL" : "uUlL");
 	if (!is_float && s.len > 1 && s[0] == '0' && s[1].is_digit()) return string::format(allocator, "0o%s", s[1..]);
 	return s.copy(allocator);
@@ -212,8 +216,16 @@ fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions op
 	String c_type = node.get("type").get_string("qualType") ?? "";
 	switch (kind)
 	{
-		case "ParenExpr":
 		case "ImplicitCastExpr":
+			Object* operand = first_inner(node)!;
+			String operand_kind = core_expr(operand).get_string("kind") ?? "";
+			if ((node.get_string("castKind") ?? "") != "IntegralCast" || operand_kind == "IntegerLiteral" || operand_kind == "CharacterLiteral")
+			{
+				return macro_value_expr(allocator, operand, options, tu);
+			}
+			String value = macro_value_expr(tmem, operand, options, tu)!;
+			return string::format(allocator, "(%s)(%s)", map_c_type_to_c3(tmem, c_type, options.type_prefix, tu), value);
+		case "ParenExpr":
 		case "ConstantExpr":
 		case "CompoundLiteralExpr":
 			return macro_value_expr(allocator, first_inner(node), options, tu);
