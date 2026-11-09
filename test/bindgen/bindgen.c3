@@ -1,6 +1,7 @@
 module lsp::bindgen_test @test;
 
 import lsp::bindgen;
+import lsp::bindgen_test::posix_signal;
 import std;
 
 fn void test_snake_case_conversion()
@@ -51,6 +52,14 @@ fn void test_c_type_mapping()
 	test::eq(bindgen::map_c_type_to_c3(tmem, "void **", "", false), "void**");
 	test::eq(bindgen::map_c_type_to_c3(tmem, "void *[2]", "", false), "void*[2]");
 	test::eq(bindgen::map_c_type_to_c3(tmem, "int *[10]", "", false), "int*[10]");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char **", "", true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *const *", "", true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const *", "", true), "char**");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const", "", true), "char*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "struct __va_list_tag *", "", true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "va_list", "", true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_const_charp", "", true, "const char *"), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_charp", "", true, "char *"), "char*");
 }
 
 fn void test_clang_ast_json_mock_emission()
@@ -100,8 +109,7 @@ fn void test_clang_ast_json_mock_emission()
 		.header_path = "test_lib.h",
 		.module_name = "test_lib",
 		.type_prefix = "RL",
-		.strip_func_prefix = "",
-		.strip_enum_prefix = "MOUSE_BUTTON_"
+		.strip_func_prefix = ""
 	};
 
 	CTranslationUnit tu;
@@ -117,8 +125,7 @@ fn void test_clang_ast_json_mock_emission()
 
 	assert(code.contains("module test_lib;"));
 	assert(code.contains("enum RLMouseButton\n{"));
-	assert(code.contains("LEFT,"));
-	assert(code.contains("RIGHT"));
+	assert(code.contains("\tLEFT,\n\tRIGHT\n"));
 	assert(code.contains("struct RLVector2"));
 	assert(code.contains("float x;"));
 	assert(code.contains("float y;"));
@@ -224,7 +231,7 @@ fn void test_opaque_and_complete_struct_deduplication()
 	test::eq(tu.structs.get(0).fields.len(), 2);
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
-	assert(!code.contains("struct Fts5Tokenizer { void* _unused; }"));
+	assert(!code.contains("typedef Fts5Tokenizer = void;"));
 	assert(code.contains("struct Fts5Tokenizer\n{\n\tvoid* x_create;\n\tvoid* x_delete;\n}"));
 }
 
@@ -647,9 +654,9 @@ fn void test_function_pointer_field_and_array_type_extraction()
 	assert(code.contains("alias HandlerTableInitFnFn = fn int();"));
 	assert(code.contains("HandlerTableInitFnFn init_fn;"));
 	assert(!code.contains("Int (*)(void)"));
-	assert(code.contains("struct ExternalMatrix { void* _unused; }"));
+	assert(code.contains("typedef ExternalMatrix = void;"));
 	assert(!code.contains("struct ExternalMatrix[3][3"));
-	assert(code.contains("struct ExternalHandle { void* _unused; }"));
+	assert(code.contains("typedef ExternalHandle = void;"));
 }
 
 fn void test_module_name_length_limit_and_zero_length_array()
@@ -720,7 +727,7 @@ fn void test_alias_target_missing_type_and_duplicate_alias()
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
 	// Missing struct target in typedef synthesized as opaque struct
-	assert(code.contains("struct NeSessionS { void* _unused; }"));
+	assert(code.contains("typedef NeSessionS = void;"));
 	assert(code.contains("alias SessionHandle = NeSessionS*;"));
 
 	// Duplicate alias VkiU16 emitted only once
@@ -761,11 +768,13 @@ fn void test_large_enum_variant_uint_backing_and_recursive_typedef()
 					}
 				]
 			},
+			{ "kind": "RecordDecl", "name": "mfxSyncPoint", "tagUsed": "struct", "loc": { "file": "test_flags.h" } },
 			{
 				"kind": "TypedefDecl",
 				"name": "mfxSyncPoint",
 				"loc": { "file": "test_flags.h" },
-				"type": { "qualType": "struct mfxSyncPoint *" }
+				"type": { "qualType": "struct mfxSyncPoint *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "mfxSyncPoint" } } ] } ]
 			}
 		]
 	}
@@ -787,11 +796,10 @@ fn void test_large_enum_variant_uint_backing_and_recursive_typedef()
 
 	// Large enum backing type inferred as uint with 'u' suffix literal
 	assert(code.contains("constdef SecretFlags : uint\n{"));
-	assert(code.contains("FLAG_HIGH = 2147483648u"));
+	assert(code.contains("\tHIGH = 2147483648u"));
 
-	// Self-referential pointer typedef converted to void*
-	assert(code.contains("alias MfxSyncPoint = void*;"));
-	assert(!code.contains("alias MfxSyncPoint = MfxSyncPoint*;"));
+	assert(code.contains("typedef _MfxSyncPoint = void;"));
+	assert(code.contains("alias MfxSyncPoint = _MfxSyncPoint*;"));
 }
 
 fn void test_external_and_empty_enum_resolution()
@@ -1210,11 +1218,13 @@ fn void test_recursive_handle_typedef_emission()
 	{
 		"kind": "TranslationUnitDecl",
 		"inner": [
+			{ "kind": "RecordDecl", "name": "HSTRING__", "tagUsed": "struct", "loc": { "file": "test_handle.h" } },
 			{
 				"kind": "TypedefDecl",
 				"name": "HSTRING",
 				"loc": { "file": "test_handle.h" },
-				"type": { "qualType": "HSTRING *" }
+				"type": { "qualType": "struct HSTRING__ *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "HSTRING__" } } ] } ]
 			}
 		]
 	}
@@ -1234,8 +1244,8 @@ fn void test_recursive_handle_typedef_emission()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("alias Hstring = void*;"));
-	assert(!code.contains("alias Hstring = Hstring*;"));
+	assert(code.contains("typedef _Hstring = void;"));
+	assert(code.contains("alias Hstring = _Hstring*;"));
 }
 
 fn void test_function_type_field_in_struct_maps_to_void_pointer()
@@ -1706,7 +1716,7 @@ fn void test_invalid_void_field_degrades_struct_to_opaque()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("struct ScalarGroup { void* _unused; }"));
+	assert(code.contains("typedef ScalarGroup = void;"));
 	assert(!code.contains("void lbound;"));
 	assert(!code.contains("void* lbound;"));
 }
@@ -1803,7 +1813,7 @@ fn void test_single_flexible_array_member_struct_degrades_to_opaque()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("struct VSCMsgReaderAdd { void* _unused; }"));
+	assert(code.contains("typedef VSCMsgReaderAdd = void;"));
 	assert(!code.contains("char[*] name;"));
 }
 
@@ -1844,9 +1854,9 @@ fn void test_enum_variant_case_collision_deduplication()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("IMAGING_MODE_LA,"));
-	assert(code.contains("IMAGING_MODE_LAB,"));
-	assert(code.contains("IMAGING_MODE_LA_2"));
+	assert(code.contains("\tLA,\n"));
+	assert(code.contains("\tLAB,\n"));
+	assert(code.contains("\tLA_2"));
 }
 
 fn void test_struct_name_matching_primitive_c3_type()
@@ -2270,7 +2280,7 @@ fn void test_invalid_typedef_and_struct_name_collision()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("struct AgAccount { void* _unused; }"));
+	assert(code.contains("typedef AgAccount = void;"));
 	assert(!code.contains("struct AgAccount_2"));
 	assert(!code.contains("alias AgAccount = int;"));
 	assert(code.contains("extern fn AgManager* get_manager(AgAccount* account) @cname(\"ag_account_get_manager\");"));
@@ -2756,7 +2766,7 @@ fn void test_external_system_record_embedded_by_value_size() @test
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
 	// External types embedded by value in structs must not degrade to an 8-byte dummy stub
-	assert(!code.contains("struct PthreadMutexT { void* _unused; }"));
+	assert(!code.contains("typedef PthreadMutexT = void;"));
 	assert(code.contains("char[40]"));
 }
 
@@ -2979,7 +2989,7 @@ fn void test_anonymous_enums_emit_inline_constdefs()
 	assert(code.contains("constdef MuCommandKind : inline int\n{\n\tJUMP = 1,\n\tCLIP = 2\n}"));
 	assert(code.contains("union MuCommand\n{"));
 	assert(code.contains("const int FOO = 4;\nconst int BAR = 5;"));
-	assert(code.contains("enum KindT\n{\n\tK_A,\n\tK_B\n}"));
+	assert(code.contains("enum KindT\n{\n\tA,\n\tB\n}"));
 	assert(!code.contains("constdef K"));
 }
 
@@ -3082,7 +3092,7 @@ fn void test_function_pointer_fields_emit_typed_aliases()
 	assert(code.contains("\tvoid* chain;\n"));
 }
 
-fn void test_object_like_macros_emit_constants()
+fn void test_object_like_macros_are_collected_for_probing()
 {
 	String preprocessed = `# 1 "<built-in>" 1
 #define __STDC__ 1
@@ -3090,17 +3100,12 @@ fn void test_object_like_macros_emit_constants()
 #define TEST_H
 #define MU_COMMANDLIST_SIZE (256 * 1024)
 #define MU_MAX_WIDTHS 16
-#define MU_DOUBLE_SIZE (MU_COMMANDLIST_SIZE * 2)
 #define MU_REAL float
-#define MU_REAL_FMT "%.3g"
-#define MU_PERMS 0755
-#define MU_MASK 0xFFu
-#define MU_SCALE 1.5f
-#define MU_SHIFTED (1 << 3)
 #define mu_min(a, b) ((a) < (b) ? (a) : (b))
-#define MU_CALL foo(1)
-#define MU_LESS (1 < 2)
+#define MU_OPEN {
+#define MU_TEXT "(unbalanced"
 #define _MU_PRIVATE 1
+#define MU_ANON 3
 #define MU_MAX_WIDTHS 32
 # 1 "/usr/include/other.h" 1
 #define OTHER_SIZE 8
@@ -3113,30 +3118,128 @@ fn void test_object_like_macros_emit_constants()
 
 	CTranslationUnit tu;
 	tu.init(tmem);
+	tu.constants.push({ .name = "MU_ANON", .value = "3", .c3_type = "int" });
 
-	bindgen::parse_macro_constants(tmem, &tu, preprocessed, opts);
+	MacroDefinition[] macros = bindgen::collect_macro_definitions(tmem, &tu, preprocessed, opts);
+
+	test::eq(macros.len, 4);
+	test::eq(macros[0].name, "MU_COMMANDLIST_SIZE");
+	test::eq(macros[0].body, "(256 * 1024)");
+	test::eq(macros[1].name, "MU_MAX_WIDTHS");
+	test::eq(macros[1].body, "32");
+	test::eq(macros[2].name, "MU_REAL");
+	test::eq(macros[3].name, "MU_TEXT");
+
+	String probe = bindgen::build_macro_probe("/inc/test.h", macros);
+	assert(probe.starts_with("#include \"/inc/test.h\"\n"));
+	assert(probe.contains("static const __auto_type __c3_probe_MU_MAX_WIDTHS = (MU_MAX_WIDTHS);\n"));
+}
+
+fn void test_macro_probe_emits_typed_constants()
+{
+	String probe_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "VarDecl", "name": "__c3_probe_FLAG_A", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_PERMS", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "493" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_MASK", "type": { "qualType": "const unsigned int" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "255" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_PI", "type": { "qualType": "const float" },
+				"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_DEG2RAD", "type": { "qualType": "const float" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "float" }, "inner": [ { "kind": "BinaryOperator", "type": { "qualType": "float" }, "opcode": "/",
+					"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" }, { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "180" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_BIG", "type": { "qualType": "const unsigned long long" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "unsigned long long" }, "opcode": "<<",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned long long" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "40" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_NEG", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "UnaryOperator", "type": { "qualType": "int" }, "opcode": "-",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "30799" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_MIX", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "|",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" },
+						{ "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<<",
+							"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "3" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_NAME", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "char *" }, "castKind": "ArrayToPointerDecay",
+					"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[4]" }, "value": "\"a\\tb\"" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_SIGNATURE", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[5]" }, "value": "\"\\033Lua\\0\"" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_CH", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "CharacterLiteral", "type": { "qualType": "int" }, "value": 120 } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_RED", "type": { "qualType": "const Color", "desugaredQualType": "const struct Color" },
+				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "Color" }, "castKind": "LValueToRValue",
+					"inner": [ { "kind": "CompoundLiteralExpr", "type": { "qualType": "Color" },
+						"inner": [ { "kind": "InitListExpr", "type": { "qualType": "Color" }, "inner": [
+							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "230" } ] },
+							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "41" } ] }
+						] } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_BROKEN", "isInvalid": true, "type": { "qualType": "const __auto_type" } },
+			{ "kind": "VarDecl", "name": "__c3_probe_LESS", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_TRANSIENT", "type": { "qualType": "const sqlite3_destructor_type", "desugaredQualType": "void (*const)(void *)" },
+				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "sqlite3_destructor_type", "desugaredQualType": "void (*)(void *)" },
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_NIL", "type": { "qualType": "void *const" },
+				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "void *" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "0" } ] } ] }
+		]
+	}
+	`;
+
+	MacroDefinition[] macros = {
+		{ "FLAG_A", "0x4000" },
+		{ "PERMS", "0755" },
+		{ "MASK", "0xFFu" },
+		{ "PI", "3.14159265358979323846f" },
+		{ "DEG2RAD", "(PI/180.0f)" },
+		{ "BIG", "(1ULL << 40)" },
+		{ "NEG", "(-30799)" },
+		{ "MIX", "(FLAG_A | 3 << 2)" },
+		{ "NAME", "\"a\\tb\"" },
+		{ "SIGNATURE", "\"\\x1bLua\\0\"" },
+		{ "CH", "'x'" },
+		{ "RED", "CLITERAL(Color){ 230, 41 }" },
+		{ "BROKEN", "int int" },
+		{ "LESS", "(1 < 2)" },
+		{ "NIL", "((void*)0)" },
+		{ "TRANSIENT", "((sqlite3_destructor_type)1)" },
+		{ "MU_REAL", "float" }
+	};
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_macro_probe(tmem, &tu, macros, json::tparse(probe_json)!!, opts);
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("const MU_COMMANDLIST_SIZE = (256 * 1024);\n"));
-	assert(code.contains("const MU_MAX_WIDTHS = 16;\n"));
-	assert(code.contains("const MU_DOUBLE_SIZE = (MU_COMMANDLIST_SIZE * 2);\n"));
-	assert(code.contains("const ZString MU_REAL_FMT = \"%.3g\";\n"));
-	assert(code.contains("const MU_PERMS = 0o755;\n"));
-	assert(code.contains("const MU_MASK = 0xFFu;\n"));
-	assert(code.contains("const MU_SCALE = 1.5f;\n"));
-	assert(code.contains("const MU_SHIFTED = (1 << 3);\n"));
-	assert(!code.contains("MU_REAL ="));
-	assert(!code.contains("mu_min"));
-	assert(!code.contains("MU_CALL"));
-	assert(!code.contains("MU_LESS"));
-	assert(!code.contains("_MU_PRIVATE"));
-	assert(!code.contains("TEST_H"));
-	assert(!code.contains("__STDC__"));
-	assert(!code.contains("OTHER_SIZE"));
-	assert(!code.contains("= 32;"));
+	assert(code.contains("const int FLAG_A = 0x4000;\n"));
+	assert(code.contains("const int PERMS = 0o755;\n"));
+	assert(code.contains("const uint MASK = 0xFF;\n"));
+	assert(code.contains("const float PI = 3.14159265358979323846;\n"));
+	assert(code.contains("const float DEG2RAD = (3.14159274f / 180.0f);\n"));
+	assert(code.contains("const ulong BIG = ((ulong)1 << 40);\n"));
+	assert(code.contains("const int NEG = -30799;\n"));
+	assert(code.contains("const int MIX = (16384 | (3 << 2));\n"));
+	assert(code.contains("const ZString NAME = \"a\\tb\";\n"));
+	assert(code.contains("const ZString SIGNATURE = \"\\x1bLua\\0\";\n"));
+	assert(code.contains("const int CH = 120;\n"));
+	assert(code.contains("const Color RED = { 230, 41 };\n"));
+	assert(!code.contains("BROKEN"));
+	assert(!code.contains("LESS"));
+	assert(!code.contains("NIL"));
+	assert(!code.contains("TRANSIENT"));
+	assert(!code.contains("MU_REAL"));
 }
-
 fn void test_function_pointer_returning_function_pointer()
 {
 	String mock_json = `
@@ -3171,3 +3274,193 @@ fn void test_function_pointer_returning_function_pointer()
 	assert(code.contains("alias Sqlite3VfsXDlSymFn = fn void*(Sqlite3Vfs*, void*, ZString);"));
 	assert(code.contains("alias Sqlite3VfsXPlainFn = fn int(int, ZString);"));
 }
+
+fn void test_typedef_references_resolve_to_emitted_aliases()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "TypedefDecl", "name": "mode_t", "loc": { "file": "/usr/include/sys/types.h" }, "type": { "qualType": "__mode_t", "desugaredQualType": "unsigned int" } },
+			{ "kind": "TypedefDecl", "name": "Sint64", "loc": { "file": "test.h" }, "type": { "qualType": "int64_t", "desugaredQualType": "long" } },
+			{ "kind": "TypedefDecl", "name": "SDL_Time", "loc": { "file": "test.h" }, "type": { "qualType": "Sint64", "desugaredQualType": "long" } },
+			{ "kind": "TypedefDecl", "name": "my_mode_t", "loc": { "file": "test.h" }, "type": { "qualType": "mode_t", "desugaredQualType": "unsigned int" } },
+			{ "kind": "TypedefDecl", "name": "assert_func", "loc": { "file": "test.h" }, "type": { "qualType": "void (int, const char *)" } },
+			{
+				"kind": "FunctionDecl", "name": "set_assert", "loc": { "file": "test.h" }, "type": { "qualType": "int (assert_func *)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "func", "type": { "qualType": "assert_func *", "desugaredQualType": "void (*)(int, const char *)" } }
+				]
+			},
+			{
+				"kind": "RecordDecl", "name": "SDL_IOStreamInterface", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "size", "type": { "qualType": "int (*)(void *)" } },
+					{ "kind": "FieldDecl", "name": "on_assert", "type": { "qualType": "assert_func *", "desugaredQualType": "void (*)(int, const char *)" } }
+				]
+			},
+			{
+				"kind": "FunctionDecl", "name": "vlog", "loc": { "file": "test.h" }, "type": { "qualType": "void (const char *, struct __va_list_tag *)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "fmt", "type": { "qualType": "const char *" } },
+					{ "kind": "ParmVarDecl", "name": "args", "type": { "qualType": "struct __va_list_tag *" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("alias SdlTime = Sint64;\n"));
+	assert(code.contains("alias MyModeT = uint;\n"));
+	assert(!code.contains("alias ModeT"));
+	assert(code.contains("extern fn int set_assert(AssertFunc func)"));
+	assert(code.contains("alias SdlIOStreamInterfaceSizeFn = fn int(void*);\n"));
+	assert(code.contains("\tSdlIOStreamInterfaceSizeFn size;\n"));
+	assert(code.contains("\tAssertFunc on_assert;\n"));
+	assert(code.contains("extern fn void vlog(ZString fmt, CVaList args)"));
+}
+
+fn void test_named_enum_values_drop_common_prefix()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "EnumDecl", "name": "MDB_cursor_op", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "MDB_FIRST" },
+					{ "kind": "EnumConstantDecl", "name": "MDB_FIRST_DUP" }
+				]
+			},
+			{
+				"kind": "EnumDecl", "name": "SDL_Scancode", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "SDL_SCANCODE_A" },
+					{ "kind": "EnumConstantDecl", "name": "SDL_SCANCODE_1" }
+				]
+			},
+			{
+				"kind": "EnumDecl", "name": "Key", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "KEY_A" },
+					{ "kind": "EnumConstantDecl", "name": "KEY_1" }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("enum MdbCursorOp\n{\n\tFIRST,\n\tFIRST_DUP\n}"));
+	assert(code.contains("enum SdlScancode\n{\n\tSCANCODE_A,\n\tSCANCODE_1\n}"));
+	assert(code.contains("enum Key\n{\n\tKEY_A,\n\tKEY_1\n}"));
+}
+
+fn void test_pointer_typedef_sharing_tag_name_keeps_both_types()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "RecordDecl", "name": "_Handle", "tagUsed": "struct", "loc": { "file": "test.h" } },
+			{
+				"kind": "TypedefDecl", "name": "Handle", "loc": { "file": "test.h" },
+				"type": { "qualType": "struct _Handle *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "_Handle" } } ] } ]
+			},
+			{ "kind": "FunctionDecl", "name": "handle_open", "loc": { "file": "test.h" }, "type": { "qualType": "Handle (void)" } },
+			{
+				"kind": "FunctionDecl", "name": "handle_use", "loc": { "file": "test.h" }, "type": { "qualType": "void (struct _Handle *)" },
+				"inner": [ { "kind": "ParmVarDecl", "name": "h", "type": { "qualType": "struct _Handle *" } } ]
+			},
+			{ "kind": "RecordDecl", "name": "Thing", "tagUsed": "struct", "loc": { "file": "test.h" } },
+			{
+				"kind": "TypedefDecl", "name": "Thing", "loc": { "file": "test.h" },
+				"type": { "qualType": "struct Thing" },
+				"inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "Thing" } } ]
+			},
+			{
+				"kind": "FunctionDecl", "name": "thing_make", "loc": { "file": "test.h" }, "type": { "qualType": "Thing *(void)" }
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("typedef _Handle = void;\n"));
+	assert(code.contains("alias Handle = _Handle*;\n"));
+	assert(code.contains("extern fn Handle handle_open()"));
+	assert(code.contains("extern fn void handle_use(_Handle* h)"));
+	assert(code.contains("typedef Thing = void;\n"));
+	assert(code.contains("extern fn Thing* thing_make()"));
+}
+
+fn void test_clang_output_with_large_stderr_does_not_block() @feat(POSIX)
+{
+	posix_signal::alarm(30);
+	defer posix_signal::alarm(0);
+	DString source;
+	source.tinit();
+	for (int i = 0; i < 3000; i++)
+	{
+		source.appendf("#define BAD_%d int int\nstatic const __auto_type probe_%d = (BAD_%d);\nstatic const int good_%d = %d;\n", i, i, i, i, i);
+	}
+	Path dir = path::temp_directory(tmem)!!;
+	String header = (String)dir.tappend("c3_ls_large_stderr_probe.c")!!;
+	file::save(header, source.str_view())!!;
+	defer (void)file::delete(header);
+
+	BindgenOptions opts = { .header_path = header };
+	ClangOutput? out = bindgen::run_clang_raw(tmem, opts, { "-Xclang", "-ast-dump=json", "-fsyntax-only", "-ferror-limit=0" });
+	if (catch out) return;
+
+	assert(out.stderr_str.len > 65536);
+	assert(out.stdout_str.starts_with("{"));
+	assert(out.stdout_str.contains("good_2999"));
+	json::tparse(out.stdout_str)!!;
+}
+
+module lsp::bindgen_test::posix_signal;
+
+extern fn uint alarm(uint seconds) @cname("alarm");

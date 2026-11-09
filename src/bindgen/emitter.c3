@@ -415,10 +415,6 @@ fn void cleanup_typedef_conflicts(CTranslationUnit* tu) @local
 	foreach (td : tu.typedefs)
 	{
 		if (td.c3_name == td.underlying_c3 || is_c3_type(td.c3_name) || is_c3_keyword(td.c3_name) || !taken_names.add(td.c3_name)) continue;
-		if (td.underlying_c3.ends_with("*") && extract_base_type_ident(td.underlying_c3) == td.c3_name)
-		{
-			td.underlying_c3 = "void*";
-		}
 		tu.typedefs[kept++] = td;
 	}
 	while (tu.typedefs.len() > kept) tu.typedefs.remove_last();
@@ -578,7 +574,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 
 		if (st.is_opaque || st.fields.len() == 0)
 		{
-			sb.appendf("struct %s { void* _unused; }\n\n", st_name);
+			sb.appendf("typedef %s = void;\n\n", st_name);
 			continue;
 		}
 
@@ -679,7 +675,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 	{
 		if (seen_struct_names.add(ms))
 		{
-			sb.appendf("struct %s { void* _unused; }\n\n", ms);
+			sb.appendf("typedef %s = void;\n\n", ms);
 		}
 	}
 }

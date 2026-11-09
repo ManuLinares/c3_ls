@@ -364,7 +364,23 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		report_error(is_cli, "Failed to run clang preprocessor (%s).", err);
 		return 1;
 	}
-	parse_macro_constants(tmem, &tu, macro_dump, options);
+	MacroDefinition[] macros = collect_macro_definitions(tmem, &tu, macro_dump, options);
+	if (macros.len > 0)
+	{
+		String? probe_json = run_clang_macro_probe(tmem, options, macros);
+		if (catch err = probe_json)
+		{
+			report_error(is_cli, "Failed to evaluate macros with clang (%s).", err);
+			return 1;
+		}
+		Object*? probe_root = json::tparse(probe_json);
+		if (catch err = probe_root)
+		{
+			report_error(is_cli, "Failed to parse the macro probe's AST JSON (%s).", err);
+			return 1;
+		}
+		parse_macro_probe(tmem, &tu, macros, probe_root, options);
+	}
 
 	String generated_code = emit_c3_bindings(tmem, &tu, options);
 

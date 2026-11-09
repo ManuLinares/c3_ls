@@ -31,9 +31,9 @@ fn ClangOutput? run_clang_raw(Allocator allocator, BindgenOptions options, Strin
 	cmd.tinit();
 
 	cmd.push(clang_bin);
-	foreach (arg : mode_args) cmd.push(arg);
 	cmd.push("-Wno-everything");
 	cmd.push(CLANG_ERROR_LIMIT);
+	foreach (arg : mode_args) cmd.push(arg);
 
 	if (options.target.len > 0)
 	{
@@ -59,60 +59,47 @@ fn ClangOutput? run_clang_raw(Allocator allocator, BindgenOptions options, Strin
 
 	cmd.push(options.header_path);
 
-	Process? proc = process::spawn(cmd.array_view());
+	Process? proc = process::spawn(cmd.array_view(), options: ASYNC_OUTPUT);
 	if (catch proc)
 	{
 		return CLANG_NOT_FOUND~;
 	}
+	defer (void)proc.destroy();
 
 	DString stdout_buf;
 	stdout_buf.init(allocator);
-
-	char[CLANG_READ_CHUNK_SIZE] chunk;
-	while (true)
-	{
-		long? bytes_read = proc.read_stdout(&chunk, CLANG_READ_CHUNK_SIZE);
-		if (catch bytes_read)
-		{
-			break;
-		}
-
-		long n = bytes_read;
-		if (n <= 0)
-		{
-			break;
-		}
-
-		stdout_buf.append((String)chunk[:n]);
-	}
-
 	DString stderr_buf;
 	stderr_buf.init(allocator);
-
-	char[4096] err_chunk;
 	while (true)
 	{
-		long? bytes_read = proc.read_stderr(&err_chunk, 4096);
-		if (catch bytes_read)
-		{
-			break;
-		}
-
-		long n = bytes_read;
-		if (n <= 0)
-		{
-			break;
-		}
-
-		stderr_buf.append((String)err_chunk[:n]);
+		bool exited = !(proc.is_running() ?? false);
+		bool got_output = drain_pipe(&proc, &stdout_buf, true) | drain_pipe(&proc, &stderr_buf, false);
+		if (exited) break;
+		if (!got_output) thread::sleep_ms(1);
 	}
 
-	(void)proc.join();
-
 	return {
-		.stdout_str = stdout_buf.str_view().copy(allocator),
-		.stderr_str = stderr_buf.str_view().copy(allocator)
+		.stdout_str = stdout_buf.str_view(),
+		.stderr_str = stderr_buf.str_view()
 	};
+}
+
+<*
+ Appends whatever a non-blocking stdout or stderr pipe currently holds. Reading both pipes in turn
+ keeps a full stderr pipe from blocking the child while stdout is still being read.
+ @return "Whether anything was read."
+*>
+fn bool drain_pipe(Process* proc, DString* out, bool is_stdout) @local
+{
+	char[CLANG_READ_CHUNK_SIZE] chunk;
+	bool got_output;
+	while (try n = (is_stdout ? proc.read_stdout(&chunk, chunk.len) : proc.read_stderr(&chunk, chunk.len)))
+	{
+		if (n <= 0) break;
+		out.append((String)chunk[:n]);
+		got_output = true;
+	}
+	return got_output;
 }
 
 <*
@@ -197,6 +184,27 @@ fn String? run_clang_macro_dump(Allocator allocator, BindgenOptions options)
 		{
 			log::error("Clang stderr: %s", out.stderr_str);
 		}
+		return INVALID_CLANG_OUTPUT~;
+	}
+	return out.stdout_str;
+}
+
+<*
+ Runs clang on a probe source that includes the header and evaluates `macros`, returning the AST JSON.
+ Invalid probes are expected, so the error limit is lifted.
+*>
+fn String? run_clang_macro_probe(Allocator allocator, BindgenOptions options, MacroDefinition[] macros)
+{
+	Path probe = path::temp_directory(tmem)!.tappend(string::tformat("c3_bindgen_probe_%d.c", (int)datetime::now().sec))!;
+	String header = (String)options.header_path.to_absolute_path(tmem)!;
+	file::save(probe, build_macro_probe(header, macros))!;
+	defer (void)file::delete(probe);
+
+	options.header_path = (String)probe;
+	ClangOutput out = run_clang_raw(allocator, options, { "-Xclang", "-ast-dump=json", "-fsyntax-only", "-ferror-limit=0" })!;
+	if (!out.stdout_str.starts_with("{"))
+	{
+		if (out.stderr_str.len > 0) log::error("Clang stderr: %s", out.stderr_str);
 		return INVALID_CLANG_OUTPUT~;
 	}
 	return out.stdout_str;

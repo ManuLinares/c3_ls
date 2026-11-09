@@ -17,7 +17,6 @@ struct BindgenOptions
 	String module_name;
 	String type_prefix;
 	String strip_func_prefix;
-	String strip_enum_prefix;
 	String clang_path;
 	String target;
 	String[] include_dirs;
@@ -749,6 +748,16 @@ fn String lower_all_caps_segments(String s) @local
 }
 
 <*
+ C3 name of a struct, union or enum tag. Tags in `underscored_tags` share their sanitized name with a
+ different typedef, so they keep a leading '_' to stay distinct.
+*>
+fn String tag_c3_name(Allocator allocator, String tag, String type_prefix, HashSet{String}* underscored_tags = null)
+{
+	String name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, tag, type_prefix));
+	return underscored_tags && underscored_tags.contains(tag) ? string::format(allocator, "_%s", name) : name;
+}
+
+<*
  Validates and formats a C type name into a C3-compliant type identifier.
  Guarantees PascalCase with at least one lowercase letter and strips leading underscores.
 *>
@@ -1095,7 +1104,8 @@ fn String map_c_type_to_c3(
 	bool is_param = false,
 	String desugared_type = "",
 	bool* out_is_noalias = null,
-	bool is_field = false
+	bool is_field = false,
+	HashSet{String}* underscored_tags = null
 )
 {
 	if (out_is_noalias)
@@ -1153,7 +1163,9 @@ fn String map_c_type_to_c3(
 		trailing_dims = is_field ? "[*]" : "[]";
 	}
 
+	bool is_const_pointee = has_const_pointee(s);
 	int elem_pointer_depth = strip_pointer_depth(&s);
+	if (elem_pointer_depth > 0 && s.ends_with("__va_list_tag")) elem_pointer_depth--;
 
 	// 4. Extract C99 complex qualifier (as standalone token)
 	bool is_complex = false;
@@ -1204,7 +1216,7 @@ fn String map_c_type_to_c3(
 			String w = clean_words.get(i);
 			if ((w == "struct" || w == "union" || w == "enum") && i + 1 < clean_words.len())
 			{
-				base_c3 = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, clean_words.get(i + 1), type_prefix));
+				base_c3 = tag_c3_name(allocator, clean_words.get(i + 1), type_prefix, underscored_tags);
 				break;
 			}
 		}
@@ -1242,6 +1254,7 @@ fn String map_c_type_to_c3(
 		{
 			base_c3 = desug_std;
 			elem_pointer_depth = desug_pointer_depth;
+			is_const_pointee = has_const_pointee(desugared_type);
 		}
 	}
 
@@ -1261,13 +1274,10 @@ fn String map_c_type_to_c3(
 		base_c3 = string::format(allocator, "%s[2]", base_c3);
 	}
 
-	if (base_c3 == "char" && elem_pointer_depth == 1 && !is_ptr_to_array && c_type.contains("const"))
+	if (base_c3 == "char" && elem_pointer_depth > 0 && !is_ptr_to_array && is_const_pointee)
 	{
-		if (trailing_dims.len > 0 || arr_dims.len > 0)
-		{
-			return string::format(allocator, "ZString%s%s", trailing_dims, arr_dims);
-		}
-		return "ZString";
+		base_c3 = "ZString";
+		elem_pointer_depth--;
 	}
 
 	if (base_c3 == "void" && elem_pointer_depth == 0)
@@ -1303,6 +1313,18 @@ fn String map_c_type_to_c3(
 	}
 
 	return res.str_view().copy(allocator);
+}
+
+<*
+ Whether the base type, left of the first `*`, is const-qualified.
+*>
+fn bool has_const_pointee(String c_type) @local
+{
+	foreach (word : c_type[:c_type.index_of_char('*') ?? c_type.len].tsplit(" "))
+	{
+		if (word == "const") return true;
+	}
+	return false;
 }
 
 fn int strip_pointer_depth(String* s) @local
