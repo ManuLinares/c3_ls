@@ -52,7 +52,7 @@ fn String? find_missing_header_directory(BindgenOptions options, String missing_
 	search_roots.tinit();
 
 	String target_dir = options.header_path;
-	if (file::is_file(target_dir)) target_dir = ((Path)target_dir).dirname();
+	if (file::is_file(target_dir)) target_dir = header_dirname(target_dir);
 	target_dir = target_dir.trim_right("/\\");
 	if (target_dir.len > 0)
 	{
@@ -180,7 +180,7 @@ fn String deduce_package_dir(BindgenOptions options)
 		return dir;
 	}
 
-	String parent = ((Path)options.header_path).dirname();
+	String parent = header_dirname(options.header_path);
 	if (parent == "." || is_include_root_dir(options, parent)) return "";
 	return options.header_path[:parent.len + 1];
 }
@@ -192,10 +192,10 @@ fn String deduce_package_dir(BindgenOptions options)
 fn void auto_discover_peer_includes(BindgenOptions* options)
 {
 	String base_dir = options.header_path;
-	if (file::is_file(base_dir)) base_dir = ((Path)base_dir).dirname();
+	if (file::is_file(base_dir)) base_dir = header_dirname(base_dir);
 	base_dir = base_dir.trim_right("/\\");
 
-	String parent_dir = ((Path)base_dir).dirname();
+	String parent_dir = header_dirname(base_dir);
 	if (parent_dir == "." || parent_dir == "/" || parent_dir == "/usr" || parent_dir == "/usr/include" ||
 		parent_dir == "/usr/local" || parent_dir == "/usr/local/include")
 	{

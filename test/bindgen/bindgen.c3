@@ -2543,6 +2543,11 @@ fn void test_deduce_package_dir_rules() @test
 		.header_path = "/home/user/project/include/mylib/entry.h"
 	};
 	test::eq(bindgen::deduce_package_dir(local_opts), "/home/user/project/include/mylib/");
+
+	BindgenOptions win_opts = {
+		.header_path = `C:\project\include\mylib\entry.h`
+	};
+	test::eq(bindgen::deduce_package_dir(win_opts), `C:\project\include\mylib\`);
 }
 
 fn void test_umbrella_header_package_symbol_extraction() @test
@@ -3132,7 +3137,9 @@ fn void test_object_like_macros_are_collected_for_probing()
 
 	String probe = bindgen::build_macro_probe("/inc/test.h", macros);
 	assert(probe.starts_with("#include \"/inc/test.h\"\n"));
-	assert(probe.contains("static const __auto_type __c3_probe_MU_MAX_WIDTHS = (MU_MAX_WIDTHS);\n"));
+	assert(probe.contains("static const __auto_type __c3_probe_a_MU_MAX_WIDTHS = (MU_MAX_WIDTHS);\n"));
+	assert(probe.contains("\n#line 1 \"c3_probe_b.c\"\n"));
+	assert(probe.contains("static const __auto_type __c3_probe_b_MU_MAX_WIDTHS = (MU_MAX_WIDTHS);\n"));
 }
 
 fn void test_macro_probe_emits_typed_constants()
@@ -3141,51 +3148,100 @@ fn void test_macro_probe_emits_typed_constants()
 	{
 		"kind": "TranslationUnitDecl",
 		"inner": [
-			{ "kind": "VarDecl", "name": "__c3_probe_FLAG_A", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_FLAG_A", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_PERMS", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_PERMS", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "493" } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_MASK", "type": { "qualType": "const unsigned int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_MASK", "type": { "qualType": "const unsigned int" },
 				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "255" } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_PI", "type": { "qualType": "const float" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_PI", "type": { "qualType": "const float" },
 				"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_DEG2RAD", "type": { "qualType": "const float" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_DEG2RAD", "type": { "qualType": "const float" },
 				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "float" }, "inner": [ { "kind": "BinaryOperator", "type": { "qualType": "float" }, "opcode": "/",
 					"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" }, { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "180" } ] } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_BIG", "type": { "qualType": "const unsigned long long" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_BIG", "type": { "qualType": "const unsigned long long" },
 				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "unsigned long long" }, "opcode": "<<",
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned long long" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "40" } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_NEG", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_NEG", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "UnaryOperator", "type": { "qualType": "int" }, "opcode": "-",
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "30799" } ] } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_MIX", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_MIX", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "|",
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" },
 						{ "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<<",
 							"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "3" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_NAME", "type": { "qualType": "char *const" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_NAME", "type": { "qualType": "char *const" },
 				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "char *" }, "castKind": "ArrayToPointerDecay",
 					"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[4]" }, "value": "\"a\\tb\"" } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_SIGNATURE", "type": { "qualType": "char *const" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_SIGNATURE", "type": { "qualType": "char *const" },
 				"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[5]" }, "value": "\"\\033Lua\\0\"" } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_CH", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_CH", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "CharacterLiteral", "type": { "qualType": "int" }, "value": 120 } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_RED", "type": { "qualType": "const Color", "desugaredQualType": "const struct Color" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_RED", "type": { "qualType": "const Color", "desugaredQualType": "const struct Color" },
 				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "Color" }, "castKind": "LValueToRValue",
 					"inner": [ { "kind": "CompoundLiteralExpr", "type": { "qualType": "Color" },
 						"inner": [ { "kind": "InitListExpr", "type": { "qualType": "Color" }, "inner": [
 							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "230" } ] },
 							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "41" } ] }
 						] } ] } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_BROKEN", "isInvalid": true, "type": { "qualType": "const __auto_type" } },
-			{ "kind": "VarDecl", "name": "__c3_probe_LESS", "type": { "qualType": "const int" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_BROKEN", "isInvalid": true, "type": { "qualType": "const __auto_type" } },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_LESS", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<",
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_TRANSIENT", "type": { "qualType": "const sqlite3_destructor_type", "desugaredQualType": "void (*const)(void *)" },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_TRANSIENT", "type": { "qualType": "const sqlite3_destructor_type", "desugaredQualType": "void (*const)(void *)" },
 				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "sqlite3_destructor_type", "desugaredQualType": "void (*)(void *)" },
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" } ] } ] },
-			{ "kind": "VarDecl", "name": "__c3_probe_NIL", "type": { "qualType": "void *const" },
-				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "void *" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "0" } ] } ] }
+			{ "kind": "VarDecl", "name": "__c3_probe_a_NIL", "type": { "qualType": "void *const" },
+				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "void *" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "0" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_FLAG_A", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_PERMS", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "493" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_MASK", "type": { "qualType": "const unsigned int" },
+				"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned int" }, "value": "255" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_PI", "type": { "qualType": "const float" },
+				"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_DEG2RAD", "type": { "qualType": "const float" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "float" }, "inner": [ { "kind": "BinaryOperator", "type": { "qualType": "float" }, "opcode": "/",
+					"inner": [ { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "3.14159274" }, { "kind": "FloatingLiteral", "type": { "qualType": "float" }, "value": "180" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_BIG", "type": { "qualType": "const unsigned long long" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "unsigned long long" }, "opcode": "<<",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "unsigned long long" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "40" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_NEG", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "UnaryOperator", "type": { "qualType": "int" }, "opcode": "-",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "30799" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_MIX", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "|",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" },
+						{ "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<<",
+							"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "3" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_NAME", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "char *" }, "castKind": "ArrayToPointerDecay",
+					"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[4]" }, "value": "\"a\\tb\"" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_SIGNATURE", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[5]" }, "value": "\"\\033Lua\\0\"" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_CH", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "CharacterLiteral", "type": { "qualType": "int" }, "value": 120 } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_RED", "type": { "qualType": "const Color", "desugaredQualType": "const struct Color" },
+				"inner": [ { "kind": "ImplicitCastExpr", "type": { "qualType": "Color" }, "castKind": "LValueToRValue",
+					"inner": [ { "kind": "CompoundLiteralExpr", "type": { "qualType": "Color" },
+						"inner": [ { "kind": "InitListExpr", "type": { "qualType": "Color" }, "inner": [
+							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "230" } ] },
+							{ "kind": "ImplicitCastExpr", "type": { "qualType": "unsigned char" }, "castKind": "IntegralCast", "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "41" } ] }
+						] } ] } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_BROKEN", "isInvalid": true, "type": { "qualType": "const __auto_type" } },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_LESS", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "BinaryOperator", "type": { "qualType": "int" }, "opcode": "<",
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" }, { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "2" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_TRANSIENT", "type": { "qualType": "const sqlite3_destructor_type", "desugaredQualType": "void (*const)(void *)" },
+				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "sqlite3_destructor_type", "desugaredQualType": "void (*)(void *)" },
+					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_NIL", "type": { "qualType": "void *const" },
+				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "void *" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "0" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_a_HERE", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[9]" }, "value": "\"/tmp/p.c\"" } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_HERE", "type": { "qualType": "char *const" },
+				"inner": [ { "kind": "StringLiteral", "type": { "qualType": "char[13]" }, "value": "\"c3_probe_b.c\"" } ] }
 		]
 	}
 	`;
@@ -3207,7 +3263,8 @@ fn void test_macro_probe_emits_typed_constants()
 		{ "LESS", "(1 < 2)" },
 		{ "NIL", "((void*)0)" },
 		{ "TRANSIENT", "((sqlite3_destructor_type)1)" },
-		{ "MU_REAL", "float" }
+		{ "MU_REAL", "float" },
+		{ "HERE", "__FILE__" }
 	};
 
 	BindgenOptions opts = {
@@ -3239,6 +3296,7 @@ fn void test_macro_probe_emits_typed_constants()
 	assert(!code.contains("NIL"));
 	assert(!code.contains("TRANSIENT"));
 	assert(!code.contains("MU_REAL"));
+	assert(!code.contains("HERE"));
 }
 fn void test_function_pointer_returning_function_pointer()
 {

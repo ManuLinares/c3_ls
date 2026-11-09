@@ -748,6 +748,32 @@ fn String lower_all_caps_segments(String s) @local
 }
 
 <*
+ Index just past the last '/' or '\' of a header path, 0 when it has none. Header paths mix both
+ separators on every host, so the host's Path rules do not apply.
+*>
+fn sz header_name_start(String path) @local
+{
+	sz start;
+	foreach (i, c : path)
+	{
+		if (c == '/' || c == '\\') start = i + 1;
+	}
+	return start;
+}
+
+fn String header_basename(String path) @private => path[header_name_start(path)..];
+
+<*
+ Directory part of a header path without its trailing separator: "." when there is none, the root separator for root files.
+*>
+fn String header_dirname(String path) @private
+{
+	sz start = header_name_start(path);
+	if (start == 0) return ".";
+	return path[:start == 1 ? 1 : start - 1];
+}
+
+<*
  C3 name of a struct, union or enum tag. Tags in `underscored_tags` share their sanitized name with a
  different typedef, so they keep a leading '_' to stay distinct.
 *>

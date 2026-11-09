@@ -73,7 +73,7 @@ fn bool is_target_file(String node_file, BindgenOptions options) @private
 		return true;
 	}
 
-	return ((Path)node_file).basename() == ((Path)options.header_path).basename();
+	return header_basename(node_file) == header_basename(options.header_path);
 }
 
 <*

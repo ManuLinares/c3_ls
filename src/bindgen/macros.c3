@@ -3,6 +3,8 @@ module lsp::bindgen;
 import std;
 
 const String MACRO_PROBE_PREFIX = "__c3_probe_";
+const String[2] MACRO_PROBE_PASSES = { "__c3_probe_a_", "__c3_probe_b_" };
+const String MACRO_PROBE_RELOCATED_FILE = "c3_probe_b.c";
 
 faultdef UNSUPPORTED_MACRO_VALUE;
 
@@ -60,13 +62,19 @@ fn MacroDefinition[] collect_macro_definitions(Allocator allocator, CTranslation
 <*
  C source that includes the header and declares one `__auto_type` variable per macro, so clang
  reports each macro's type and value. Macros that are not expressions produce invalid declarations.
+ The declarations are repeated under another file name and line numbers, so values that depend on
+ where the macro expands, such as `__FILE__`, `__LINE__` or `__COUNTER__`, differ between the passes.
 *>
 fn String build_macro_probe(String header_path, MacroDefinition[] macros)
 {
 	DString out;
 	out.tinit();
 	out.appendf("#include \"%s\"\n", header_path);
-	foreach (m : macros) out.appendf("static const __auto_type %s%s = (%s);\n", MACRO_PROBE_PREFIX, m.name, m.name);
+	foreach (i, prefix : MACRO_PROBE_PASSES)
+	{
+		if (i > 0) out.appendf("#line 1 \"%s\"\n", MACRO_PROBE_RELOCATED_FILE);
+		foreach (m : macros) out.appendf("static const __auto_type %s%s = (%s);\n", prefix, m.name, m.name);
+	}
 	return out.str_view();
 }
 
@@ -84,22 +92,23 @@ fn void parse_macro_probe(Allocator allocator, CTranslationUnit* tu, MacroDefini
 			Object* node = inner.get_at(i);
 			String name = node.get_string("name") ?? "";
 			if ((node.get_string("kind") ?? "") != "VarDecl" || !name.starts_with(MACRO_PROBE_PREFIX) || (node.get_bool("isInvalid") ?? false)) continue;
-			probes.set(name[MACRO_PROBE_PREFIX.len..], node);
+			probes.set(name, node);
 		}
 	}
 
 	foreach (m : macros)
 	{
-		Object* decl = probes.get(m.name) ?? null;
-		if (!decl) continue;
-		Object*? init = decl.get("inner").get_at(0);
-		if (catch init) continue;
+		Object* decl = probes.get(string::tformat("%s%s", MACRO_PROBE_PASSES[0], m.name)) ?? null;
+		Object* relocated = probes.get(string::tformat("%s%s", MACRO_PROBE_PASSES[1], m.name)) ?? null;
+		if (!decl || !relocated) continue;
 
-		String? c3_type = macro_constant_type(allocator, decl, init, options);
-		String? value = c3_number_literal(allocator, m.body) ?? macro_value_expr(allocator, init, options);
-		if (catch c3_type, value) continue;
+		String? c3_type = macro_constant_type(allocator, decl, options);
+		String? value = macro_value_expr(allocator, decl.get("inner").get_at(0), options);
+		String? relocated_value = macro_value_expr(tmem, relocated.get("inner").get_at(0), options);
+		if (catch c3_type, value, relocated_value) continue;
+		if (value != relocated_value) continue;
 
-		tu.constants.push({ .name = m.name.copy(allocator), .value = value, .c3_type = c3_type });
+		tu.constants.push({ .name = m.name.copy(allocator), .value = c3_number_literal(allocator, m.body) ?? value, .c3_type = c3_type });
 	}
 }
 
@@ -166,9 +175,9 @@ fn Object* core_expr(Object* node) @local
  C3 type of a probe declaration: ZString for string literals, otherwise the declared type without its
  top-level const. Pointer and array types are unsupported.
 *>
-fn String? macro_constant_type(Allocator allocator, Object* decl, Object* init, BindgenOptions options) @local
+fn String? macro_constant_type(Allocator allocator, Object* decl, BindgenOptions options) @local
 {
-	if ((core_expr(init).get_string("kind") ?? "") == "StringLiteral") return "ZString";
+	if ((core_expr(decl.get("inner").get_at(0)!).get_string("kind") ?? "") == "StringLiteral") return "ZString";
 	if (is_indirect_type(decl)) return UNSUPPORTED_MACRO_VALUE~;
 	RawTypeInfo t = extract_type_info(decl);
 	return map_c_type_to_c3(allocator, t.qual_type.strip_prefix("const "), options.type_prefix, false, t.desugared_type.strip_prefix("const "));
