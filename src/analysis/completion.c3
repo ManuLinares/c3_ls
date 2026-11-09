@@ -99,6 +99,95 @@ fn bool fuzzy_match(String target, String prefix)
 	return pi == prefix.len;
 }
 
+fn bool has_lparen_ahead(Context* ctx) @local
+{
+	if (!ctx.sf) return false;
+	sz scan = ctx.offset;
+	while (scan < ctx.sf.content.len && (ctx.sf.content[scan] == ' ' || ctx.sf.content[scan] == '\t')) scan++;
+	return scan < ctx.sf.content.len && ctx.sf.content[scan] == '(';
+}
+
+<*
+ Whether the completed word directly follows `=>`, so it starts an expression body.
+*>
+fn bool follows_arrow(Context* ctx) @local
+{
+	if (!ctx.sf || ctx.offset > ctx.sf.content.len) return false;
+	sz p = ctx.offset - ctx.prefix.len;
+	while (p > 0 && (ctx.sf.content[p - 1] == ' ' || ctx.sf.content[p - 1] == '\t')) p--;
+	return p >= 2 && ctx.sf.content[p - 2:2] == "=>";
+}
+
+fn void append_snippet_text(DString* out, String text) @local
+{
+	foreach (c : text)
+	{
+		if (c == '$' || c == '}' || c == '\\') out.append_char('\\');
+		out.append_char(c);
+	}
+}
+
+<*
+ Call text for a function or macro: required parameters become placeholders,
+ body parameters keep their declared names, which are valid as written, and a
+ trailing body gets a block holding the cursor.
+ Parameters with defaults and variadic parameters are left out, so required
+ parameters after a left-out one are named.
+*>
+fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_method, Node* body_params, bool is_void, InsertTextFormat* format) @local
+{
+	*format = PLAIN_TEXT;
+	if (has_lparen_ahead(ctx)) return name;
+
+	DString out;
+	out.tinit();
+	out.append(name);
+	out.append_char('(');
+	int tabstop = 1;
+	bool skipped = false;
+	bool first = true;
+	foreach (i, param : params)
+	{
+		if (i == 0 && is_method) continue;
+		if (!param || param.kind != VAR_DECL) continue;
+		VarDecl* vd = param.as(VarDecl);
+		if (!vd.name || vd.var_flags.is_variadic || vd.var_flags.is_macro_optional_ellipsis) continue;
+		if (vd.init_expr)
+		{
+			skipped = true;
+			continue;
+		}
+		if (!first) out.append(", ");
+		first = false;
+		if (skipped) out.appendf("%s: ", vd.name.text);
+		out.appendf("${%d:", tabstop++);
+		append_snippet_text(&out, vd.name.text);
+		out.append_char('}');
+	}
+
+	BodyParamDecl* body = body_params && body_params.kind == BODY_PARAM_DECL ? body_params.as(BodyParamDecl) : null;
+	if (body)
+	{
+		bool has_body_names;
+		foreach (param : body.params)
+		{
+			if (!param || param.kind != VAR_DECL || !param.as(VarDecl).name) continue;
+			out.append(has_body_names ? ", " : "; ");
+			has_body_names = true;
+			append_snippet_text(&out, param.as(VarDecl).name.text);
+		}
+		out.append(")\n{\n\t$0\n}");
+		if (ctx.is_stmt && !follows_arrow(ctx)) out.append_char(';');
+		*format = SNIPPET;
+		return out.str_view();
+	}
+
+	out.append_char(')');
+	if (is_void && ctx.is_stmt) out.append_char(';');
+	if (tabstop > 1) *format = SNIPPET;
+	return out.str_view();
+}
+
 fn void add_symbol_completion(
 	Context* ctx,
 	List{CompletionItem}* items,
@@ -140,48 +229,7 @@ fn void add_symbol_completion(
 					is_void = true;
 				}
 
-				sz param_count = fd.params.len;
-				if (fd.associated_type != null && param_count > 0)
-				{
-					param_count--;
-				}
-
-				bool has_lparen_ahead = false;
-				if (ctx.sf && ctx.offset < ctx.sf.content.len)
-				{
-					sz scan = ctx.offset;
-					while (scan < ctx.sf.content.len && (ctx.sf.content[scan] == ' ' || ctx.sf.content[scan] == '\t')) scan++;
-					if (scan < ctx.sf.content.len && ctx.sf.content[scan] == '(') has_lparen_ahead = true;
-				}
-
-				if (has_lparen_ahead)
-				{
-					format = PLAIN_TEXT;
-				}
-				else if (param_count == 0)
-				{
-					if (is_void && ctx.is_stmt)
-					{
-						insert_text = string::tformat("%s();", insert_text);
-					}
-					else
-					{
-						insert_text = string::tformat("%s()", insert_text);
-					}
-					format = PLAIN_TEXT;
-				}
-				else
-				{
-					if (is_void && ctx.is_stmt)
-					{
-						insert_text = string::tformat("%s($1);", insert_text);
-					}
-					else
-					{
-						insert_text = string::tformat("%s($1)", insert_text);
-					}
-					format = SNIPPET;
-				}
+				insert_text = call_insert_text(ctx, insert_text, fd.params, fd.associated_type != null, null, is_void, &format);
 			}
 		case MACRO_DECL:
 			{
@@ -199,48 +247,7 @@ fn void add_symbol_completion(
 					is_void = true;
 				}
 
-				sz param_count = md.params.len;
-				if (@ok(md.associated_type.get()) && param_count > 0)
-				{
-					param_count--;
-				}
-
-				bool has_lparen_ahead = false;
-				if (ctx.sf && ctx.offset < ctx.sf.content.len)
-				{
-					sz scan = ctx.offset;
-					while (scan < ctx.sf.content.len && (ctx.sf.content[scan] == ' ' || ctx.sf.content[scan] == '\t')) scan++;
-					if (scan < ctx.sf.content.len && ctx.sf.content[scan] == '(') has_lparen_ahead = true;
-				}
-
-				if (has_lparen_ahead)
-				{
-					format = PLAIN_TEXT;
-				}
-				else if (param_count == 0 && !md.body_params)
-				{
-					if (is_void && ctx.is_stmt)
-					{
-						insert_text = string::tformat("%s();", insert_text);
-					}
-					else
-					{
-						insert_text = string::tformat("%s()", insert_text);
-					}
-					format = PLAIN_TEXT;
-				}
-				else
-				{
-					if (is_void && ctx.is_stmt)
-					{
-						insert_text = string::tformat("%s($1);", insert_text);
-					}
-					else
-					{
-						insert_text = string::tformat("%s($1)", insert_text);
-					}
-					format = SNIPPET;
-				}
+				insert_text = call_insert_text(ctx, insert_text, md.params, @ok(md.associated_type.get()), md.body_params, is_void, &format);
 			}
 		case INTERFACE_DECL:
 			type_desc = "interface";
@@ -2593,6 +2600,7 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 	}
 
 	String before_at = ctx.sf.content[stmt_start : at_pos - stmt_start].trim();
+	if (before_at.contains("=>")) return false;
 
 	if (try first_at = before_at.index_of_char('@'))
 	{
@@ -3040,7 +3048,8 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 
 	if (try eq_idx = line_prefix.rindex_of_char('='))
 	{
-		if (eq_idx == 0 || (line_prefix[eq_idx - 1] != '=' && line_prefix[eq_idx - 1] != '!' && line_prefix[eq_idx - 1] != '<' && line_prefix[eq_idx - 1] != '>'))
+		bool is_arrow = eq_idx + 1 < line_prefix.len && line_prefix[eq_idx + 1] == '>';
+		if (!is_arrow && (eq_idx == 0 || (line_prefix[eq_idx - 1] != '=' && line_prefix[eq_idx - 1] != '!' && line_prefix[eq_idx - 1] != '<' && line_prefix[eq_idx - 1] != '>')))
 		{
 			String des_type = find_designated_assignment_type(ctx, ctx.sf, ctx.offset);
 			if (des_type.len > 0)

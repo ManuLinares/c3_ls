@@ -78,7 +78,7 @@ fn void test_user_repro_issue1_method_snippet_parentheses()
     }
 
     assert(create_item != null, "Could not find 'create' in completion items");
-    test::eq(create_item.insertText, "create($1);");
+    test::eq(create_item.insertText, "create(${1:physicsEngine}, ${2:physicsScene}, ${3:carRigidBody}, ${4:carGameObject}, ${5:rampSize}, ${6:shapeOffset}, ${7:rampLocalPos}, ${8:rampRotationAxis});");
     test::eq(create_item.insertTextFormat, InsertTextFormat.SNIPPET);
     // assert(create_item.command.has_value, "Expected command on function completion item");
     // test::eq(create_item.command.value.command, "editor.action.triggerParameterHints");

@@ -1187,7 +1187,7 @@ fn void main() {
 
 <*
  Feature 2: Completing a void function at the statement level
- appends a semicolon (`do_log($1);`), whereas non-void calls do not.
+ appends a semicolon (`do_log(${1:msg});`), whereas non-void calls do not.
 *>
 fn void test_auto_semicolon_on_void_call_completion() @test
 {
@@ -1220,7 +1220,7 @@ fn void main() {
 		if (item.label == "do_log")
 		{
 			found_log = true;
-			test::eq(item.insertText, "do_log($1);");
+			test::eq(item.insertText, "do_log(${1:msg});");
 			test::eq(item.insertTextFormat, InsertTextFormat.SNIPPET);
 		}
 	}
@@ -1236,7 +1236,7 @@ fn void main() {
 		if (item.label == "compute_val")
 		{
 			found_compute = true;
-			test::eq(item.insertText, "compute_val($1)");
+			test::eq(item.insertText, "compute_val(${1:x})");
 		}
 	}
 	assert(found_compute);
