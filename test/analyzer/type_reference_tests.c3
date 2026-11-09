@@ -98,3 +98,36 @@ fn int use(TNode* n) => n.t;
 `);
 	assert(errs.len == 1, "%s", errs);
 }
+
+fn void related_modules_outside_the_lineage_need_an_import() @test
+{
+	Diag[] errs = diag_capture::errors_for(`module a::x;
+struct XNode { int x; }
+module a::x::p;
+struct PNode { int p; }
+module a::y;
+fn int sibling(XNode* n) => n.x;
+fn int nephew(PNode* n) => n.p;
+module a::y::q;
+fn int cousin(PNode* n) => n.p;
+fn int uncle(XNode* n) => n.x;
+`);
+	assert(errs.len == 4, "%s", errs);
+}
+
+fn void modules_in_the_lineage_see_each_other() @test
+{
+	Diag[] errs = diag_capture::errors_for(`module a;
+struct ANode { int a; }
+module a::x;
+struct XNode { int x; }
+module a::x::p;
+fn int parent(XNode* n) => n.x;
+fn int grandparent(ANode* n) => n.a;
+module a::x::p::q;
+struct QNode { int q; }
+module a;
+fn int grandchild(QNode* n) => n.q;
+`);
+	assert(errs.len == 0, "%s", errs);
+}

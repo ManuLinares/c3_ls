@@ -352,12 +352,7 @@ fn bool is_module_visible_at(AnalyzerContext* context, SourceFile* sf, Location 
 
 	if (target_mod == "std::core" || target_mod.starts_with("std::core::")) return true;
 
-	if (sf_mod.len > 0)
-	{
-		sz sf_dot = sf_mod.index_of("::") ?? sf_mod.len;
-		sz tg_dot = target_mod.index_of("::") ?? target_mod.len;
-		if (sf_mod[:sf_dot] == target_mod[:tg_dot]) return true;
-	}
+	if (module_is_within(sf_mod, target_mod) || module_is_within(target_mod, sf_mod)) return true;
 
 	return section_imports_reach(sf, loc, target_mod, require_public: false);
 }
