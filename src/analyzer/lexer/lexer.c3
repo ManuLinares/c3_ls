@@ -123,15 +123,6 @@ fn Token lex_block_comment(Lexer* self)
 		}
 	}
 
-	if (depth > 0)
-	{
-		return {
-			.kind = ERROR,
-			.value = self.get_string(start_index, self.index - start_index),
-			.range = {.start = start,.end = self.location }
-		};
-	}
-
 	return {
 		.kind = BLOCK_COMMENT,
 		.value = self.get_string(start_index, self.index - start_index),
