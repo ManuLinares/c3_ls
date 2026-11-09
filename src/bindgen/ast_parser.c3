@@ -250,6 +250,7 @@ struct ParseContext @local
 	HashSet{String} function_types;
 	HashMap{String, Object*} anon_records;
 	HashMap{String, Object*} anon_enums;
+	HashMap{String, String} unnamed_record_names;
 	HashMap{String, String} external_typedefs;
 	HashMap{String, Object*} external_records;
 	HashMap{String, Object*} external_enums;
@@ -264,6 +265,7 @@ fn void ParseContext.init(&self, Allocator allocator, CTranslationUnit* tu, Bind
 	self.function_types.init(allocator);
 	self.anon_records.init(allocator);
 	self.anon_enums.init(allocator);
+	self.unnamed_record_names.init(allocator);
 	self.external_typedefs.init(allocator);
 	self.external_records.init(allocator);
 	self.external_enums.init(allocator);
@@ -277,6 +279,7 @@ fn void ParseContext.free(&self)
 	self.function_types.free();
 	self.anon_records.free();
 	self.anon_enums.free();
+	self.unnamed_record_names.free();
 	self.external_typedefs.free();
 	self.external_records.free();
 	self.external_enums.free();
@@ -802,9 +805,8 @@ fn bool compute_record_bitfields(List{CField}* fields) @local
 	int current_container_cap = 64;
 	int current_bit_offset = 0;
 
-	for (sz i = 0; i < fields.len(); i++)
+	foreach (&f : *fields)
 	{
-		CField* f = fields.get_ref(i);
 		if (f.bit_width < 0)
 		{
 			has_non_bitfield = true;
@@ -1181,6 +1183,38 @@ fn bool is_enum_constant_emitted(CTranslationUnit* tu, String c_name) @local
 }
 
 <*
+ Gives the unnamed struct or union behind a pointer or array typedef the typedef's name, kept distinct
+ by a leading underscore, and returns `qual_type` spelled with that name. Later typedefs of the same
+ record reuse the first name.
+*>
+fn String ParseContext.name_unnamed_record(&self, Object* node, String c_name, String qual_type)
+{
+	sz? open = qual_type.index_of("(unnamed") ?? qual_type.index_of("(anonymous");
+	Object*? record = find_descendant_by_kind(node, "RecordDecl");
+	if (catch open, record) return qual_type;
+	ParenSpan? span = find_paren_span(qual_type, open);
+	if (catch span) return qual_type;
+
+	String tag = self.unnamed_record_tag(resolve_complete_decl(record, &self.anon_records), c_name);
+	return string::tformat("%s%s%s", qual_type[:open], tag, qual_type[span.close + 1..]);
+}
+
+<*
+ Name of an unnamed record: the one it already got, or `c_name`, parsing the record under it.
+*>
+fn String ParseContext.unnamed_record_tag(&self, Object* record, String c_name)
+{
+	String id = record.get_string("id") ?? "";
+	if (try known = self.unnamed_record_names.get(id)) return known;
+
+	String tag = c_name.copy(self.allocator);
+	self.unnamed_record_names.set(id, tag);
+	self.tu.underscored_tags.add(tag);
+	self.parse_record_decl_with_name(record, tag);
+	return tag;
+}
+
+<*
  Parses a TypedefDecl into either an alias (function pointers) or struct/type alias.
  Resolves anonymous RecordDecl / EnumDecl references by ID.
  Dispatches structured types (FunctionProtoType, VectorType) directly from Clang's AST.
@@ -1240,7 +1274,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 	self.target_types.add(c_name);
 
 	RawTypeInfo tinfo = extract_type_info(node);
-	String qual_type = tinfo.qual_type;
+	String qual_type = self.name_unnamed_record(node, c_name, tinfo.qual_type);
 
 	bool is_func_ptr = false;
 	String c3_name = sanitize_c3_type_name(self.allocator, c_name, self.options.type_prefix);

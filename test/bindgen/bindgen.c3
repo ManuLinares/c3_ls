@@ -3573,6 +3573,58 @@ fn void test_external_typedef_to_underscored_tag()
 	assert(code.contains("extern fn void use_handle(ExtAliasT h)"));
 }
 
+fn void test_pointer_typedef_to_unnamed_struct_names_the_struct()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"id": "0x1", "kind": "RecordDecl", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "fd", "type": { "qualType": "int" } },
+					{ "kind": "FieldDecl", "name": "name", "type": { "qualType": "char *" } }
+				]
+			},
+			{
+				"kind": "TypedefDecl", "name": "PrivPtr", "loc": { "file": "test.h" },
+				"type": { "qualType": "struct (unnamed at test.h:1:9) *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "id": "0x1", "kind": "RecordDecl", "name": "" } } ] } ]
+			},
+			{
+				"kind": "TypedefDecl", "name": "OtherPtr", "loc": { "file": "test.h" },
+				"type": { "qualType": "struct (unnamed at test.h:1:9) *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "id": "0x1", "kind": "RecordDecl", "name": "" } } ] } ]
+			},
+			{
+				"kind": "FunctionDecl", "name": "priv_fd", "loc": { "file": "test.h" }, "type": { "qualType": "int (PrivPtr)" },
+				"inner": [ { "kind": "ParmVarDecl", "name": "p", "type": { "qualType": "PrivPtr", "desugaredQualType": "struct (unnamed at test.h:1:9) *" } } ]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("struct _PrivPtr\n{\n\tint fd;\n\tchar* name;\n}"));
+	assert(code.contains("alias PrivPtr = _PrivPtr*;\n"));
+	assert(code.contains("alias OtherPtr = _PrivPtr*;\n"));
+	assert(code.contains("extern fn int priv_fd(PrivPtr p)"));
+	assert(!code.contains("Void"));
+}
+
 module lsp::bindgen_test::posix_signal;
 
 extern fn uint alarm(uint seconds) @cname("alarm");

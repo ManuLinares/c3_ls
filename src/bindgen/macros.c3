@@ -188,10 +188,10 @@ fn String? c3_number_literal(Allocator allocator, String body) @local
 	String s = body;
 	while (s.starts_with("(") && s.ends_with(")")) s = s[1..^2].trim();
 	if (s.len == 0 || (!s[0].is_digit() && s[0] != '.')) return UNSUPPORTED_MACRO_VALUE~;
-	for (sz i = 0; i < s.len; i++)
+	foreach (i, c : s)
 	{
-		bool is_exponent_sign = (s[i] == '+' || s[i] == '-') && i > 0 && "eEpP".contains_char(s[i - 1]);
-		if (!s[i].is_alnum() && s[i] != '.' && !is_exponent_sign) return UNSUPPORTED_MACRO_VALUE~;
+		bool is_exponent_sign = (c == '+' || c == '-') && i > 0 && "eEpP".contains_char(s[i - 1]);
+		if (!c.is_alnum() && c != '.' && !is_exponent_sign) return UNSUPPORTED_MACRO_VALUE~;
 	}
 
 	bool is_hex = s.starts_with("0x") || s.starts_with("0X");

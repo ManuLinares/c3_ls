@@ -83,9 +83,8 @@ fn void emit_enums(DString* sb, CTranslationUnit* tu) @local
 		if (e.is_constdef)
 		{
 			sb.appendf("constdef %s : %s%s\n{\n", e_name, e.is_inline ? "inline " : "", e.backing_type);
-			for (sz i = 0; i < e.variants.len(); i++)
+			foreach (i, v : e.variants)
 			{
-				CEnumVariant v = e.variants.get(i);
 				String vname = deduplicate_name(&seen_var_names, v.c3_name, tmem);
 
 				if (e.backing_type == "uint" && v.value > int::max)
@@ -116,9 +115,8 @@ fn void emit_enums(DString* sb, CTranslationUnit* tu) @local
 		else
 		{
 			sb.appendf("enum %s\n{\n", e_name);
-			for (sz i = 0; i < e.variants.len(); i++)
+			foreach (i, v : e.variants)
 			{
-				CEnumVariant v = e.variants.get(i);
 				String vname = deduplicate_name(&seen_var_names, v.c3_name, tmem);
 
 				sb.appendf("\t%s", vname);
@@ -187,18 +185,17 @@ fn CStruct*? fam_owner(CTranslationUnit* tu, CStruct* st) @local
 *>
 fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 {
-	for (sz i = 0; i < tu.structs.len(); i++)
+	foreach (&st : tu.structs)
 	{
-		CStruct* st = tu.structs.get_ref(i);
 		if (st.is_union || st.is_opaque)
 		{
 			continue;
 		}
 
 		sz non_fam_count = 0;
-		for (sz j = 0; j < st.fields.len(); j++)
+		foreach (&f : st.fields)
 		{
-			if (!st.fields.get(j).c3_type.ends_with("[*]"))
+			if (!f.c3_type.ends_with("[*]"))
 			{
 				non_fam_count++;
 			}
@@ -246,18 +243,15 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 	while (fam_modified)
 	{
 		fam_modified = false;
-		for (sz i = 0; i < tu.structs.len(); i++)
+		foreach (&st : tu.structs)
 		{
-			CStruct* st = tu.structs.get_ref(i);
 			if (st.is_union || st.is_opaque || st.fields.len() <= 1)
 			{
 				continue;
 			}
 
-			sz total_fields = st.fields.len();
-			for (sz j = 0; j + 1 < total_fields; j++)
+			foreach (&f : st.fields.array_view()[:^1])
 			{
-				CField f = st.fields.get(j);
 				if (!f.c3_type.contains("*") && !f.c3_type.contains("["))
 				{
 					String base = extract_base_type_ident(f.c3_type);
@@ -706,9 +700,8 @@ fn void emit_functions(DString* sb, CTranslationUnit* tu, HashSet{String}* seen_
 		HashSet{String} seen_p_names;
 		seen_p_names.tinit();
 
-		for (sz i = 0; i < fn_decl.params.len(); i++)
+		foreach (i, p : fn_decl.params)
 		{
-			CParam p = fn_decl.params.get(i);
 			String pname = deduplicate_name(&seen_p_names, p.name, tmem);
 
 			if (p.is_noalias && (p.c3_type.ends_with("*") || p.c3_type.ends_with("]")))

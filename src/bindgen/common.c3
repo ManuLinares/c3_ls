@@ -461,9 +461,8 @@ fn String to_snake_case(Allocator allocator, String name)
 	DString sb;
 	sb.init(allocator);
 
-	for (sz i = 0; i < name.len; i++)
+	foreach (i, c : name)
 	{
-		char c = name[i];
 
 		if (c >= 'A' && c <= 'Z')
 		{
@@ -816,9 +815,8 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 
 	bool all_upper = true;
 	bool has_alpha = false;
-	for (sz i = 0; i < s.len; i++)
+	foreach (c : s)
 	{
-		char c = s[i];
 		if (c >= 'a' && c <= 'z')
 		{
 			all_upper = false;
@@ -865,9 +863,9 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 	pascal = capitalize_ascii(allocator, pascal);
 
 	bool has_lower = false;
-	for (sz i = 0; i < pascal.len; i++)
+	foreach (c : pascal)
 	{
-		if (pascal[i] >= 'a' && pascal[i] <= 'z')
+		if (c >= 'a' && c <= 'z')
 		{
 			has_lower = true;
 			break;
@@ -881,9 +879,9 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 	if (type_prefix.len > 0 && !pascal.starts_with(type_prefix))
 	{
 		bool prefix_has_lower = false;
-		for (sz i = 0; i < type_prefix.len; i++)
+		foreach (c : type_prefix)
 		{
-			if (type_prefix[i] >= 'a' && type_prefix[i] <= 'z')
+			if (c >= 'a' && c <= 'z')
 			{
 				prefix_has_lower = true;
 				break;
@@ -939,36 +937,35 @@ fn String extract_base_type_name(String qual_type)
 	}
 
 	// 1. Tagged type: struct X, union X, enum X
-	for (sz i = 0; i < clean_words.len(); i++)
+	foreach (i, w : clean_words)
 	{
-		String w = clean_words.get(i);
 		if ((w == "struct" || w == "union" || w == "enum") && i + 1 < clean_words.len())
 		{
-			return clean_words.get(i + 1);
+			return clean_words[i + 1];
 		}
 	}
 
 	// 2. Suffix standard C type (e.g. "unsigned int", "char")
-	for (sz i = 0; i < clean_words.len(); i++)
-	{
-		DString suffix_sb;
-		suffix_sb.tinit();
-		for (sz j = i; j < clean_words.len(); j++)
-		{
-			if (suffix_sb.len() > 0) suffix_sb.append_char(' ');
-			suffix_sb.append(clean_words.get(j));
-		}
-		if (map_c_standard_type(suffix_sb.str_view()).len > 0)
-		{
-			return suffix_sb.str_view();
-		}
-	}
+	if (try suffix = standard_type_suffix(clean_words.array_view())) return suffix;
 
 	// 3. Rightmost token (typedef name)
 	return clean_words.get(clean_words.len() - 1);
 }
 
 const sz DEFAULT_VECTOR_COUNT = 4;
+
+<*
+ Longest trailing run of `words` naming a standard C type, e.g. "unsigned int" in "const unsigned int".
+*>
+fn String? standard_type_suffix(String[] words) @local
+{
+	for (sz i = 0; i < words.len; i++)
+	{
+		String suffix = string::tjoin(words[i..], " ");
+		if (map_c_standard_type(suffix).len > 0) return suffix;
+	}
+	return NOT_FOUND~;
+}
 
 <*
  Checks if a normalized C type string represents a function pointer or function type.
@@ -1112,12 +1109,11 @@ fn String map_c_type_to_c3(
 	if (base_c3.len == 0 && clean_words.len() > 0)
 	{
 		// Tagged type: struct X, union X, enum X
-		for (sz i = 0; i < clean_words.len(); i++)
+		foreach (i, w : clean_words)
 		{
-			String w = clean_words.get(i);
 			if ((w == "struct" || w == "union" || w == "enum") && i + 1 < clean_words.len())
 			{
-				base_c3 = tag_c3_name(allocator, clean_words.get(i + 1), type_prefix, underscored_tags);
+				base_c3 = tag_c3_name(allocator, clean_words[i + 1], type_prefix, underscored_tags);
 				break;
 			}
 		}
@@ -1125,25 +1121,7 @@ fn String map_c_type_to_c3(
 		if (base_c3.len == 0)
 		{
 			// Suffix standard C type (e.g. "unsigned int", "char")
-			for (sz i = 0; i < clean_words.len(); i++)
-			{
-				DString suffix_sb;
-				suffix_sb.tinit();
-				for (sz j = i; j < clean_words.len(); j++)
-				{
-					if (suffix_sb.len() > 0)
-					{
-						suffix_sb.append_char(' ');
-					}
-					suffix_sb.append(clean_words.get(j));
-				}
-				String std_match = map_c_standard_type(suffix_sb.str_view());
-				if (std_match.len > 0)
-				{
-					base_c3 = std_match;
-					break;
-				}
-			}
+			if (try suffix = standard_type_suffix(clean_words.array_view())) base_c3 = map_c_standard_type(suffix);
 		}
 	}
 
