@@ -434,7 +434,7 @@ fn void dispatch(LspMessage* message)
 						.items = items ?? {},
 					}
 				};
-				io_handler::write(translator::encode(res, tmem));
+				io_handler::write(translator::encode_omitting_absent(res, tmem));
 			}
 
 		case COMPLETION_RESOLVE:
@@ -446,7 +446,7 @@ fn void dispatch(LspMessage* message)
 					.id = message.has_id ? message.id : -1,
 					.result = item
 				};
-				io_handler::write(translator::encode(res, tmem));
+				io_handler::write(translator::encode_omitting_absent(res, tmem));
 			}
 
 		case HOVER:

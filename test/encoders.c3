@@ -66,10 +66,40 @@ fn void test_encode_completion_response()
 			.items = &items
 		}
 	};
-	String encoded = translator::encode(resp, tmem);
+	String encoded = translator::encode_omitting_absent(resp, tmem);
 	assert(encoded.starts_with("Content-Length:"));
 	assert(encoded.contains(`"label":"my_func"`));
 	assert(encoded.contains(`"isIncomplete":false`));
+}
+
+fn void test_encode_completion_response_omits_absent_properties()
+{
+	TextEdit edit = { .range = { .start = { .line = 0, .character = 4 }, .end = { .line = 0, .character = 7 } }, .newText = "lala::@mac()" };
+	CompletionItem[2] items = {
+		{ .label = "plain", .kind = FUNCTION },
+		{ .label = "@mac", .kind = FUNCTION, .textEdit = &edit },
+	};
+	LspCompletionResponse resp = {
+		.jsonrpc = "2.0",
+		.id = 3,
+		.result = { .isIncomplete = false, .items = &items }
+	};
+	String encoded = translator::encode_omitting_absent(resp, tmem);
+	assert(encoded.contains(`"isIncomplete":false`), "%s", encoded);
+	assert(encoded.contains(`{"label":"plain","kind":3}`), "%s", encoded);
+	assert(encoded.contains(`"textEdit":{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":7}},"newText":"lala::@mac()"}`), "%s", encoded);
+}
+
+fn void test_decode_completion_resolve_keeps_text_edit()
+{
+	String msg = `{"jsonrpc":"2.0","id":7,"method":"completionItem/resolve","params":{"label":"@mac","kind":3,"textEdit":{"range":{"start":{"line":2,"character":1},"end":{"line":2,"character":4}},"newText":"lala::@mac();"}}}`;
+	LspMessage decoded = translator::decode(tmem, msg)!!.message;
+	TextEdit* edit = decoded.params.completion_resolve.item.textEdit;
+	assert(edit != null);
+	test::eq(edit.newText, "lala::@mac();");
+	assert(edit.range.start.line == 2, "%d", edit.range.start.line);
+	assert(edit.range.start.character == 1, "%d", edit.range.start.character);
+	assert(edit.range.end.character == 4, "%d", edit.range.end.character);
 }
 
 fn void test_encode_goto_definition_response()

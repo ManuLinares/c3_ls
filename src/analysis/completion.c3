@@ -205,13 +205,14 @@ fn void add_symbol_completion(
 	String insert_text = symbol_name;
 	String node_type = "";
 
-	if (prefix.len > 0 && prefix.starts_with("@"))
-	{
-		insert_text = symbol_name.strip_prefix("@");
-	}
-	else if (qualifier.len > 0)
+	bool replaces_typed_at = qualifier.len > 0 && prefix.starts_with("@");
+	if (qualifier.len > 0)
 	{
 		insert_text = string::tformat("%s%s", qualifier, symbol_name);
+	}
+	else if (prefix.starts_with("@"))
+	{
+		insert_text = symbol_name.strip_prefix("@");
 	}
 
 	InsertTextFormat format = PLAIN_TEXT;
@@ -283,6 +284,14 @@ fn void add_symbol_completion(
 
 	String detail_string = string::tformat("%s via %s", type_desc, base_identifier);
 	String filter_text = symbol_name.strip_prefix("@");
+	TextEdit* text_edit = null;
+	if (replaces_typed_at)
+	{
+		// The client leaves the typed `@` in place, so the module path can only go before it by replacing it.
+		LspPosition start = { .line = ctx.position.line, .character = ctx.position.character - (uint)prefix.len };
+		text_edit = alloc::new(tmem, TextEdit, { .range = { .start = start, .end = ctx.position }, .newText = insert_text });
+		filter_text = symbol_name;
+	}
 
 	String sort_prefix = "0010";
 	if (ctx.expected_type.len > 0 && node_type.len > 0 && node_type == ctx.expected_type)
@@ -317,7 +326,8 @@ fn void add_symbol_completion(
 		.insertTextFormat = format,
 		.filterText = filter_text,
 		.sortText = string::tformat("%s_%s", sort_prefix, symbol_name),
-		.data = data_str
+		.data = data_str,
+		.textEdit = text_edit
 	}
 	);
 }

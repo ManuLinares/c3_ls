@@ -17,6 +17,8 @@ fn void main()
 	dad
 	Thin
 	builtin_f
+	@ma
+	@bm
 }
 
 fn void dada() {}
@@ -30,7 +32,23 @@ faultdef OOPS;
 macro void plainmac() {}
 struct Thing { int x; }
 fn void builtin_fn() @builtin {}
+macro void @mac() {}
+macro void @bmac() @builtin {}
 `;
+
+macro CompletionItem item_at(String label, uint line, uint character)
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/qualifier.c3", QUALIFIER_SOURCE);
+	Uri doc_uri = uri::from_file_path(tmem, "/virtual/qualifier.c3");
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = line, .character = character })!!)
+	{
+		if (item.label == label) return item;
+	}
+	unreachable("No completion '%s' at %d:%d", label, line, character);
+}
 
 macro String insert_text_at(String label, uint line, uint character)
 {
@@ -72,4 +90,27 @@ fn void types_and_builtins_have_no_prefix() @test
 {
 	test::eq(insert_text_at("Thing", 10, 5), "Thing");
 	test::eq(insert_text_at("builtin_fn", 11, 10), "builtin_fn();");
+}
+
+fn void typed_at_macro_from_other_module_replaces_the_typed_range() @test
+{
+	CompletionItem item = item_at("@mac", 12, 4);
+	assert(item.textEdit != null);
+	test::eq(item.textEdit.newText, "lala::@mac();");
+	assert(item.textEdit.range.start.line == 12, "%d", item.textEdit.range.start.line);
+	assert(item.textEdit.range.start.character == 1, "%d", item.textEdit.range.start.character);
+	assert(item.textEdit.range.end.character == 4, "%d", item.textEdit.range.end.character);
+	test::eq(item.filterText, "@mac");
+}
+
+fn void same_module_items_have_no_text_edit() @test
+{
+	assert(item_at("dada", 9, 4).textEdit == null);
+}
+
+fn void builtin_macro_has_no_prefix() @test
+{
+	CompletionItem item = item_at("@bmac", 13, 4);
+	assert(item.textEdit == null);
+	test::eq(item.insertText, "bmac();");
 }

@@ -88,6 +88,7 @@ struct CompletionItem
 	String filterText;
 	String sortText;
 	String data;
+	TextEdit* textEdit; // Replaces the typed range; insertText is used when null.
 }
 
 struct VersionedTextDocumentIdentifier

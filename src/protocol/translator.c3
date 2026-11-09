@@ -152,6 +152,87 @@ macro String encode(expr, Allocator allocator, int indent = 0)
 	);
 }
 
+<*
+ Like `encode`, but leaves out absent optional properties: empty strings, null
+ pointers, zero-valued constdefs, as LSP numbers its kinds from 1, and structs
+ holding only absent properties. Other numbers, bools and slices are always written.
+*>
+macro String encode_omitting_absent(expr, Allocator allocator)
+{
+	DString json;
+	json.tinit();
+	write_omitting_absent{$Typeof(expr)}(&json, expr)!!;
+	return string::format(allocator, "Content-Length: %d\r\n\r\n%s", json.len(), json.str_view());
+}
+
+fn bool is_absent(Type value) <Type> @local
+{
+	$switch:
+		$case Type == String:
+			return value.len == 0;
+		$case Type::kind == POINTER:
+			return value == null;
+		$case Type::kind == CONSTDEF:
+			Type zero;
+			return value == zero;
+		$case Type::kind == STRUCT:
+			$foreach $member : Type::members:
+				if (!is_absent{$member.type}(value.$member)) return false;
+			$endforeach
+			return true;
+		$default:
+			return false;
+	$endswitch
+}
+
+fn void? write_omitting_absent(OutStream out, Type value) <Type> @local
+{
+	$switch:
+		$case Type == String:
+			json::marshal_to(out, value)!;
+		$case Type::kind == POINTER:
+			write_omitting_absent{Type::inner}(out, *value)!;
+		$case Type::kind == STRUCT:
+			out.write_byte('{')!;
+			bool first = true;
+			$foreach $member : Type::members:
+				if (!is_absent{$member.type}(value.$member))
+				{
+					if (!first) out.write_byte(',')!;
+					first = false;
+					io::fprintf(out, `"%s":`, $member.name)!;
+					write_omitting_absent{$member.type}(out, value.$member)!;
+				}
+			$endforeach
+			out.write_byte('}')!;
+		$case Type::kind == SLICE:
+			out.write_byte('[')!;
+			foreach (i, element : value)
+			{
+				if (i > 0) out.write_byte(',')!;
+				write_omitting_absent{Type::inner}(out, element)!;
+			}
+			out.write_byte(']')!;
+		$default:
+			json::marshal_to(out, value)!;
+	$endswitch
+}
+
+fn LspRange decode_range(Object* range) @local
+{
+	if (!range) return {};
+	return {
+		.start = decode_position(range.get("start") ?? null),
+		.end = decode_position(range.get("end") ?? null),
+	};
+}
+
+fn LspPosition decode_position(Object* pos) @local
+{
+	if (!pos) return {};
+	return { .line = (uint)(pos.get_int("line") ?? 0), .character = (uint)(pos.get_int("character") ?? 0) };
+}
+
 struct IoDecodeResult
 {
 	LspMessage message;
@@ -390,6 +471,13 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 					item.filterText = (params_obj.get_string("filterText") ?? "").copy(allocator);
 					item.sortText = (params_obj.get_string("sortText") ?? "").copy(allocator);
 					item.data = (params_obj.get_string("data") ?? "").copy(allocator);
+					if (try edit_obj = params_obj.get("textEdit"))
+					{
+						item.textEdit = alloc::new(allocator, TextEdit, {
+							.range = decode_range(edit_obj.get("range") ?? null),
+							.newText = (edit_obj.get_string("newText") ?? "").copy(allocator),
+						});
+					}
 					String dval = params_obj.get_string("documentation") ?? "";
 					if (dval.len == 0)
 					{

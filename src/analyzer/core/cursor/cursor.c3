@@ -241,6 +241,18 @@ fn bool has_attribute(Node* node, AttributeKind kind, Node**out_attribute)
 			PathExpr* pe = node.as(PathExpr);
 			temp = pe.attributes;
 			break;
+		case MACRO_DECL: temp = node.as(MacroDecl).attributes;
+		case VAR_DECL: temp = node.as(VarDecl).attributes;
+		case ENUM_DECL: temp = node.as(EnumDecl).attributes;
+		case FAULT_DECL: temp = node.as(FaultDecl).attributes;
+		case ALIAS_DECL: temp = node.as(AliasDecl).attributes;
+		case TYPEDEF_DECL: temp = node.as(TypedefDecl).attributes;
+		case ATTRDEF_DECL: temp = node.as(AttrdefDecl).attributes;
+		case MODULE_DECL: temp = node.as(ModuleDecl).attributes;
+		case CT_EXPAND_DECL: temp = node.as(CtExpandDecl).attributes;
+		case SWITCH_STMT: temp = node.as(SwitchStmt).attributes;
+		case CALL_EXPR: temp = node.as(CallExpr).attributes;
+		case LAMBDA_EXPR: temp = node.as(LambdaExpr).attributes;
 		default:
 			return false;
 	}
