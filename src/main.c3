@@ -29,6 +29,8 @@ struct CliArgs
 	String bindgen_type_prefix;
 	String bindgen_strip_prefix;
 	String clang_path;
+	String target;
+	bool list_targets;
 	String[MAX_CLI_INCLUDES] includes;
 	String[MAX_CLI_DEFINES] defines;
 }
@@ -70,6 +72,8 @@ fn int main(String[] args)
 		"",  "type-prefix", "Type prefix for generated types (e.g. RL)",             &cli.bindgen_type_prefix,
 		"",  "strip-prefix", "Function prefix to strip (default: <module>_)",        &cli.bindgen_strip_prefix,
 		"",  "clang-path", "Path to clang executable",                               &cli.clang_path,
+		"",  "target", "Target to generate bindings for (default: host), see --list-targets", &cli.target,
+		"",  "list-targets", "List the targets accepted by --target",                &cli.list_targets,
 		"I", "include", "Include directory for clang (can be repeated)",             &cli.includes,
 		"D", "define", "Macro definition for clang (can be repeated)",               &cli.defines
 	);
@@ -90,8 +94,25 @@ fn int main(String[] args)
 		return 0;
 	}
 
+	if (cli.list_targets)
+	{
+		io::printf("Available targets:\n%s", bindgen::target_names());
+		return 0;
+	}
+
 	if (cli.bindgen.len > 0)
 	{
+		String target_triple;
+		if (cli.target.len > 0)
+		{
+			String? triple = bindgen::target_triple(cli.target);
+			if (catch triple)
+			{
+				io::eprintf("Error: unknown target '%s'. Available targets:\n%s", cli.target, bindgen::target_names());
+				return 1;
+			}
+			target_triple = triple;
+		}
 		List{String} inc_list;
 		inc_list.tinit();
 		foreach (s : cli.includes)
@@ -143,6 +164,7 @@ fn int main(String[] args)
 			.type_prefix = cli.bindgen_type_prefix,
 			.strip_func_prefix = cli.bindgen_strip_prefix,
 			.clang_path = cli.clang_path,
+			.target = target_triple,
 			.include_dirs = inc_list.array_view(),
 			.defines = def_list.array_view()
 		};

@@ -14,27 +14,26 @@ const String[*] SYSTEM_SEARCH_ROOTS = {
 
 fn void add_unique_include(BindgenOptions* options, String dir)
 {
-	String clean = dir.trim();
-	if (clean.len == 0)
-	{
-		return;
-	}
+	options.include_dirs = with_unique(options.include_dirs, dir);
+}
 
-	foreach (existing : options.include_dirs)
-	{
-		if (existing == clean)
-		{
-			return;
-		}
-	}
-	List{String} list;
-	list.tinit();
-	foreach (d : options.include_dirs)
-	{
-		list.push(d.copy(tmem));
-	}
-	list.push(clean.copy(tmem));
-	options.include_dirs = list.to_tarray();
+fn void add_unique_define(BindgenOptions* options, String define)
+{
+	options.defines = with_unique(options.defines, define);
+}
+
+<*
+ `list` with `value` appended, unless it is blank or already present.
+*>
+fn String[] with_unique(String[] list, String value) @local
+{
+	String clean = value.trim();
+	if (clean.len == 0 || array::contains(list, clean)) return list;
+	List{String} out;
+	out.tinit();
+	foreach (item : list) out.push(item.copy(tmem));
+	out.push(clean.copy(tmem));
+	return out.to_tarray();
 }
 
 <*
@@ -316,14 +315,12 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 			return 1;
 		}
 
-		Path? tmp_dir = path::temp_directory(tmem);
-		if (catch tmp_dir)
+		Path? wrapper = unique_temp_path("c3_bindgen_wrap", ".h");
+		if (catch wrapper)
 		{
 			report_error(is_cli, "Failed to access temporary directory.");
 			return 1;
 		}
-
-		Path wrapper = tmp_dir.tappend(string::tformat("c3_bindgen_wrap_%d.h", (int)datetime::now().sec)) ?? (Path)"";
 		temp_wrapper_path = (String)wrapper;
 
 		DString wrap_content;

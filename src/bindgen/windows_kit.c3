@@ -2,7 +2,13 @@ module lsp::bindgen;
 
 import std;
 
-faultdef MSVC_CRT_NOT_FOUND, WINDOWS_SDK_NOT_FOUND;
+faultdef MSVC_CRT_NOT_FOUND, WINDOWS_SDK_NOT_FOUND, UNSUPPORTED_KERNEL_ARCH;
+
+struct WindowsKit
+{
+	String root;
+	bool is_kernel; // A km/ header: km/, km/crt/ and shared/ replace um/, shared/, ucrt/ and the MSVC CRT.
+}
 
 <*
  The fix to print for a Windows SDK lookup fault, or empty for other faults.
@@ -50,40 +56,46 @@ fn String? find_msvc_crt_dir(String[] sdk_roots)
 }
 
 <*
- The Windows Kits include directory, the one holding um/, shared/ and ucrt/, that contains the
- header or one of the include directories.
+ The Windows Kits include directory that contains the header or one of the include directories.
 *>
-fn String? find_windows_kit(BindgenOptions options)
+fn WindowsKit? find_windows_kit(BindgenOptions options)
 {
-	if (try kit = find_windows_kit_root(options.header_path)) return kit;
+	if (try kit = find_windows_kit_at(options.header_path)) return kit;
 	foreach (dir : options.include_dirs)
 	{
-		if (try kit = find_windows_kit_root(dir)) return kit;
+		if (try kit = find_windows_kit_at(dir)) return kit;
 	}
 	return NOT_FOUND~;
 }
 
 <*
- The Windows Kits layout inside c3c's MSVC SDK, for headers that include windows.h from outside a kit.
+ The Windows Kits layout inside c3c's MSVC SDK for the target's architecture, for headers that
+ include windows.h from outside a kit.
 *>
-fn String? find_msvc_sdk_windows_kit()
+fn WindowsKit? find_msvc_sdk_windows_kit(String target_triple)
 {
+	String arch = (target_triple.len > 0 ? target_triple : host_windows_triple()).starts_with("aarch64") ? "arm64" : "x64";
 	foreach (root : msvc_sdk_roots())
 	{
-		Path? kit = path::tnew(root).tappend("include", "x64");
+		Path? kit = path::tnew(root).tappend("include", arch);
 		if (catch kit) continue;
-		if (is_kit_dir(kit, "um") && is_kit_dir(kit, "shared") && is_kit_dir(kit, "ucrt")) return (String)kit;
+		if (is_kit_dir(kit, "um") && is_kit_dir(kit, "shared") && is_kit_dir(kit, "ucrt")) return { .root = (String)kit };
 	}
 	return WINDOWS_SDK_NOT_FOUND~;
 }
 
-fn String? find_windows_kit_root(String path) @local
+<*
+ The kit, a directory holding shared/ and um/ or km/, that contains `path`.
+*>
+fn WindowsKit? find_windows_kit_at(String path) @local
 {
 	Path dir = path.to_absolute_path(tmem)!;
 	if (file::is_file((String)dir)) dir = dir.parent()!;
+	String entered_from;
 	while (true)
 	{
-		if (is_kit_dir(dir, "um") && is_kit_dir(dir, "shared") && is_kit_dir(dir, "ucrt")) return (String)dir;
+		if (is_kit_dir(dir, "shared") && (is_kit_dir(dir, "um") || is_kit_dir(dir, "km"))) return { (String)dir, entered_from == "km" };
+		entered_from = dir.basename();
 		dir = dir.parent()!;
 	}
 }
@@ -94,25 +106,61 @@ fn bool is_kit_dir(Path kit_root, String name) @local
 }
 
 <*
- Points clang at a Windows Kits header set: the MSVC target, the kit's um, shared and ucrt
- directories, and the MSVC CRT from c3c's SDK, which the kits do not ship. On case-sensitive hosts
- the kit is read through a case-insensitive overlay, set as `vfs_overlay`, since its includes do
- not match file name case.
+ Points clang at a Windows Kits header set with the MSVC target. User-mode headers get the kit's um,
+ shared and ucrt directories and the MSVC CRT from c3c's SDK, which the kits do not ship. Kernel
+ headers get km, km/crt and shared, with _KERNEL_MODE and the architecture define a driver build
+ passes. On case-sensitive hosts the kit is read through a case-insensitive overlay, set as
+ `vfs_overlay`, since its includes do not match file name case.
 *>
-fn void? configure_windows_kit(BindgenOptions* options, String kit_root)
+fn void? configure_windows_kit(BindgenOptions* options, WindowsKit kit)
 {
-	String crt = find_msvc_crt_dir(msvc_sdk_roots())!;
-	Path root = path::tnew(kit_root)!;
-	String[3] kit_dirs = { (String)root.tappend("um")!, (String)root.tappend("shared")!, (String)root.tappend("ucrt")! };
-	if (options.target.len == 0) options.target = "x86_64-pc-windows-msvc";
+	Path root = path::tnew(kit.root)!;
+	if (options.target.len == 0) options.target = host_windows_triple();
+	options.has_windows_kit = true;
+	String[3] kit_dirs;
+	if (kit.is_kernel)
+	{
+		kit_dirs = { (String)root.tappend("km")!, (String)root.tappend("km", "crt")!, (String)root.tappend("shared")! };
+		add_unique_define(options, "_KERNEL_MODE");
+		add_unique_define(options, kernel_arch_define(options.target)!);
+	}
+	else
+	{
+		kit_dirs = { (String)root.tappend("um")!, (String)root.tappend("shared")!, (String)root.tappend("ucrt")! };
+	}
 	foreach (dir : kit_dirs) add_unique_include(options, dir);
-	add_unique_include(options, crt);
+	if (!kit.is_kernel) add_unique_include(options, find_msvc_crt_dir(msvc_sdk_roots())!);
 
 	$if !env::WIN32:
-		Path overlay = path::temp_directory(tmem)!.tappend(string::tformat("c3_bindgen_kit_%d.yaml", (int)datetime::now().sec))!;
+		Path overlay = unique_temp_path("c3_bindgen_kit", ".yaml")!;
 		file::save(overlay, case_insensitive_overlay(&kit_dirs))!;
 		options.vfs_overlay = (String)overlay;
 	$endif
+}
+
+<*
+ Whether a missing windows.h should be taken from c3c's MSVC SDK: no kit is set up yet and the
+ target is unset or an MSVC one.
+*>
+fn bool should_use_msvc_sdk_for(BindgenOptions options, String missing_header)
+{
+	if (options.has_windows_kit || missing_header.to_lower_tcopy() != "windows.h") return false;
+	return options.target.len == 0 || options.target.ends_with("windows-msvc");
+}
+
+<*
+ The architecture macro that the WDK build defines for kernel headers, which select their
+ architecture-specific declarations with it instead of the compiler's _M_* macros.
+*>
+fn String? kernel_arch_define(String target_triple) @local
+{
+	switch
+	{
+		case target_triple.starts_with("x86_64"): return "_AMD64_";
+		case target_triple.starts_with("aarch64") || target_triple.starts_with("arm64"): return "_ARM64_";
+		case target_triple.starts_with("i386") || target_triple.starts_with("i686"): return "_X86_";
+		default: return UNSUPPORTED_KERNEL_ARCH~;
+	}
 }
 
 <*

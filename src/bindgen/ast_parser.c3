@@ -771,10 +771,12 @@ fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, Str
 }
 
 <*
- Calculates bit offsets for bitfields and returns true if all fields are bitfields.
+ Calculates bit offsets for bitfields and returns true if all fields are bitfields that share one
+ storage unit, so the record can be a bitstruct.
 *>
-fn bool compute_record_bitfields(List{CField}* fields) @local
+fn bool compute_record_bitfields(List{CField}* fields, int c_long_bits, bool ms_bitfields) @local
 {
+	if (ms_bitfields) return compute_ms_bitfields(fields, c_long_bits);
 	bool has_any_bitfield = false;
 	bool has_non_bitfield = false;
 	int current_container_cap = 64;
@@ -790,7 +792,7 @@ fn bool compute_record_bitfields(List{CField}* fields) @local
 		}
 
 		has_any_bitfield = true;
-		int cap = type_bit_capacity(f.c3_type);
+		int cap = type_bit_capacity(f.c3_type, c_long_bits);
 		if (cap > current_container_cap)
 		{
 			current_container_cap = cap;
@@ -812,6 +814,41 @@ fn bool compute_record_bitfields(List{CField}* fields) @local
 	}
 
 	return has_any_bitfield && !has_non_bitfield;
+}
+
+<*
+ MS bitfield layout: a bitfield lives in a storage unit of its declared type, and a new unit starts
+ when the declared type's size changes, when the field does not fit in the bits left, or after a
+ zero-width bitfield.
+*>
+fn bool compute_ms_bitfields(List{CField}* fields, int c_long_bits) @local
+{
+	bool has_non_bitfield;
+	int unit = -1;
+	int unit_bits;
+	int used_bits;
+	foreach (&f : *fields)
+	{
+		if (f.bit_width < 0)
+		{
+			has_non_bitfield = true;
+			unit_bits = 0;
+			continue;
+		}
+		int bits = type_bit_capacity(f.c3_type, c_long_bits);
+		if (f.bit_width > 0 && (bits != unit_bits || used_bits + f.bit_width > unit_bits))
+		{
+			unit++;
+			unit_bits = bits;
+			used_bits = 0;
+		}
+		f.storage_unit = unit;
+		f.storage_bits = bits;
+		f.bit_offset = used_bits;
+		used_bits += f.bit_width;
+		if (f.bit_width == 0) unit_bits = 0;
+	}
+	return !has_non_bitfield && unit == 0;
 }
 
 <*
@@ -929,14 +966,14 @@ fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_n
 		is_complete = self.parse_record_fields(node, c_name, c_object, &fields);
 	}
 
-	bool is_all_bitfields = compute_record_bitfields(&fields);
-	if (!is_packed)
+	bool is_all_bitfields = compute_record_bitfields(&fields, self.tu.c_long_bits, self.tu.ms_bitfields);
+	if (!is_packed && !self.tu.ms_bitfields)
 	{
 		foreach (f : fields)
 		{
 			if (f.bit_width >= 0)
 			{
-				uint align_bytes = (uint)(type_bit_capacity(f.c3_type) / 8);
+				uint align_bytes = (uint)(type_bit_capacity(f.c3_type, self.tu.c_long_bits) / 8);
 				if (align_bytes > alignment) alignment = align_bytes;
 			}
 		}
@@ -1347,11 +1384,17 @@ fn void parse_clang_ast_json(
 {
 	Object*[] nodes = inner_nodes(root_obj);
 
+	tu.c_long_bits = target_c_long_bits(options.target);
+	tu.ms_bitfields = target_uses_ms_bitfields(options.target);
 	ParseContext ctx;
 	ctx.init(allocator, tu, options);
 	defer ctx.free();
 
 	// Pass 1: Index typedefs and records across entire translation unit
+	HashMap{String, String} tags_by_c3_name;
+	tags_by_c3_name.tinit();
+	HashMap{String, String} typedef_tags;
+	typedef_tags.tinit();
 	foreach (node : nodes)
 	{
 
@@ -1373,13 +1416,11 @@ fn void parse_clang_ast_json(
 					ctx.external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
 				}
 				bool is_indirect = desugared.contains("*") || desugared.contains("[");
+				String named_tag;
 				if (try rec_child = find_descendant_by_kind(node, "RecordDecl"))
 				{
 					String tag = rec_child.get_string("name") ?? "";
-					if (is_indirect && tag.len > 0 && !is_fundamental_c_type(tag) && sanitize_c3_type_name(tmem, tag, "") == sanitize_c3_type_name(tmem, td_name, ""))
-					{
-						tu.underscored_tags.add(tag.copy(allocator));
-					}
+					if (!is_indirect) named_tag = tag;
 					index_tag_decl(allocator, is_indirect ? tag : td_name, rec_child, &ctx.external_records, &ctx.anon_records);
 				}
 				else if (try enum_child = find_descendant_by_kind(node, "EnumDecl"))
@@ -1387,13 +1428,16 @@ fn void parse_clang_ast_json(
 					String reg_name = is_indirect ? (enum_child.get_string("name") ?? "") : td_name;
 					index_tag_decl(allocator, reg_name, enum_child, &ctx.external_enums, &ctx.anon_enums);
 				}
+				typedef_tags.set(td_name, named_tag);
 			}
 			continue;
 		}
 
 		if (kind == "RecordDecl")
 		{
-			index_tag_decl(allocator, node.get_string("name") ?? "", node, &ctx.external_records, &ctx.anon_records);
+			String tag = node.get_string("name") ?? "";
+			if (tag.len > 0 && !is_fundamental_c_type(tag)) tags_by_c3_name.set(sanitize_c3_type_name(tmem, tag, ""), tag);
+			index_tag_decl(allocator, tag, node, &ctx.external_records, &ctx.anon_records);
 			continue;
 		}
 
@@ -1403,6 +1447,16 @@ fn void parse_clang_ast_json(
 			continue;
 		}
 	}
+
+	// A tag that sanitizes to a typedef's name, while the typedef names another type or a pointer,
+	// keeps its leading underscore so the typedef's name stays the typedef's.
+	typedef_tags.@each(; String td_name, String named_tag)
+	{
+		if (try tag = tags_by_c3_name.get(sanitize_c3_type_name(tmem, td_name, "")))
+		{
+			if (tag != named_tag) tu.underscored_tags.add(tag.copy(allocator));
+		}
+	};
 
 	String current_file = options.header_path;
 

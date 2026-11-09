@@ -453,6 +453,15 @@ fn void emit_bitfield_members(DString* sb, List{CField}* fields, sz start_idx, s
 	}
 }
 
+<*
+ Whether two bitfields go in one bitstruct: the same storage unit under MS layout, any adjacent
+ bitfields under SysV.
+*>
+fn bool shares_storage_unit(CField* first, CField* other) @local
+{
+	return first.storage_bits == 0 || first.storage_unit == other.storage_unit;
+}
+
 fn bool bitfields_have_overlap(List{CField}* fields, sz start_idx, sz end_idx) @local
 {
 	int highest_end = 0;
@@ -476,8 +485,10 @@ fn bool bitfields_have_overlap(List{CField}* fields, sz start_idx, sz end_idx) @
 	return false;
 }
 
-fn String get_bitfields_backing_type(List{CField}* fields, sz start_idx, sz end_idx, bool is_pure_bitfield, bool is_packed) @local
+fn String get_bitfields_backing_type(List{CField}* fields, sz start_idx, sz end_idx, bool is_pure_bitfield, bool is_packed, int c_long_bits) @local
 {
+	int storage_bits = fields.get(start_idx).storage_bits;
+	if (storage_bits > 0) return capacity_backing_type(storage_bits);
 	int max_bits = 0;
 	int max_cap = 0;
 	for (sz j = start_idx; j < end_idx; j++)
@@ -493,7 +504,7 @@ fn String get_bitfields_backing_type(List{CField}* fields, sz start_idx, sz end_
 		}
 		if (is_pure_bitfield && !is_packed)
 		{
-			int cap = type_bit_capacity(bf.c3_type);
+			int cap = type_bit_capacity(bf.c3_type, c_long_bits);
 			if (cap > max_cap)
 			{
 				max_cap = cap;
@@ -577,7 +588,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 
 		if (st.is_bitfield)
 		{
-			String backing_type = get_bitfields_backing_type(&st.fields, 0, st.fields.len(), true, st.is_packed);
+			String backing_type = get_bitfields_backing_type(&st.fields, 0, st.fields.len(), true, st.is_packed, tu.c_long_bits);
 			bool overlap = bitfields_have_overlap(&st.fields, 0, st.fields.len());
 			sb.appendf("bitstruct %s : %s", st_name, backing_type);
 			if (overlap)
@@ -648,12 +659,12 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 			}
 
 			sz grp_end = i;
-			while (grp_end < st.fields.len() && st.fields.get(grp_end).bit_width >= 0)
+			while (grp_end < st.fields.len() && st.fields.get(grp_end).bit_width >= 0 && shares_storage_unit(f, st.fields.get_ref(grp_end)))
 			{
 				grp_end++;
 			}
 
-			String grp_backing = get_bitfields_backing_type(&st.fields, i, grp_end, false, st.is_packed);
+			String grp_backing = get_bitfields_backing_type(&st.fields, i, grp_end, false, st.is_packed, tu.c_long_bits);
 			bool overlap = bitfields_have_overlap(&st.fields, i, grp_end);
 			String grp_name = deduplicate_name(&seen_field_names, "bits", tmem);
 			sb.appendf("\tbitstruct %s : %s", grp_name, grp_backing);
@@ -661,6 +672,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 			{
 				sb.append(" @overlap");
 			}
+			if (f.alignment > 0) sb.appendf(" @align(%d)", f.alignment);
 			sb.append("\n\t{\n");
 			emit_bitfield_members(sb, &st.fields, i, grp_end, "\t\t");
 			sb.append("\t}\n");

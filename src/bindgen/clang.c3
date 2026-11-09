@@ -150,9 +150,9 @@ fn String? run_clang_ast_dump(Allocator allocator, BindgenOptions* options)
 		String stderr_str = out.stderr_str;
 
 		String missing = extract_missing_header_from_stderr(stderr_str);
-		if (options.target.len == 0 && missing.to_lower_tcopy() == "windows.h")
+		if (should_use_msvc_sdk_for(*options, missing))
 		{
-			configure_windows_kit(options, find_msvc_sdk_windows_kit()!)!;
+			configure_windows_kit(options, find_msvc_sdk_windows_kit(options.target)!)!;
 			continue;
 		}
 		if (missing.len > 0)
@@ -201,6 +201,15 @@ fn String? run_clang_macro_dump(Allocator allocator, BindgenOptions options)
 }
 
 <*
+ A temp file path no other bindgen run uses: `prefix`, random hex, then `extension`. Runs that start
+ in the same second must not share probe or wrapper files, which each run deletes when done.
+*>
+fn Path? unique_temp_path(String prefix, String extension)
+{
+	return path::temp_directory(tmem)!.tappend(string::tformat("%s_%s%s", prefix, hex::tencode(&&random::entropy()), extension));
+}
+
+<*
  C source that includes the header once, followed by each probe section.
 *>
 fn String build_probe(String header_path, String[] sections)
@@ -218,7 +227,7 @@ fn String build_probe(String header_path, String[] sections)
 *>
 fn String? run_clang_probe(Allocator allocator, BindgenOptions options, String[] sections)
 {
-	Path probe = path::temp_directory(tmem)!.tappend(string::tformat("c3_bindgen_probe_%d.c", (int)datetime::now().sec))!;
+	Path probe = unique_temp_path("c3_bindgen_probe", ".c")!;
 	String header = (String)options.header_path.to_absolute_path(tmem)!;
 	file::save(probe, build_probe(header, sections))!;
 	defer (void)file::delete(probe);

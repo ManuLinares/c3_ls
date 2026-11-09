@@ -3696,6 +3696,184 @@ typedef struct {
 	};
 }
 
+fn void test_kernel_header_uses_km_includes_and_arch_define()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_kit_km")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path kit = root.tappend("Include", "10.0.1.0")!!;
+	save_test_file(kit.tappend("shared")!!, "NtDef.h", "typedef long NTSTATUS;\n");
+	save_test_file(kit.tappend("km", "crt")!!, "excpt.h", "typedef int EXCEPTION_DISPOSITION;\n");
+	save_test_file(kit.tappend("km")!!, "Drv.h", `
+#include <ntdef.h>
+#include <excpt.h>
+typedef struct {
+	NTSTATUS status;
+	EXCEPTION_DISPOSITION disposition;
+#if defined(_AMD64_) && defined(_KERNEL_MODE)
+	int kernel_x64;
+#endif
+} DrvRecord;
+`);
+
+	String code = generate_bindings(root, kit.tappend("km", "Drv.h")!!);
+	assert(code.contains("struct DrvRecord\n{\n\tCLong status;\n\tExceptionDisposition disposition;\n\tint kernel_x64;\n}"), "%s", code);
+}
+
+fn void test_long_bitfield_storage_follows_target_long_width()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_long_bitfields")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	save_test_file(root, "bits.h", "struct bits { unsigned long a : 5; unsigned long b : 3; };\n");
+	Path header = root.tappend("bits.h")!!;
+	String output = (String)root.tappend("bits.c3")!!;
+
+	BindgenOptions windows = { .header_path = (String)header, .output_path = output, .module_name = "bits", .target = "x86_64-pc-windows-msvc" };
+	test::eq(bindgen::run_bindgen(windows), 0);
+	String code = (String)file::load_temp(output)!!;
+	assert(code.contains("bitstruct Bits : uint"), "%s", code);
+
+	BindgenOptions linux = { .header_path = (String)header, .output_path = output, .module_name = "bits", .target = "x86_64-pc-linux-gnu" };
+	test::eq(bindgen::run_bindgen(linux), 0);
+	code = (String)file::load_temp(output)!!;
+	assert(code.contains("bitstruct Bits : ulong"), "%s", code);
+}
+
+fn void test_target_names_map_to_c3c_triples()
+{
+	test::eq(bindgen::target_triple("windows-x64")!!, "x86_64-pc-windows-msvc");
+	test::eq(bindgen::target_triple("windows-aarch64")!!, "aarch64-pc-windows-msvc");
+	test::eq(bindgen::target_triple("linux-aarch64")!!, "aarch64-unknown-linux-gnu");
+	test::eq(bindgen::target_triple("macos-aarch64")!!, "aarch64-apple-macosx");
+	assert(@catch(bindgen::target_triple("windows-arm")) == bindgen::UNKNOWN_TARGET);
+	assert(bindgen::target_names().contains("windows-aarch64"));
+}
+
+fn void test_kernel_header_arch_define_follows_target()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_kit_km_arm64")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path kit = root.tappend("Include", "10.0.1.0")!!;
+	save_test_file(kit.tappend("shared")!!, "ntdef.h", "");
+	save_test_file(kit.tappend("km", "crt")!!, "excpt.h", "");
+	save_test_file(kit.tappend("km")!!, "Drv.h", `
+typedef struct {
+	int always;
+#ifdef _ARM64_
+	int arm64_only;
+#endif
+#ifdef _AMD64_
+	int amd64_only;
+#endif
+} DrvRecord;
+`);
+
+	String output = (String)root.tappend("bindings.c3")!!;
+	BindgenOptions opts = { .header_path = (String)kit.tappend("km", "Drv.h")!!, .output_path = output, .module_name = "bindings", .target = bindgen::target_triple("windows-aarch64")!! };
+	test::eq(bindgen::run_bindgen(opts), 0);
+	String code = (String)file::load_temp(output)!!;
+	assert(code.contains("struct DrvRecord\n{\n\tint always;\n\tint arm64_only;\n}"), "%s", code);
+}
+
+fn void test_missing_windows_h_with_windows_target_falls_back_to_c3c_msvc_sdk()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_windows_h_fallback_target")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	Path sdk = root.tappend("msvc_sdk")!!;
+	save_fake_kit(sdk.tappend("include", "arm64")!!, "Windows.h", "#include <corecrt.h>\ntypedef int FAKE_KIT_INT;\n");
+	save_test_file(root.tappend("user")!!, "user.h", "#include <windows.h>\ntypedef struct { FAKE_KIT_INT k; } KitUser;\n");
+
+	@with_fake_msvc_sdk(sdk)
+	{
+		String output = (String)root.tappend("bindings.c3")!!;
+		BindgenOptions opts = { .header_path = (String)root.tappend("user", "user.h")!!, .output_path = output, .module_name = "bindings", .target = bindgen::target_triple("windows-aarch64")!! };
+		test::eq(bindgen::run_bindgen(opts), 0);
+		String code = (String)file::load_temp(output)!!;
+		assert(code.contains("struct KitUser\n{\n\tint k;\n}"), "%s", code);
+	};
+}
+
+fn void test_msvc_bitfields_use_declared_type_storage_units()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_msvc_bitfields")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	save_test_file(root, "bits.h", `
+#pragma pack(push, 1)
+struct arm_err { unsigned short v; unsigned char a : 2; unsigned char b : 4; unsigned char c : 3; unsigned long long r : 35; };
+#pragma pack(pop)
+#pragma pack(push, 2)
+struct pack2 { char c; unsigned int x : 3; };
+#pragma pack(pop)
+#pragma pack(push, 4)
+struct pack4 { unsigned int x : 1; unsigned int y : 1; };
+#pragma pack(pop)
+struct mixed { unsigned char a : 4; unsigned short b : 4; };
+struct two_units { int a : 7; int b : 25; int c : 1; };
+`);
+	String output = (String)root.tappend("bits.c3")!!;
+	BindgenOptions opts = { .header_path = (String)root.tappend("bits.h")!!, .output_path = output, .module_name = "bits", .target = bindgen::target_triple("windows-x64")!! };
+	test::eq(bindgen::run_bindgen(opts), 0);
+	String code = (String)file::load_temp(output)!!;
+
+	assert(code.contains("struct ArmErr @packed\n{\n\tushort v;\n\tbitstruct bits : char\n\t{\n\t\tchar a : 0..1;\n\t\tchar b : 2..5;\n\t}\n\tbitstruct bits_2 : char\n\t{\n\t\tchar c : 0..2;\n\t}\n\tbitstruct bits_3 : ulong\n\t{\n\t\tulong r : 0..34;\n\t}\n}"), "%s", code);
+	assert(code.contains("struct Pack2 @packed\n{\n\tchar c;\n\tbitstruct bits : uint @align(2)\n\t{\n\t\tuint x : 0..2;\n\t}\n}"), "%s", code);
+	assert(code.contains("bitstruct Pack4 : uint\n{\n\tuint x : 0..0;\n\tuint y : 1..1;\n}"), "%s", code);
+	assert(code.contains("struct Mixed\n{\n\tbitstruct bits : char\n\t{\n\t\tchar a : 0..3;\n\t}\n\tbitstruct bits_2 : ushort\n\t{\n\t\tushort b : 0..3;\n\t}\n}"), "%s", code);
+	assert(code.contains("struct TwoUnits\n{\n\tbitstruct bits : uint\n\t{\n\t\tint a : 0..6;\n\t\tint b : 7..31;\n\t}\n\tbitstruct bits_2 : uint\n\t{\n\t\tint c : 0..0;\n\t}\n}"), "%s", code);
+}
+
+fn void test_tag_named_like_typedef_of_other_record_keeps_underscore()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_tag_typedef_collision")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	save_test_file(root, "image.h", `
+typedef struct _IMAGE_OPTIONAL_HEADER { int a; } IMAGE_OPTIONAL_HEADER32;
+typedef struct _IMAGE_OPTIONAL_HEADER64 { long long a; } IMAGE_OPTIONAL_HEADER64;
+typedef IMAGE_OPTIONAL_HEADER64 IMAGE_OPTIONAL_HEADER;
+void use_header(IMAGE_OPTIONAL_HEADER* header, IMAGE_OPTIONAL_HEADER32* header32);
+`);
+	String code = generate_bindings(root, root.tappend("image.h")!!);
+	assert(code.contains("struct _ImageOptionalHeader\n{\n\tint a;\n}"), "%s", code);
+	assert(code.contains("alias ImageOptionalHeader = ImageOptionalHeader64;"), "%s", code);
+	assert(code.contains("extern fn void use_header(ImageOptionalHeader* header, ImageOptionalHeader32* header32)"), "%s", code);
+}
+
+fn void test_anonymous_member_alignment_in_packed_records()
+{
+	if (!clang_available()) return;
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_packed_anonymous_members")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	save_test_file(root, "anon.h", `
+#pragma pack(push, 8)
+typedef struct { union { void* p; int i; }; short vt; } Desc;
+#pragma pack(pop)
+#pragma pack(push, 2)
+typedef struct { char c; union { int i; short s; }; } Pack2;
+#pragma pack(pop)
+#pragma pack(push, 8)
+typedef struct tagVARIANT VARIANT;
+struct tagVARIANT { union { struct { short vt; union { long long ll; int i; }; }; double d; }; };
+#pragma pack(pop)
+`);
+	String code = generate_bindings(root, root.tappend("anon.h")!!);
+	assert(code.contains("union DescField2\n{\n\tvoid* p;\n\tint i;\n}"), "%s", code);
+	assert(code.contains("struct Desc\n{\n\tDescField2 _field2;\n\tshort vt;\n}"), "%s", code);
+	assert(code.contains("struct Pack2 @packed\n{\n\tchar c;\n\tPack2Field3 _field3 @align(2);\n}"), "%s", code);
+	assert(code.contains("struct TagVARIANT\n{\n\tTagVARIANTField"), "%s", code);
+}
+
 fn void test_windows_kit_found_through_include_dir()
 {
 	if (!clang_available()) return;
@@ -3728,6 +3906,14 @@ fn void test_missing_windows_h_falls_back_to_c3c_msvc_sdk()
 		String code = generate_bindings(root, root.tappend("user", "user.h")!!);
 		assert(code.contains(MSVC_ONLY_RECORD_C3), "%s", code);
 	};
+}
+
+fn void test_temp_paths_are_unique_within_one_second()
+{
+	String first = (String)bindgen::unique_temp_path("c3_bindgen_probe", ".c")!!;
+	String second = (String)bindgen::unique_temp_path("c3_bindgen_probe", ".c")!!;
+	assert(first != second, "%s", first);
+	assert(first.ends_with(".c"), "%s", first);
 }
 
 fn void test_msvc_crt_dir_requires_vcruntime_header()

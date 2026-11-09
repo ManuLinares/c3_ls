@@ -20,6 +20,7 @@ struct BindgenOptions
 	String clang_path;
 	String target;
 	String vfs_overlay;
+	bool has_windows_kit;
 	String[] include_dirs;
 	String[] defines;
 }
@@ -60,6 +61,8 @@ struct CField
 	String c3_type;
 	int bit_width;
 	int bit_offset;
+	int storage_unit; // Index of the bitfield's storage unit in its record under MS layout.
+	int storage_bits; // Width of that storage unit, the declared type's; 0 under SysV layout.
 	uint alignment; // Emitted as the member's @align; 0 when the C3 default matches C.
 	String comment;
 }
@@ -157,6 +160,8 @@ struct CTranslationUnit
 	List{CVariable} variables;
 	List{CFunction} functions;
 	HashSet{String} underscored_tags;
+	int c_long_bits; // Width of C long on the target, which sizes long bitfield storage.
+	bool ms_bitfields; // Bitfields are laid out as MSVC does, which Windows targets use.
 }
 
 fn void CTranslationUnit.init(&self, Allocator allocator)
@@ -591,14 +596,39 @@ fn bool is_c3_type(String s)
 }
 
 <*
+ Width of C long for a clang target triple, or for the host when none is given: 32 bits on
+ Windows (LLP64) and 32-bit targets, 64 elsewhere.
+*>
+fn int target_c_long_bits(String target_triple)
+{
+	if (target_triple.len == 0) return CLong::size * 8;
+	if (target_triple.contains("windows") || target_triple.contains("win32")) return 32;
+	foreach (prefix : (String[]){ "i386", "i486", "i586", "i686", "arm-", "armv7", "riscv32", "wasm32" })
+	{
+		if (target_triple.starts_with(prefix)) return 32;
+	}
+	return 64;
+}
+
+<*
+ Whether bitfields follow the MS layout, as on Windows targets including MinGW, or SysV otherwise.
+*>
+fn bool target_uses_ms_bitfields(String target_triple)
+{
+	if (target_triple.len == 0) return env::WIN32;
+	return target_triple.contains("windows") || target_triple.contains("win32");
+}
+
+<*
  Returns the bit capacity of a C3 scalar type.
 *>
-fn int type_bit_capacity(String c3_type)
+fn int type_bit_capacity(String c3_type, int c_long_bits)
 {
 	if (c3_type == "char" || c3_type == "ichar" || c3_type == "bool") return 8;
 	if (c3_type == "short" || c3_type == "ushort") return 16;
 	if (c3_type == "int" || c3_type == "uint") return 32;
-	if (c3_type == "long" || c3_type == "ulong" || c3_type == "CLong" || c3_type == "CULong") return 64;
+	if (c3_type == "CLong" || c3_type == "CULong") return c_long_bits;
+	if (c3_type == "long" || c3_type == "ulong") return 64;
 	if (c3_type == "uint128" || c3_type == "int128") return 128;
 	return 32;
 }
