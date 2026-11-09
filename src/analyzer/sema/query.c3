@@ -250,9 +250,28 @@ fn void get_module_section_stmt_range(SourceFile* sf, Location loc, sz* out_star
 	}
 }
 
-fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod)
+<*
+ Whether importing `imp_path` makes `target_mod` visible: the module itself and,
+ unless the import is `@norecurse`, its sub-modules and parent modules.
+*>
+fn bool import_reaches(String imp_path, bool is_recursive, String target_mod) @local
 {
-	if (!sf || target_mod.len == 0) return false;
+	if (imp_path == target_mod) return true;
+	if (!is_recursive) return false;
+	return module_is_within(target_mod, imp_path) || module_is_within(imp_path, target_mod);
+}
+
+fn bool module_is_within(String mod, String ancestor) @local
+{
+	return mod.len > ancestor.len + 2 && mod.starts_with(ancestor) && mod[ancestor.len:2] == "::";
+}
+
+<*
+ Whether an import in the module section at `loc` reaches `target_mod`, and is
+ `@public` when `require_public` is set.
+*>
+fn bool section_imports_reach(SourceFile* sf, Location loc, String target_mod, bool require_public) @local
+{
 	sz start_idx = 0;
 	sz end_idx = 0;
 	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
@@ -263,19 +282,25 @@ fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod
 		if (!stmt || stmt.kind != IMPORT_DECL) continue;
 		ImportDecl* imp = stmt.as(ImportDecl);
 		bool stmt_is_public = cursor::has_attribute((Node*)imp, PUBLIC, null);
+		bool stmt_is_recursive = !cursor::has_attribute((Node*)imp, NORECURSE, null);
 
 		foreach (p : imp.paths)
 		{
 			if (!p || p.kind != PATH_EXPR) continue;
 			PathExpr* pe = p.as(PathExpr);
 			String imp_path = pe.path ? pe.path.text.strip_suffix("::") : "";
-			if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
-			{
-				if (stmt_is_public || cursor::has_attribute(p, PUBLIC, null)) return true;
-			}
+			if (imp_path.len == 0) continue;
+			if (require_public && !stmt_is_public && !cursor::has_attribute(p, PUBLIC, null)) continue;
+			if (import_reaches(imp_path, stmt_is_recursive && !cursor::has_attribute(p, NORECURSE, null), target_mod)) return true;
 		}
 	}
 	return false;
+}
+
+fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod)
+{
+	if (!sf || target_mod.len == 0) return false;
+	return section_imports_reach(sf, loc, target_mod, require_public: true);
 }
 
 fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
@@ -334,16 +359,7 @@ fn bool is_module_visible_at(AnalyzerContext* context, SourceFile* sf, Location 
 		if (sf_mod[:sf_dot] == target_mod[:tg_dot]) return true;
 	}
 
-	List{String} imports = get_imported_modules_at_location(sf, loc);
-	foreach (imp_path : imports)
-	{
-		if (imp_path == target_mod || target_mod.starts_with(string::tformat("%s::", imp_path)))
-		{
-			return true;
-		}
-	}
-
-	return false;
+	return section_imports_reach(sf, loc, target_mod, require_public: false);
 }
 
 fn bool is_symbol_accessible_at(AnalyzerContext* context, SourceFile* sf, Location loc, Node* target_node, String target_mod)
@@ -1957,6 +1973,7 @@ struct TypeNameScope
 	HashMap{String, Node*} visible; // name -> visible declaration, or null
 	GenericDecl* section_generics;
 	GenericDecl* decl_generics;
+	GenericDecl* receiver_generics;
 }
 
 fn void TypeNameScope.init(&self, AnalyzerContext* context, SourceFile* sf)
@@ -1973,6 +1990,26 @@ fn void TypeNameScope.enter(&self, Node* stmt)
 		self.section_generics = generics_of(stmt);
 	}
 	self.decl_generics = generics_of(stmt);
+	self.receiver_generics = generics_of(self.receiver_decl(stmt));
+}
+
+<*
+ Type declaration a method `stmt` is declared on, whose generic parameters
+ the method can use, or null.
+*>
+fn Node* TypeNameScope.receiver_decl(&self, Node* stmt)
+{
+	Node* receiver;
+	switch (stmt.kind)
+	{
+		case FN_DECL: receiver = stmt.as(FnDecl).associated_type;
+		case MACRO_DECL: receiver = stmt.as(MacroDecl).associated_type.get() ?? null;
+		default: return null;
+	}
+	if (!receiver || receiver.kind != TYPE_EXPR) return null;
+	TypeExpr* te = receiver.as(TypeExpr);
+	if (te.type_kind != TYPE_IDENTIFIER || !te.unresolved.name) return null;
+	return find_type_node_in_context(self.context, self.sf, te.unresolved.name.text, te.unresolved.name.range.start);
 }
 
 fn Node* find_generic_param(GenericDecl* gd, String name) @local
@@ -1991,7 +2028,7 @@ fn Node* find_generic_param(GenericDecl* gd, String name) @local
 *>
 fn Node* TypeNameScope.resolve(&self, Ident* name)
 {
-	if (Node* param = find_generic_param(self.decl_generics, name.text) ?: find_generic_param(self.section_generics, name.text)) return param;
+	if (Node* param = find_generic_param(self.decl_generics, name.text) ?: find_generic_param(self.receiver_generics, name.text) ?: find_generic_param(self.section_generics, name.text)) return param;
 	if (try cached = self.visible.get(name.text)) return cached;
 	Node* decl = find_type_node_in_context(self.context, self.sf, name.text, name.range.start);
 	self.visible.set(name.text, decl);
