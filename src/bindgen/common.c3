@@ -99,6 +99,7 @@ struct CEnum
 	String c_name;
 	String c3_name;
 	bool is_constdef;
+	bool is_inline;
 	String backing_type;
 	List{CEnumVariant} variants;
 	String comment;
@@ -643,6 +644,21 @@ fn String map_c_standard_type(String s)
 fn bool is_fundamental_c_type(String s) => map_c_standard_type(s).len > 0;
 
 <*
+ Lowercases each '_'-separated segment that has no lowercase letter, keeping camel-case segments intact.
+*>
+fn String lower_all_caps_segments(String s) @local
+{
+	String out = s.tcopy();
+	foreach (segment : out.tsplit("_"))
+	{
+		bool has_lower;
+		foreach (c : segment) has_lower |= c.is_lower();
+		if (!has_lower) segment.convert_to_lower();
+	}
+	return out;
+}
+
+<*
  Validates and formats a C type name into a C3-compliant type identifier.
  Guarantees PascalCase with at least one lowercase letter and strips leading underscores.
 *>
@@ -720,7 +736,7 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 	}
 	else if (s.contains("_"))
 	{
-		pascal = s.to_lower_copy(tmem).snake_to_pascal_copy(allocator);
+		pascal = lower_all_caps_segments(s).snake_to_pascal_copy(allocator);
 	}
 	else
 	{

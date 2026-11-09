@@ -438,6 +438,21 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 
 	parse_clang_ast_json(tmem, &tu, root_obj, options);
 
+	String? macro_dump = run_clang_macro_dump(tmem, options);
+	if (catch err = macro_dump)
+	{
+		if (is_cli)
+		{
+			io::eprintfn("Error: Failed to run clang preprocessor (%s).", err);
+		}
+		else
+		{
+			log::error("Failed to run clang preprocessor (%s).", err);
+		}
+		return 1;
+	}
+	parse_macro_constants(tmem, &tu, macro_dump, options);
+
 	String generated_code = emit_c3_bindings(tmem, &tu, options);
 
 	if (options.output_path.len > 0)

@@ -124,7 +124,7 @@ fn void emit_enums(DString* sb, CTranslationUnit* tu) @local
 
 		if (e.is_constdef)
 		{
-			sb.appendf("constdef %s : %s\n{\n", e_name, e.backing_type);
+			sb.appendf("constdef %s : %s%s\n{\n", e_name, e.is_inline ? "inline " : "", e.backing_type);
 			for (sz i = 0; i < e.variants.len(); i++)
 			{
 				CEnumVariant v = e.variants.get(i);

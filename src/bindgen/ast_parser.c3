@@ -340,7 +340,7 @@ fn String format_function_proto_from_ast(
 	{
 		track_external_type_usage(ret_info.qual_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
 	}
-	String ret_c3 = map_c_type_to_c3(allocator, ret_info.qual_type, options.type_prefix, false, ret_info.desugared_type);
+	String ret_c3 = map_c_type_to_c3(allocator, ret_info.qual_type, options.type_prefix, false, desugared_unless_target_typedef(ret_info.qual_type, ret_info.desugared_type, target_types));
 
 	DString params_c3;
 	params_c3.init(allocator);
@@ -358,7 +358,7 @@ fn String format_function_proto_from_ast(
 		{
 			track_external_type_usage(p_info.qual_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
 		}
-		String p_c3 = map_c_type_to_c3(allocator, p_info.qual_type, options.type_prefix, true, p_info.desugared_type);
+		String p_c3 = map_c_type_to_c3(allocator, p_info.qual_type, options.type_prefix, true, desugared_unless_target_typedef(p_info.qual_type, p_info.desugared_type, target_types));
 		if (params_c3.len() > 0)
 		{
 			params_c3.append(", ");
@@ -416,6 +416,24 @@ fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOp
 	}
 
 	return string::format(allocator, "%s[<%d>]", elem_c3, (int)count);
+}
+
+<*
+ Registers an alias named `<Owner><Member>Fn` for an inline function pointer type and returns that name.
+*>
+fn String push_callback_alias(Allocator allocator, CTranslationUnit* tu, String owner_name, String member_name, String c_type, BindgenOptions options) @local
+{
+	String cb_name = string::format(allocator, "%s%sFn", owner_name.snake_to_pascal_copy(allocator), member_name.snake_to_pascal_copy(allocator));
+	cb_name = sanitize_c3_type_name(allocator, cb_name, options.type_prefix);
+	tu.typedefs.push({
+		.c_name = cb_name.copy(allocator),
+		.c3_name = cb_name,
+		.underlying_c = c_type.copy(allocator),
+		.underlying_c3 = parse_function_pointer_type(allocator, c_type, options),
+		.is_func_ptr = true,
+		.comment = ""
+	});
+	return cb_name;
 }
 
 <*
@@ -562,6 +580,16 @@ fn String parse_function_pointer_type(Allocator allocator, String qual_type, Bin
 }
 
 <*
+ Drops the desugared type when `qual_type` names a typedef declared in the target header,
+ so mapping keeps the emitted alias instead of its underlying type.
+*>
+fn String desugared_unless_target_typedef(String qual_type, String desugared_type, HashSet{String}* target_types) @local
+{
+	if (target_types && target_types.contains(extract_base_type_name(qual_type))) return "";
+	return desugared_type;
+}
+
+<*
  Records used external types that need alias, struct, or enum generation.
 *>
 fn void track_external_type_usage(
@@ -631,22 +659,11 @@ fn CParam parse_param_decl(
 
 	if (is_c_function_pointer(c_type))
 	{
-		String cb_sig = parse_function_pointer_type(allocator, c_type, options);
-		String cb_name = string::format(allocator, "%s%sFn", fn_c3_name.snake_to_pascal_copy(allocator), raw_name.snake_to_pascal_copy(allocator));
-		cb_name = sanitize_c3_type_name(allocator, cb_name, options.type_prefix);
-		tu.typedefs.push({
-			.c_name = cb_name.copy(allocator),
-			.c3_name = cb_name,
-			.underlying_c = c_type.copy(allocator),
-			.underlying_c3 = cb_sig,
-			.is_func_ptr = true,
-			.comment = ""
-		});
-		c3_type = cb_name;
+		c3_type = push_callback_alias(allocator, tu, fn_c3_name, raw_name, c_type, options);
 	}
 	else
 	{
-		c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, true, tinfo.desugared_type, &is_noalias);
+		c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, true, desugared_unless_target_typedef(c_type, tinfo.desugared_type, target_types), &is_noalias);
 	}
 
 	String c3_name = to_snake_case(allocator, raw_name);
@@ -739,7 +756,7 @@ fn void parse_var_decl(
 
 	track_external_type_usage(c_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
 
-	String c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, false, tinfo.desugared_type);
+	String c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, false, desugared_unless_target_typedef(c_type, tinfo.desugared_type, target_types));
 	String snake_name = to_snake_case(tmem, c_name);
 	String c3_name = strip_symbol_prefix(snake_name, options);
 	c3_name = sanitize_identifier(allocator, c3_name);
@@ -808,7 +825,7 @@ fn void parse_function_decl(
 	{
 		ret_desugared = extract_function_return_type(tinfo.desugared_type);
 	}
-	String ret_c3 = map_c_type_to_c3(allocator, ret_c, options.type_prefix, false, ret_desugared);
+	String ret_c3 = map_c_type_to_c3(allocator, ret_c, options.type_prefix, false, desugared_unless_target_typedef(ret_c, ret_desugared, target_types));
 
 	String snake_name = to_snake_case(tmem, c_name);
 	String c3_name = strip_symbol_prefix(snake_name, options);
@@ -1046,10 +1063,15 @@ fn bool parse_record_fields(
 				}
 			}
 		}
+		else if (f_type_c.contains("(*)") && is_c_function_pointer(f_type_c))
+		{
+			f_type_c3 = push_callback_alias(allocator, tu, c_name, f_name, f_type_c, options);
+		}
 		else
 		{
 			track_external_type_usage(f_type_c, target_types, external_typedefs, external_records, external_enums, used_external_types);
-			f_type_c3 = map_c_type_to_c3(allocator, f_type_c, options.type_prefix, false, f_tinfo.desugared_type, is_field: true);
+			String f_desugared = bit_width >= 0 ? f_tinfo.desugared_type : desugared_unless_target_typedef(f_type_c, f_tinfo.desugared_type, target_types);
+			f_type_c3 = map_c_type_to_c3(allocator, f_type_c, options.type_prefix, false, f_desugared, is_field: true);
 		}
 
 		String f_name_c3 = f_name.len > 0 ? to_snake_case(allocator, f_name) : "";
@@ -1319,6 +1341,30 @@ fn void parse_enum_decl_with_name(
 	target_types.add(c_name);
 	target_types.add(c3_name);
 
+	EnumBody body = parse_enum_body(allocator, node, options.strip_enum_prefix);
+	tu.enums.push({
+		.c_name = c_name.copy(allocator),
+		.c3_name = c3_name,
+		.is_constdef = !body.is_sequential,
+		.backing_type = body.backing_type,
+		.variants = body.variants,
+		.comment = ""
+	});
+}
+
+struct EnumBody
+{
+	List{CEnumVariant} variants;
+	bool is_sequential;
+	String backing_type;
+}
+
+<*
+ Collects EnumConstantDecl children with resolved values.
+ Strips `strip_prefix` from variant names unless that leaves an invalid identifier.
+*>
+fn EnumBody parse_enum_body(Allocator allocator, Object* node, String strip_prefix) @local
+{
 	List{CEnumVariant} variants;
 	variants.init(allocator);
 
@@ -1382,9 +1428,9 @@ fn void parse_enum_decl_with_name(
 				}
 
 				String v_c3 = v_name;
-				if (options.strip_enum_prefix.len > 0 && v_c3.starts_with(options.strip_enum_prefix))
+				if (strip_prefix.len > 0 && v_c3.starts_with(strip_prefix))
 				{
-					v_c3 = v_c3[options.strip_enum_prefix.len..];
+					v_c3 = v_c3[strip_prefix.len..];
 				}
 				if (v_c3.len == 0 || (v_c3[0] >= '0' && v_c3[0] <= '9'))
 				{
@@ -1437,14 +1483,94 @@ fn void parse_enum_decl_with_name(
 		backing_type = "long";
 	}
 
+	return { variants, is_sequential, backing_type };
+}
+
+<*
+ Emits a top-level anonymous enum whose constants no typedef has claimed.
+ A shared constant-name prefix becomes an inline constdef, otherwise each constant becomes a const.
+*>
+fn void parse_anonymous_enum(Allocator allocator, CTranslationUnit* tu, Object* node, BindgenOptions options) @local
+{
+	String prefix = common_enum_constant_prefix(node);
+	EnumBody body = parse_enum_body(allocator, node, prefix);
+	if (body.variants.len() == 0 || is_enum_constant_emitted(tu, body.variants[0].c_name)) return;
+
+	if (prefix.len == 0)
+	{
+		foreach (v : body.variants)
+		{
+			tu.constants.push({
+				.name = v.c3_name,
+				.value = string::format(allocator, "%d", v.value),
+				.c3_type = body.backing_type
+			});
+		}
+		return;
+	}
+
+	HashSet{String} taken_type_names;
+	taken_type_names.tinit();
+	foreach (&st : tu.structs) taken_type_names.add(st.c3_name);
+	foreach (&td : tu.typedefs) taken_type_names.add(td.c3_name);
+	foreach (&e : tu.enums) taken_type_names.add(e.c3_name);
+
+	String type_c_name = prefix.trim("_").to_lower_copy(tmem);
+	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, type_c_name, options.type_prefix));
+	if (taken_type_names.contains(c3_name)) c3_name = string::format(allocator, "%sKind", c3_name);
 	tu.enums.push({
-		.c_name = c_name.copy(allocator),
-		.c3_name = c3_name,
-		.is_constdef = !is_sequential,
-		.backing_type = backing_type,
-		.variants = variants,
-		.comment = ""
+		.c3_name = deduplicate_name(&taken_type_names, c3_name, allocator),
+		.is_constdef = true,
+		.is_inline = true,
+		.backing_type = body.backing_type,
+		.variants = body.variants
 	});
+}
+
+<*
+ Longest common prefix of an enum's constant names, cut after its last '_'.
+ Empty when fewer than two constants exist or no such prefix is shared.
+*>
+fn String common_enum_constant_prefix(Object* node) @local
+{
+	Object*? inner_arr = node.get("inner");
+	if (catch inner_arr) return "";
+	if (!inner_arr.is_array()) return "";
+
+	String prefix;
+	int count;
+	for (sz i = 0; i < inner_arr.len(); i++)
+	{
+		Object* child = inner_arr.get_at(i);
+		if (!child || (child.get_string("kind") ?? "") != "EnumConstantDecl") continue;
+		String name = child.get_string("name") ?? "";
+		if (count++ == 0)
+		{
+			prefix = name;
+			continue;
+		}
+		sz n;
+		while (n < prefix.len && n < name.len && prefix[n] == name[n]) n++;
+		prefix = prefix[:n];
+	}
+
+	if (count < 2) return "";
+	sz? cut = prefix.rindex_of_char('_');
+	if (catch cut) return "";
+	prefix = prefix[:cut + 1];
+	return prefix.trim("_").len > 0 ? prefix : "";
+}
+
+fn bool is_enum_constant_emitted(CTranslationUnit* tu, String c_name) @local
+{
+	foreach (&e : tu.enums)
+	{
+		foreach (&v : e.variants)
+		{
+			if (v.c_name == c_name) return true;
+		}
+	}
+	return false;
 }
 
 <*
@@ -1699,6 +1825,9 @@ fn void parse_clang_ast_json(
 
 	String current_file = options.header_path;
 
+	List{Object*} anonymous_enums;
+	anonymous_enums.init(allocator);
+
 	// Pass 2: Parse declarations from the target header
 	for (sz i = 0; i < inner_arr.len(); i++)
 	{
@@ -1755,6 +1884,7 @@ fn void parse_clang_ast_json(
 						{
 							anon_enums.set(id, node);
 						}
+						anonymous_enums.push(node);
 					}
 					else
 					{
@@ -1845,4 +1975,115 @@ fn void parse_clang_ast_json(
 			}
 		}
 	};
+
+	foreach (node : anonymous_enums)
+	{
+		parse_anonymous_enum(allocator, tu, node, options);
+	}
+}
+<*
+ Collects object-like #define constants from target files in `clang -E -dD` output.
+ Only literal values and arithmetic over literals or previously collected constants are kept.
+*>
+fn void parse_macro_constants(Allocator allocator, CTranslationUnit* tu, String preprocessed, BindgenOptions options)
+{
+	HashSet{String} known_names;
+	known_names.tinit();
+	foreach (&c : tu.constants) known_names.add(c.name);
+
+	String current_file;
+	foreach (line : preprocessed.tsplit("\n"))
+	{
+		if (line.starts_with("# "))
+		{
+			String[] quoted = line.tsplit("\"");
+			if (quoted.len >= 3) current_file = quoted[1];
+			continue;
+		}
+		if (!line.starts_with("#define ") || !is_target_file(current_file, options)) continue;
+
+		String definition = line["#define ".len..];
+		sz name_len;
+		while (name_len < definition.len && (definition[name_len].is_alnum() || definition[name_len] == '_')) name_len++;
+		String name = definition[:name_len];
+		String raw_value = definition[name_len..];
+		if (raw_value.starts_with("(") || !is_c3_constant_name(name)) continue;
+
+		String value = raw_value.trim();
+		if (value.len == 0 || known_names.contains(name)) continue;
+
+		String? c3_value = translate_constant_expr(allocator, value, &known_names);
+		if (catch c3_value) continue;
+
+		known_names.add(name);
+		tu.constants.push({
+			.name = name.copy(allocator),
+			.value = c3_value,
+			.c3_type = value.starts_with("\"") ? "ZString" : ""
+		});
+	}
+}
+
+fn bool is_c3_constant_name(String name) @local
+{
+	if (name.len == 0 || !name[0].is_upper()) return false;
+	foreach (c : name)
+	{
+		if (!c.is_upper() && !c.is_digit() && c != '_') return false;
+	}
+	return true;
+}
+
+faultdef UNSUPPORTED_MACRO_VALUE;
+
+<*
+ Translates a C constant expression to C3, or faults when it contains anything but
+ a single string literal, or numeric/char literals, known constant names, parentheses and arithmetic operators.
+*>
+fn String? translate_constant_expr(Allocator allocator, String value, HashSet{String}* known_names) @local
+{
+	if (value.starts_with("\""))
+	{
+		sz i = 1;
+		while (i < value.len && value[i] != '"') i += value[i] == '\\' ? 2 : 1;
+		if (i != value.len - 1) return UNSUPPORTED_MACRO_VALUE~;
+		return value.copy(allocator);
+	}
+
+	DString out;
+	out.init(allocator);
+	sz i;
+	while (i < value.len)
+	{
+		char c = value[i];
+		sz start = i;
+		switch
+		{
+			case c == ' ' || c == '\t':
+				i++;
+			case c.is_digit() || (c == '.' && i + 1 < value.len && value[i + 1].is_digit()):
+				while (i < value.len && (value[i].is_alnum() || value[i] == '.' || ((value[i] == '+' || value[i] == '-') && (value[i - 1] | 32) == 'e'))) i++;
+				if (value[start] == '0' && start + 1 < i && value[start + 1].is_digit())
+				{
+					out.append("0o");
+					start++;
+				}
+			case c.is_alpha() || c == '_':
+				while (i < value.len && (value[i].is_alnum() || value[i] == '_')) i++;
+				if (!known_names.contains(value[start:i - start])) return UNSUPPORTED_MACRO_VALUE~;
+			case c == '\'':
+				i++;
+				while (i < value.len && value[i] != '\'') i += value[i] == '\\' ? 2 : 1;
+				if (i >= value.len) return UNSUPPORTED_MACRO_VALUE~;
+				i++;
+			case (c == '<' || c == '>') && i + 1 < value.len && value[i + 1] == c:
+				i += 2;
+			case "+-*/%()&|^~".contains_char(c):
+				i++;
+			default:
+				return UNSUPPORTED_MACRO_VALUE~;
+		}
+		out.append(value[start:i - start]);
+	}
+	return out.str_view();
 }

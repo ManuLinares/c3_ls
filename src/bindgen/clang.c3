@@ -17,12 +17,13 @@ struct ClangOutput
 }
 
 <*
- Invokes clang to produce a JSON AST dump and captures both stdout and stderr.
+ Invokes clang on the header with `mode_args` and captures both stdout and stderr.
  @param allocator : "Allocator used for output strings."
  @param options   : "Bindgen configuration options."
+ @param mode_args : "Flags selecting clang's output, e.g. an AST dump or preprocessed macros."
  @return          "Clang output containing stdout and stderr, or a fault on failure."
 *>
-fn ClangOutput? run_clang_ast_dump_raw(Allocator allocator, BindgenOptions options)
+fn ClangOutput? run_clang_raw(Allocator allocator, BindgenOptions options, String[] mode_args)
 {
 	String clang_bin = options.clang_path.len > 0 ? options.clang_path : "clang";
 
@@ -30,9 +31,7 @@ fn ClangOutput? run_clang_ast_dump_raw(Allocator allocator, BindgenOptions optio
 	cmd.tinit();
 
 	cmd.push(clang_bin);
-	cmd.push("-Xclang");
-	cmd.push("-ast-dump=json");
-	cmd.push("-fsyntax-only");
+	foreach (arg : mode_args) cmd.push(arg);
 	cmd.push("-Wno-everything");
 	cmd.push(CLANG_ERROR_LIMIT);
 
@@ -148,7 +147,7 @@ fn String? run_clang_ast_dump(Allocator allocator, BindgenOptions* options)
 
 	for (int attempt = 0; attempt < MAX_SELF_HEAL_ATTEMPTS; attempt++)
 	{
-		ClangOutput? out = run_clang_ast_dump_raw(allocator, *options);
+		ClangOutput? out = run_clang_raw(allocator, *options, { "-Xclang", "-ast-dump=json", "-fsyntax-only" });
 		if (catch err = out)
 		{
 			return err~;
@@ -185,4 +184,20 @@ fn String? run_clang_ast_dump(Allocator allocator, BindgenOptions* options)
 	}
 
 	return INVALID_CLANG_OUTPUT~;
+}
+<*
+ Invokes clang's preprocessor keeping #define directives in place, with line markers naming their files.
+*>
+fn String? run_clang_macro_dump(Allocator allocator, BindgenOptions options)
+{
+	ClangOutput out = run_clang_raw(allocator, options, { "-E", "-dD" })!;
+	if (out.stdout_str.len == 0)
+	{
+		if (out.stderr_str.len > 0)
+		{
+			log::error("Clang stderr: %s", out.stderr_str);
+		}
+		return INVALID_CLANG_OUTPUT~;
+	}
+	return out.stdout_str;
 }

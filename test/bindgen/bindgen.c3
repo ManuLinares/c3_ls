@@ -644,7 +644,8 @@ fn void test_function_pointer_field_and_array_type_extraction()
 
 	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
 
-	assert(code.contains("void* init_fn;"));
+	assert(code.contains("alias HandlerTableInitFnFn = fn int();"));
+	assert(code.contains("HandlerTableInitFnFn init_fn;"));
 	assert(!code.contains("Int (*)(void)"));
 	assert(code.contains("struct ExternalMatrix { void* _unused; }"));
 	assert(!code.contains("struct ExternalMatrix[3][3"));
@@ -2676,8 +2677,8 @@ fn void test_nested_anonymous_struct_and_union_fields() @test
 	assert(code.contains("DeviceBuffer buffer;"));
 	assert(!code.contains("void* buffer;"));
 
-	assert(code.contains("struct OpparamsInit\n{\n\tint code;\n}"));
-	assert(code.contains("OpparamsInit init;"));
+	assert(code.contains("struct OpParamsInit\n{\n\tint code;\n}"));
+	assert(code.contains("OpParamsInit init;"));
 	assert(!code.contains("void* init;"));
 }
 
@@ -2911,4 +2912,227 @@ fn void test_completing_opaque_struct_survives_struct_list_growth()
 	test::eq(tu.structs.get(0).is_opaque, false);
 	test::eq(tu.structs.get(0).fields.len(), 1);
 	test::eq(tu.structs.get(16).c3_name, "CtxInner");
+}
+
+fn void test_anonymous_enums_emit_inline_constdefs()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"id": "0x1", "kind": "EnumDecl", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "MU_CLIP_PART", "inner": [ { "kind": "ConstantExpr", "value": "1" } ] },
+					{ "kind": "EnumConstantDecl", "name": "MU_CLIP_ALL" }
+				]
+			},
+			{
+				"id": "0x2", "kind": "EnumDecl", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "MU_COMMAND_JUMP", "inner": [ { "kind": "ConstantExpr", "value": "1" } ] },
+					{ "kind": "EnumConstantDecl", "name": "MU_COMMAND_CLIP" }
+				]
+			},
+			{
+				"id": "0x3", "kind": "EnumDecl", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "FOO", "inner": [ { "kind": "ConstantExpr", "value": "4" } ] },
+					{ "kind": "EnumConstantDecl", "name": "BAR" }
+				]
+			},
+			{
+				"id": "0x4", "kind": "EnumDecl", "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "EnumConstantDecl", "name": "K_A" },
+					{ "kind": "EnumConstantDecl", "name": "K_B" }
+				]
+			},
+			{
+				"kind": "TypedefDecl", "name": "kind_t", "loc": { "file": "test.h" },
+				"type": { "qualType": "enum kind_t" },
+				"inner": [ { "kind": "EnumType", "decl": { "id": "0x4", "kind": "EnumDecl", "name": "" } } ]
+			},
+			{
+				"kind": "RecordDecl", "name": "mu_Command", "tagUsed": "union", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [ { "kind": "FieldDecl", "name": "type", "type": { "qualType": "int" } } ]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("constdef MuClip : inline int\n{\n\tPART = 1,\n\tALL = 2\n}"));
+	assert(code.contains("constdef MuCommandKind : inline int\n{\n\tJUMP = 1,\n\tCLIP = 2\n}"));
+	assert(code.contains("union MuCommand\n{"));
+	assert(code.contains("const int FOO = 4;\nconst int BAR = 5;"));
+	assert(code.contains("enum KindT\n{\n\tK_A,\n\tK_B\n}"));
+	assert(!code.contains("constdef K"));
+}
+
+fn void test_type_name_keeps_camel_case_segments()
+{
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "mu_PoolItem", ""), "MuPoolItem");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "mu_BaseCommand", ""), "MuBaseCommand");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "mu_Context", ""), "MuContext");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "SDL_Window", ""), "SdlWindow");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "sqlite3_stmt", ""), "Sqlite3Stmt");
+}
+
+fn void test_target_typedef_names_kept_for_values()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "TypedefDecl", "name": "mu_Id", "loc": { "file": "test.h" }, "type": { "qualType": "unsigned int" } },
+			{ "kind": "TypedefDecl", "name": "mu_Font", "loc": { "file": "test.h" }, "type": { "qualType": "void *" } },
+			{ "kind": "TypedefDecl", "name": "mu_Real", "loc": { "file": "test.h" }, "type": { "qualType": "float" } },
+			{
+				"kind": "RecordDecl", "name": "mu_Style", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "hover", "type": { "qualType": "mu_Id", "desugaredQualType": "unsigned int" } },
+					{ "kind": "FieldDecl", "name": "font", "type": { "qualType": "mu_Font", "desugaredQualType": "void *" } },
+					{ "kind": "FieldDecl", "name": "ext", "type": { "qualType": "__u32", "desugaredQualType": "unsigned int" } }
+				]
+			},
+			{
+				"kind": "FunctionDecl", "name": "mu_set", "loc": { "file": "test.h" },
+				"type": { "qualType": "void (mu_Id, mu_Real)", "desugaredQualType": "void (unsigned int, float)" },
+				"inner": [
+					{ "kind": "ParmVarDecl", "name": "id", "type": { "qualType": "mu_Id", "desugaredQualType": "unsigned int" } },
+					{ "kind": "ParmVarDecl", "name": "low", "type": { "qualType": "mu_Real", "desugaredQualType": "float" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test",
+		.strip_func_prefix = "mu_"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("\tMuId hover;\n"));
+	assert(code.contains("\tMuFont font;\n"));
+	assert(code.contains("\tuint ext;\n"));
+	assert(code.contains("extern fn void set(MuId id, MuReal low)"));
+}
+
+fn void test_function_pointer_fields_emit_typed_aliases()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "TypedefDecl", "name": "mu_Font", "loc": { "file": "test.h" }, "type": { "qualType": "void *" } },
+			{
+				"kind": "RecordDecl", "name": "mu_Context", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "text_width", "type": { "qualType": "int (*)(mu_Font, const char *, int)" } },
+					{ "kind": "FieldDecl", "name": "draw_frame", "type": { "qualType": "void (*)(mu_Context *, int)" } },
+					{ "kind": "FieldDecl", "name": "chain", "type": { "qualType": "void (**)(void)" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("alias MuContextTextWidthFn = fn int(MuFont, ZString, int);"));
+	assert(code.contains("alias MuContextDrawFrameFn = fn void(MuContext*, int);"));
+	assert(code.contains("\tMuContextTextWidthFn text_width;\n"));
+	assert(code.contains("\tMuContextDrawFrameFn draw_frame;\n"));
+	assert(code.contains("\tvoid* chain;\n"));
+}
+
+fn void test_object_like_macros_emit_constants()
+{
+	String preprocessed = `# 1 "<built-in>" 1
+#define __STDC__ 1
+# 1 "/inc/test.h" 1
+#define TEST_H
+#define MU_COMMANDLIST_SIZE (256 * 1024)
+#define MU_MAX_WIDTHS 16
+#define MU_DOUBLE_SIZE (MU_COMMANDLIST_SIZE * 2)
+#define MU_REAL float
+#define MU_REAL_FMT "%.3g"
+#define MU_PERMS 0755
+#define MU_MASK 0xFFu
+#define MU_SCALE 1.5f
+#define MU_SHIFTED (1 << 3)
+#define mu_min(a, b) ((a) < (b) ? (a) : (b))
+#define MU_CALL foo(1)
+#define MU_LESS (1 < 2)
+#define _MU_PRIVATE 1
+#define MU_MAX_WIDTHS 32
+# 1 "/usr/include/other.h" 1
+#define OTHER_SIZE 8
+`;
+
+	BindgenOptions opts = {
+		.header_path = "/inc/test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_macro_constants(tmem, &tu, preprocessed, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("const MU_COMMANDLIST_SIZE = (256 * 1024);\n"));
+	assert(code.contains("const MU_MAX_WIDTHS = 16;\n"));
+	assert(code.contains("const MU_DOUBLE_SIZE = (MU_COMMANDLIST_SIZE * 2);\n"));
+	assert(code.contains("const ZString MU_REAL_FMT = \"%.3g\";\n"));
+	assert(code.contains("const MU_PERMS = 0o755;\n"));
+	assert(code.contains("const MU_MASK = 0xFFu;\n"));
+	assert(code.contains("const MU_SCALE = 1.5f;\n"));
+	assert(code.contains("const MU_SHIFTED = (1 << 3);\n"));
+	assert(!code.contains("MU_REAL ="));
+	assert(!code.contains("mu_min"));
+	assert(!code.contains("MU_CALL"));
+	assert(!code.contains("MU_LESS"));
+	assert(!code.contains("_MU_PRIVATE"));
+	assert(!code.contains("TEST_H"));
+	assert(!code.contains("__STDC__"));
+	assert(!code.contains("OTHER_SIZE"));
+	assert(!code.contains("= 32;"));
 }
