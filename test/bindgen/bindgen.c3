@@ -541,6 +541,13 @@ fn void test_type_name_sanitization_rules()
 	test::eq(bindgen::sanitize_c3_type_name(tmem, "_G_fpos_t", ""), "GFposT");
 }
 
+fn void test_all_caps_type_name_keeps_digits()
+{
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "HEADER64", ""), "Header64");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "VEC4", ""), "Vec4");
+	test::eq(bindgen::sanitize_c3_type_name(tmem, "A64", ""), "A64_t");
+}
+
 fn void test_restrict_parameter_emits_noalias()
 {
 	String mock_json = `
@@ -3847,6 +3854,59 @@ void use_header(IMAGE_OPTIONAL_HEADER* header, IMAGE_OPTIONAL_HEADER32* header32
 	assert(code.contains("struct _ImageOptionalHeader\n{\n\tint a;\n}"), "%s", code);
 	assert(code.contains("alias ImageOptionalHeader = ImageOptionalHeader64;"), "%s", code);
 	assert(code.contains("extern fn void use_header(ImageOptionalHeader* header, ImageOptionalHeader32* header32)"), "%s", code);
+}
+
+<*
+ Clang before 22 wraps a typedef's referenced type in an ElaboratedType, so a typedef of a typedef
+ reaches the record through the inner typedef.
+*>
+fn void test_typedef_of_typedef_through_elaborated_type_is_alias()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"id": "0x1", "kind": "RecordDecl", "name": "_HEADER64", "tagUsed": "struct", "completeDefinition": true,
+				"loc": { "file": "image.h" },
+				"inner": [ { "kind": "FieldDecl", "name": "a", "type": { "qualType": "long long" } } ]
+			},
+			{
+				"id": "0x2", "kind": "TypedefDecl", "name": "HEADER64",
+				"loc": { "file": "image.h" },
+				"type": { "qualType": "struct _HEADER64" },
+				"inner": [ {
+					"kind": "ElaboratedType", "type": { "qualType": "struct _HEADER64" }, "ownedTagDecl": { "id": "0x1", "kind": "RecordDecl", "name": "_HEADER64" },
+					"inner": [ { "kind": "RecordType", "type": { "qualType": "struct _HEADER64" }, "decl": { "id": "0x1", "kind": "RecordDecl", "name": "_HEADER64" } } ]
+				} ]
+			},
+			{
+				"id": "0x3", "kind": "TypedefDecl", "name": "HEADER",
+				"loc": { "file": "image.h" },
+				"type": { "desugaredQualType": "struct _HEADER64", "qualType": "HEADER64" },
+				"inner": [ {
+					"kind": "ElaboratedType", "type": { "qualType": "HEADER64" },
+					"inner": [ {
+						"kind": "TypedefType", "type": { "qualType": "HEADER64" }, "decl": { "id": "0x2", "kind": "TypedefDecl", "name": "HEADER64" },
+						"inner": [ {
+							"kind": "ElaboratedType", "type": { "qualType": "struct _HEADER64" },
+							"inner": [ { "kind": "RecordType", "type": { "qualType": "struct _HEADER64" }, "decl": { "id": "0x1", "kind": "RecordDecl", "name": "_HEADER64" } } ]
+						} ]
+					} ]
+				} ]
+			}
+		]
+	}
+	`;
+
+	BindgenOptions opts = { .header_path = "image.h", .module_name = "image" };
+	CTranslationUnit tu;
+	tu.init(tmem);
+	bindgen::parse_clang_ast_json(tmem, &tu, json::tparse(mock_json)!!, opts);
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+	assert(code.contains("struct Header64\n{\n\tlong a;\n}"), "%s", code);
+	assert(code.contains("alias Header = Header64;"), "%s", code);
+	assert(!code.contains("struct Header\n"), "%s", code);
 }
 
 fn void test_anonymous_member_alignment_in_packed_records()

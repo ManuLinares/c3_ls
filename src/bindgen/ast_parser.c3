@@ -85,9 +85,11 @@ fn RawTypeInfo extract_type_info(Object* node) @private
 <*
  Recursively finds the first descendant AST node matching target_kind in inner.
  @param [&in] node : "Node to search below."
+ @param through_typedefs : "Whether to search the types other typedefs name."
 *>
-fn Object*? find_descendant_by_kind(Object* node, String target_kind) @local
+fn Object*? find_descendant_by_kind(Object* node, String target_kind, bool through_typedefs = true) @local
 {
+	if (!through_typedefs && (node.get_string("kind") ?? "") == "TypedefType") return NOT_FOUND~;
 	String[2] tag_keys = { "decl", "ownedTagDecl" };
 	foreach (key : tag_keys)
 	{
@@ -97,7 +99,7 @@ fn Object*? find_descendant_by_kind(Object* node, String target_kind) @local
 			{
 				return child;
 			}
-			if (try found = find_descendant_by_kind(child, target_kind))
+			if (try found = find_descendant_by_kind(child, target_kind, through_typedefs))
 			{
 				return found;
 			}
@@ -110,7 +112,7 @@ fn Object*? find_descendant_by_kind(Object* node, String target_kind) @local
 		{
 			return child;
 		}
-		if (try found = find_descendant_by_kind(child, target_kind))
+		if (try found = find_descendant_by_kind(child, target_kind, through_typedefs))
 		{
 			return found;
 		}
@@ -1297,7 +1299,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 			continue;
 		}
 
-		if (try rec_child = find_descendant_by_kind(child, "RecordDecl"))
+		if (try rec_child = find_descendant_by_kind(child, "RecordDecl", through_typedefs: false))
 		{
 			Object* full_rec = resolve_complete_decl(rec_child, &self.anon_records);
 			String tag_name = full_rec.get_string("name") ?? "";
@@ -1310,7 +1312,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 				return;
 			}
 		}
-		else if (try enum_child = find_descendant_by_kind(child, "EnumDecl"))
+		else if (try enum_child = find_descendant_by_kind(child, "EnumDecl", through_typedefs: false))
 		{
 			Object* full_enum = resolve_complete_decl(enum_child, &self.anon_enums);
 			String tag_name = full_enum.get_string("name") ?? "";

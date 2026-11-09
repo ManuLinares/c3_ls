@@ -895,7 +895,7 @@ fn String sanitize_c3_type_name(Allocator allocator, String raw_name, String typ
 			sb.append_char(s[0]);
 			for (sz i = 1; i < s.len; i++)
 			{
-				sb.append_char((char)(s[i] + 32));
+				sb.append_char(s[i].to_lower());
 			}
 			if (s.len == 1)
 			{
