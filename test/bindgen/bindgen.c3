@@ -3148,6 +3148,8 @@ fn void test_macro_probe_emits_typed_constants()
 	{
 		"kind": "TranslationUnitDecl",
 		"inner": [
+			{ "kind": "VarDecl", "name": "__c3_probe_a_EMPTY", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_FLAG_A", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" } ] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_PERMS", "type": { "qualType": "const int" },
@@ -3193,6 +3195,8 @@ fn void test_macro_probe_emits_typed_constants()
 					"inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "1" } ] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_a_NIL", "type": { "qualType": "void *const" },
 				"inner": [ { "kind": "CStyleCastExpr", "type": { "qualType": "void *" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "0" } ] } ] },
+			{ "kind": "VarDecl", "name": "__c3_probe_b_EMPTY", "type": { "qualType": "const int" },
+				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_b_FLAG_A", "type": { "qualType": "const int" },
 				"inner": [ { "kind": "ParenExpr", "type": { "qualType": "int" }, "inner": [ { "kind": "IntegerLiteral", "type": { "qualType": "int" }, "value": "16384" } ] } ] },
 			{ "kind": "VarDecl", "name": "__c3_probe_b_PERMS", "type": { "qualType": "const int" },
@@ -3264,7 +3268,8 @@ fn void test_macro_probe_emits_typed_constants()
 		{ "NIL", "((void*)0)" },
 		{ "TRANSIENT", "((sqlite3_destructor_type)1)" },
 		{ "MU_REAL", "float" },
-		{ "HERE", "__FILE__" }
+		{ "HERE", "__FILE__" },
+		{ "EMPTY", "(EMPTY_EXPR)" }
 	};
 
 	BindgenOptions opts = {
@@ -3297,6 +3302,7 @@ fn void test_macro_probe_emits_typed_constants()
 	assert(!code.contains("TRANSIENT"));
 	assert(!code.contains("MU_REAL"));
 	assert(!code.contains("HERE"));
+	assert(!code.contains("EMPTY"));
 }
 fn void test_function_pointer_returning_function_pointer()
 {

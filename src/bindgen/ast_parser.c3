@@ -15,20 +15,7 @@ fn String extract_file_from_loc(Object* loc) @local
 		return "";
 	}
 
-	if (try f = loc.get_string("file"))
-	{
-		return f;
-	}
-
-	if (try e_loc = loc.get("expansionLoc"))
-	{
-		if (try f = e_loc.get_string("file"))
-		{
-			return f;
-		}
-	}
-
-	return "";
+	return loc.get_string("file") ?? loc.get("expansionLoc").get_string("file") ?? "";
 }
 
 <*
@@ -98,8 +85,8 @@ fn RawTypeInfo extract_type_info(Object* node) @private
 		return info;
 	}
 
-	Object* type_obj = node.get("type") ?? null;
-	if (!type_obj)
+	Object*? type_obj = node.get("type");
+	if (catch type_obj)
 	{
 		return info;
 	}
@@ -107,10 +94,7 @@ fn RawTypeInfo extract_type_info(Object* node) @private
 	info.qual_type = type_obj.get_string("qualType") ?? "void*";
 	info.desugared_type = type_obj.get_string("desugaredQualType") ?? "";
 
-	if (try decl_obj = type_obj.get("decl"))
-	{
-		info.decl_id = decl_obj.get_string("id") ?? "";
-	}
+	info.decl_id = type_obj.get("decl").get_string("id") ?? "";
 	return info;
 }
 
@@ -140,34 +124,40 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 		}
 	}
 
-	if (try inner_arr = node.get("inner"))
+	foreach (child : inner_nodes(node))
 	{
-		if (inner_arr.is_array())
+		if ((child.get_string("kind") ?? "") == target_kind)
 		{
-			for (sz i = 0; i < inner_arr.len(); i++)
-			{
-				Object* child = inner_arr.get_at(i);
-				if (!child)
-				{
-					continue;
-				}
-
-				String k = child.get_string("kind") ?? "";
-				if (k == target_kind)
-				{
-					return child;
-				}
-
-				Object* found = find_descendant_by_kind(child, target_kind);
-				if (found)
-				{
-					return found;
-				}
-			}
+			return child;
+		}
+		if (Object* found = find_descendant_by_kind(child, target_kind))
+		{
+			return found;
 		}
 	}
 
 	return null;
+}
+
+<*
+ Children in a node's "inner" array; empty when it has none.
+*>
+fn Object*[] inner_nodes(Object* node) @private
+{
+	Object*? inner = node.get("inner");
+	if (catch inner) return {};
+	if (!inner.is_array()) return {};
+	return inner.array.array_view();
+}
+
+<*
+ First child in a node's "inner" array.
+*>
+fn Object*? first_inner(Object* node) @private
+{
+	Object*[] children = inner_nodes(node);
+	if (children.len == 0) return NOT_FOUND~;
+	return children[0];
 }
 
 <*
@@ -184,14 +174,7 @@ fn Object* resolve_complete_decl(Object* node, HashMap{String, Object*}* anon_ma
 	{
 		return node;
 	}
-	if (try id = node.get_string("id"))
-	{
-		if (try full_def = anon_map.get(id))
-		{
-			return full_def;
-		}
-	}
-	return node;
+	return anon_map.get(node.get_string("id")) ?? node;
 }
 
 <*
@@ -234,21 +217,14 @@ fn Object* find_external_tag(
 	HashMap{String, String}* typedef_map
 ) @local
 {
-	String underscore_name = string::tformat("_%s", name);
-	if (try node = tag_map.get(name)) return node;
-	if (try node = tag_map.get(underscore_name)) return node;
+	Object*? node = tag_map.get(name) ?? tag_map.get(string::tformat("_%s", name));
+	if (try node) return node;
 
-	if (try desug = typedef_map.get(name))
-	{
-		if (!desug.contains("*") && !desug.contains("["))
-		{
-			String base_desug = extract_base_type_name(desug);
-			String underscore_desug = string::tformat("_%s", base_desug);
-			if (try node = tag_map.get(base_desug)) return node;
-			if (try node = tag_map.get(underscore_desug)) return node;
-		}
-	}
-	return null;
+	String? desug = typedef_map.get(name);
+	if (catch desug) return null;
+	if (desug.contains("*") || desug.contains("[")) return null;
+	String base_desug = extract_base_type_name(desug);
+	return tag_map.get(base_desug) ?? tag_map.get(string::tformat("_%s", base_desug)) ?? null;
 }
 
 <*
@@ -341,21 +317,20 @@ fn void ParseContext.free(&self)
 *>
 fn String ParseContext.format_function_proto_from_ast(&self, Object* fpt)
 {
-	Object* inner = fpt.get("inner") ?? null;
-	if (!inner || !inner.is_array() || inner.len() == 0)
+	Object*[] inner = inner_nodes(fpt);
+	if (inner.len == 0)
 	{
 		return "fn void()";
 	}
 
-	RawTypeInfo ret_info = extract_type_info(inner.get_at(0));
+	RawTypeInfo ret_info = extract_type_info(inner[0]);
 	String ret_c3 = self.map_type(ret_info.qual_type, ret_info.desugared_type);
 
 	DString params_c3;
 	params_c3.init(self.allocator);
 
-	for (sz i = 1; i < inner.len(); i++)
+	foreach (param_node : inner[1..])
 	{
-		Object* param_node = inner.get_at(i);
 		RawTypeInfo p_info = extract_type_info(param_node);
 		if (p_info.qual_type == "void")
 		{
@@ -398,13 +373,9 @@ fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOp
 	sz count = (sz)(vt.get_int("numElements") ?? (long)DEFAULT_VECTOR_COUNT);
 
 	String elem_qual = "";
-	if (try inner_arr = vt.get("inner"))
+	if (try elem = first_inner(vt))
 	{
-		if (inner_arr.is_array() && inner_arr.len() > 0)
-		{
-			RawTypeInfo elem_info = extract_type_info(inner_arr.get_at(0));
-			elem_qual = elem_info.qual_type;
-		}
+		elem_qual = extract_type_info(elem).qual_type;
 	}
 
 	if (elem_qual.len == 0)
@@ -701,36 +672,17 @@ fn void ParseContext.parse_function_decl(&self, Object* node)
 
 	bool is_variadic = qual_type.contains("...");
 
-	if (try inner_arr = node.get("inner"))
+	int param_idx = 0;
+	foreach (child : inner_nodes(node))
 	{
-		if (inner_arr.is_array())
+		if ((child.get_string("kind") ?? "") != "ParmVarDecl" || extract_type_info(child).qual_type == "void")
 		{
-			int param_idx = 0;
-			for (sz i = 0; i < inner_arr.len(); i++)
-			{
-				Object* child = inner_arr.get_at(i);
-				if (!child)
-				{
-					continue;
-				}
-
-				String child_kind = child.get_string("kind") ?? "";
-				if (child_kind != "ParmVarDecl")
-				{
-					continue;
-				}
-
-				RawTypeInfo p_tinfo = extract_type_info(child);
-				if (p_tinfo.qual_type == "void")
-				{
-					continue;
-				}
-
-				CParam p = self.parse_param_decl(c3_name, child, param_idx++);
-				p.name = deduplicate_name(&seen_param_names, p.name, self.allocator);
-				params.push(p);
-			}
+			continue;
 		}
+
+		CParam p = self.parse_param_decl(c3_name, child, param_idx++);
+		p.name = deduplicate_name(&seen_param_names, p.name, self.allocator);
+		params.push(p);
 	}
 
 	self.tu.functions.push({
@@ -751,22 +703,10 @@ fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
 
 fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, List{CField}* fields)
 {
-	Object* inner_arr = node.get("inner") ?? null;
-	if (!inner_arr || !inner_arr.is_array())
-	{
-		return true;
-	}
-
 	Object* last_anon_rec = null;
 
-	for (sz i = 0; i < inner_arr.len(); i++)
+	foreach (i, child : inner_nodes(node))
 	{
-		Object* child = inner_arr.get_at(i);
-		if (!child)
-		{
-			continue;
-		}
-
 		String child_kind = child.get_string("kind") ?? "";
 		if (child_kind == "RecordDecl")
 		{
@@ -826,15 +766,7 @@ fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, Lis
 		if (is_anonymous_tag_name(f_type_c))
 		{
 			String synth_name = string::format(self.allocator, "%s_%s", c_name, f_name);
-			Object* anon_rec = null;
-			if (f_tinfo.decl_id.len > 0)
-			{
-				anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? null;
-			}
-			if (!anon_rec)
-			{
-				anon_rec = last_anon_rec;
-			}
+			Object* anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? last_anon_rec;
 			if (anon_rec)
 			{
 				self.parse_record_decl_with_name(anon_rec, synth_name);
@@ -939,28 +871,19 @@ fn bool compute_record_bitfields(List{CField}* fields) @local
 *>
 fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_alignment) @local
 {
-	if (try inner_arr = node.get("inner"))
+	foreach (child : inner_nodes(node))
 	{
-		if (inner_arr.is_array())
+		String k = child.get_string("kind") ?? "";
+		if (k == "PackedAttr" || k == "MaxFieldAlignmentAttr")
 		{
-			for (sz i = 0; i < inner_arr.len(); i++)
+			*out_is_packed = true;
+		}
+		else if (k == "AlignedAttr")
+		{
+			uint align_val = (uint)(constant_value(child) ?? 16);
+			if (align_val > *out_alignment)
 			{
-				if (Object* child = inner_arr.get_at(i))
-				{
-					String k = child.get_string("kind") ?? "";
-					if (k == "PackedAttr" || k == "MaxFieldAlignmentAttr")
-					{
-						*out_is_packed = true;
-					}
-					else if (k == "AlignedAttr")
-					{
-						uint align_val = (uint)(constant_value(child) ?? 16);
-						if (align_val > *out_alignment)
-						{
-							*out_alignment = align_val;
-						}
-					}
-				}
+				*out_alignment = align_val;
 			}
 		}
 	}
@@ -1129,84 +1052,46 @@ fn EnumBody parse_enum_body(Allocator allocator, Object* node, String strip_pref
 	long max_val = 0;
 	bool has_negative = false;
 
-	if (try inner_arr = node.get("inner"))
+	foreach (child : inner_nodes(node))
 	{
-		if (inner_arr.is_array())
+		String v_name = child.get_string("name") ?? "";
+		if ((child.get_string("kind") ?? "") != "EnumConstantDecl" || v_name.len == 0)
 		{
-			for (sz i = 0; i < inner_arr.len(); i++)
-			{
-				Object* child = inner_arr.get_at(i);
-				if (!child)
-				{
-					continue;
-				}
-
-				String child_kind = child.get_string("kind") ?? "";
-				if (child_kind != "EnumConstantDecl")
-				{
-					continue;
-				}
-
-				String v_name = child.get_string("name") ?? "";
-				if (v_name.len == 0)
-				{
-					continue;
-				}
-
-				long val = expected_val;
-				bool has_explicit = false;
-
-				if (try val_obj = child.get("inner"))
-				{
-					if (val_obj.is_array() && val_obj.len() > 0)
-					{
-						has_explicit = true;
-						if (Object* cexpr = val_obj.get_at(0))
-						{
-							if (try v_str = cexpr.get_string("value"))
-							{
-								if (try parsed_val = v_str.to_long())
-								{
-									val = parsed_val;
-								}
-							}
-						}
-					}
-				}
-
-				if (has_explicit && val != expected_val)
-				{
-					is_sequential = false;
-				}
-
-				String v_c3 = v_name[strip_prefix.len..].to_upper_copy(allocator);
-
-				v_c3 = deduplicate_name(&seen_variant_names, v_c3, allocator);
-
-				if (val < min_val)
-				{
-					min_val = val;
-				}
-				if (val > max_val)
-				{
-					max_val = val;
-				}
-				if (val < 0)
-				{
-					has_negative = true;
-				}
-
-				variants.push({
-					.c_name = v_name.copy(allocator),
-					.c3_name = v_c3,
-					.value = val,
-					.has_explicit_value = has_explicit,
-					.comment = ""
-				});
-
-				expected_val = val + 1;
-			}
+			continue;
 		}
+
+		Object*? value_expr = first_inner(child);
+		bool has_explicit = @ok(value_expr);
+		long val = value_expr.get_string("value").to_long() ?? expected_val;
+		if (has_explicit && val != expected_val)
+		{
+			is_sequential = false;
+		}
+
+		String v_c3 = deduplicate_name(&seen_variant_names, v_name[strip_prefix.len..].to_upper_copy(allocator), allocator);
+
+		if (val < min_val)
+		{
+			min_val = val;
+		}
+		if (val > max_val)
+		{
+			max_val = val;
+		}
+		if (val < 0)
+		{
+			has_negative = true;
+		}
+
+		variants.push({
+			.c_name = v_name.copy(allocator),
+			.c3_name = v_c3,
+			.value = val,
+			.has_explicit_value = has_explicit,
+			.comment = ""
+		});
+
+		expected_val = val + 1;
 	}
 
 	String backing_type = "int";
@@ -1276,13 +1161,9 @@ fn String common_enum_constant_prefix(Object* node) @local
 {
 	List{String} names;
 	names.tinit();
-	if (try inner_arr = node.get("inner"))
+	foreach (child : inner_nodes(node))
 	{
-		for (sz i = 0; i < inner_arr.len(); i++)
-		{
-			Object* child = inner_arr.get_at(i);
-			if (child && (child.get_string("kind") ?? "") == "EnumConstantDecl") names.push(child.get_string("name") ?? "");
-		}
+		if ((child.get_string("kind") ?? "") == "EnumConstantDecl") names.push(child.get_string("name") ?? "");
 	}
 	if (names.len() < 2) return "";
 
@@ -1346,45 +1227,36 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 		return;
 	}
 
-	if (try inner_arr = node.get("inner"))
+	foreach (child : inner_nodes(node))
 	{
-		if (inner_arr.is_array())
+		String child_kind = child.get_string("kind") ?? "";
+		if (child_kind != "ElaboratedType" && child_kind != "RecordType" && child_kind != "EnumType")
 		{
-			for (sz i = 0; i < inner_arr.len(); i++)
+			continue;
+		}
+
+		if (Object* rec_child = find_descendant_by_kind(child, "RecordDecl"))
+		{
+			Object* full_rec = resolve_complete_decl(rec_child, &self.anon_records);
+			String tag_name = full_rec.get_string("name") ?? "";
+			RawTypeInfo tinfo = extract_type_info(node);
+			bool is_ptr = tinfo.qual_type.contains("*") || tinfo.desugared_type.contains("*");
+			if (is_anonymous_tag_name(tag_name) || (tag_name.starts_with("_") && !is_ptr))
 			{
-				Object* child = inner_arr.get_at(i);
-				if (!child) continue;
-
-				String child_kind = child.get_string("kind") ?? "";
-				if (child_kind != "ElaboratedType" && child_kind != "RecordType" && child_kind != "EnumType")
-				{
-					continue;
-				}
-
-				if (Object* rec_child = find_descendant_by_kind(child, "RecordDecl"))
-				{
-					Object* full_rec = resolve_complete_decl(rec_child, &self.anon_records);
-					String tag_name = full_rec.get_string("name") ?? "";
-					RawTypeInfo tinfo = extract_type_info(node);
-					bool is_ptr = tinfo.qual_type.contains("*") || tinfo.desugared_type.contains("*");
-					if (is_anonymous_tag_name(tag_name) || (tag_name.starts_with("_") && !is_ptr))
-					{
-						if (tag_name.len > 0) self.seen_names.add(tag_name);
-						self.parse_record_decl_with_name(full_rec, c_name);
-						return;
-					}
-				}
-				else if (Object* enum_child = find_descendant_by_kind(child, "EnumDecl"))
-				{
-					Object* full_enum = resolve_complete_decl(enum_child, &self.anon_enums);
-					String tag_name = full_enum.get_string("name") ?? "";
-					if (is_anonymous_tag_name(tag_name) || tag_name.starts_with("_"))
-					{
-						if (tag_name.len > 0) self.seen_names.add(tag_name);
-						self.parse_enum_decl_with_name(full_enum, c_name);
-						return;
-					}
-				}
+				if (tag_name.len > 0) self.seen_names.add(tag_name);
+				self.parse_record_decl_with_name(full_rec, c_name);
+				return;
+			}
+		}
+		else if (Object* enum_child = find_descendant_by_kind(child, "EnumDecl"))
+		{
+			Object* full_enum = resolve_complete_decl(enum_child, &self.anon_enums);
+			String tag_name = full_enum.get_string("name") ?? "";
+			if (is_anonymous_tag_name(tag_name) || tag_name.starts_with("_"))
+			{
+				if (tag_name.len > 0) self.seen_names.add(tag_name);
+				self.parse_enum_decl_with_name(full_enum, c_name);
+				return;
 			}
 		}
 	}
@@ -1450,28 +1322,15 @@ fn void parse_clang_ast_json(
 	BindgenOptions options
 )
 {
-	Object* inner_arr = null;
-	if (try arr = root_obj.get("inner"))
-	{
-		inner_arr = arr;
-	}
-	if (!inner_arr || !inner_arr.is_array())
-	{
-		return;
-	}
+	Object*[] nodes = inner_nodes(root_obj);
 
 	ParseContext ctx;
 	ctx.init(allocator, tu, options);
 	defer ctx.free();
 
 	// Pass 1: Index typedefs and records across entire translation unit
-	for (sz i = 0; i < inner_arr.len(); i++)
+	foreach (node : nodes)
 	{
-		Object* node = inner_arr.get_at(i);
-		if (!node)
-		{
-			continue;
-		}
 
 		if (node.get_bool("isInvalid") ?? false)
 		{
@@ -1528,13 +1387,8 @@ fn void parse_clang_ast_json(
 	anonymous_enums.init(allocator);
 
 	// Pass 2: Parse declarations from the target header
-	for (sz i = 0; i < inner_arr.len(); i++)
+	foreach (node : nodes)
 	{
-		Object* node = inner_arr.get_at(i);
-		if (!node)
-		{
-			continue;
-		}
 
 		if (node.get_bool("isImplicit") ?? false)
 		{
