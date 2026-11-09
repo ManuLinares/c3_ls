@@ -194,7 +194,8 @@ fn void add_symbol_completion(
 	String symbol_name,
 	Node* node,
 	String base_identifier,
-	String prefix = ""
+	String prefix = "",
+	String qualifier = ""
 )
 {
 	if (!node) return;
@@ -207,6 +208,10 @@ fn void add_symbol_completion(
 	if (prefix.len > 0 && prefix.starts_with("@"))
 	{
 		insert_text = symbol_name.strip_prefix("@");
+	}
+	else if (qualifier.len > 0)
+	{
+		insert_text = string::tformat("%s%s", qualifier, symbol_name);
 	}
 
 	InsertTextFormat format = PLAIN_TEXT;
@@ -1092,6 +1097,19 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 	}
 }
 
+<*
+ Path prefix a function, macro, global or fault declared in `decl_mod` needs at the
+ completion site: none in its own module or when `@builtin`, else its last module
+ segment, as c3c suggests.
+*>
+fn String module_qualifier(Context* ctx, Node* node, String decl_mod) @local
+{
+	if (decl_mod.len == 0 || decl_mod == ctx.caller_mod) return "";
+	if (cursor::has_attribute(node, BUILTIN, null)) return "";
+	sz start = (decl_mod.rindex_of("::") ?? -2) + 2;
+	return string::tformat("%s::", decl_mod[start..]);
+}
+
 fn void provide_global(Context* ctx, List{CompletionItem}* items)
 {
 	if (ctx.access != NONE || !ctx.ws || !ctx.ws.ctx) return;
@@ -1128,7 +1146,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 						{
 							if (seen_symbols.add(fname))
 							{
-								add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix);
+								add_symbol_completion(ctx, items, fname, fn_info.node, fn_info.mod, ctx.prefix, module_qualifier(ctx, fn_info.node, fn_info.mod));
 							}
 						}
 					}
@@ -1166,7 +1184,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 						{
 							if (seen_symbols.add(mname))
 							{
-								add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix);
+								add_symbol_completion(ctx, items, mname, mac_info.node, mac_info.mod, ctx.prefix, module_qualifier(ctx, mac_info.node, mac_info.mod));
 							}
 						}
 					}
@@ -1179,12 +1197,12 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 	{
 		if (sf)
 		{
-			String file_mod = query::get_source_file_module_name(sf);
-			String mod_ident = file_mod.len > 0 ? file_mod : "global";
 			foreach (stmt : sf.ast.statements)
 			{
 				if (stmt)
 				{
+					String stmt_mod = query::get_module_name_at_location(sf, stmt.range.start);
+					String mod_ident = stmt_mod.len > 0 ? stmt_mod : "global";
 					if (stmt.kind == ATTRDEF_DECL) continue;
 					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
@@ -1202,7 +1220,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 							{
 								if (seen_symbols.add(fname))
 								{
-									add_symbol_completion(ctx, items, fname, fault_node, mod_ident, ctx.prefix);
+									add_symbol_completion(ctx, items, fname, fault_node, mod_ident, ctx.prefix, module_qualifier(ctx, fault_node, stmt_mod));
 								}
 							}
 						}
@@ -1217,7 +1235,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 						{
 							if (seen_symbols.add(fname))
 							{
-								add_symbol_completion(ctx, items, fname, stmt, mod_ident, ctx.prefix);
+								add_symbol_completion(ctx, items, fname, stmt, mod_ident, ctx.prefix, module_qualifier(ctx, stmt, stmt_mod));
 							}
 						}
 						continue;
@@ -1253,7 +1271,8 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 					{
 						if (seen_symbols.add(sname))
 						{
-							add_symbol_completion(ctx, items, sname, stmt, mod_ident, ctx.prefix);
+							bool needs_path = stmt.kind == FN_DECL || stmt.kind == MACRO_DECL || stmt.kind == VAR_DECL;
+							add_symbol_completion(ctx, items, sname, stmt, mod_ident, ctx.prefix, needs_path ? module_qualifier(ctx, stmt, stmt_mod) : "");
 						}
 					}
 				}
