@@ -810,6 +810,52 @@ fn void LspProject.process_config(&self)
 	}
 }
 
+<*
+ Dependencies of the project and of every target, since any target may be the one being built.
+*>
+fn String[] LspProject.all_dependencies(&self)
+{
+	List{String} out;
+	out.tinit();
+	push_unique_all(&out, self.config.dependencies.get() ?? {});
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			push_unique_all(&out, target_conf.dependencies_override.get() ?? {});
+			push_unique_all(&out, target_conf.dependencies.get() ?? {});
+		};
+	}
+	return out.array_view();
+}
+
+<*
+ Library search paths of the project and of every target.
+*>
+fn String[] LspProject.all_dependency_search_paths(&self)
+{
+	List{String} out;
+	out.tinit();
+	push_unique_all(&out, self.config.dependency_search_paths.get() ?? (String[]){ "lib" });
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			push_unique_all(&out, target_conf.dependency_search_paths_override.get() ?? {});
+			push_unique_all(&out, target_conf.dependency_search_paths.get() ?? {});
+		};
+	}
+	return out.array_view();
+}
+
+fn void push_unique_all(List{String}* list, String[] values) @local
+{
+	foreach (value : values)
+	{
+		if (!list.contains(value)) list.push(value);
+	}
+}
+
 fn void LspProject.process_libs(&self)
 {
 	if (self.config.root_path.len == 0) return;
@@ -821,8 +867,8 @@ fn void LspProject.process_libs(&self)
 		return;
 	}
 
-	String[] deps         = self.config.dependencies.get() ?? {};
-	String[] search_paths = self.config.dependency_search_paths.get() ?? (String[]){ "lib" };
+	String[] deps         = self.all_dependencies();
+	String[] search_paths = self.all_dependency_search_paths();
 
 	foreach (search_entry : search_paths)
 	{

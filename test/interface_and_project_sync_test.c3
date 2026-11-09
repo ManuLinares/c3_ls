@@ -186,6 +186,66 @@ fn void test_process_libs_matches_manifest_provides()
 }
 
 <*
+ Saves a library folder `<search_dir>/<folder>` whose manifest provides `provides`, with one
+ function `fn_name`.
+*>
+macro void save_test_lib(Path search_dir, String folder, String provides, String fn_name)
+{
+	Path lib = search_dir.tappend(folder)!!;
+	(void)path::mkdir(lib, recursive: true);
+	file::save(lib.tappend("manifest.json")!!, string::tformat(`{"provides": "%s", "sources": ["."]}`, provides))!!;
+	file::save(lib.tappend("lib.c3")!!, string::tformat("module %s;\nfn void %s() {}\n", provides, fn_name))!!;
+}
+
+macro bool has_fn_symbol(LspProject* proj, String name)
+{
+	List{SymbolEntry} syms = proj.workspace.find_symbol_by_name(name);
+	return syms.len() > 0 && syms.get(0).node.kind == NodeKind.FN_DECL;
+}
+
+<*
+ Libraries listed in a target's `dependencies` or `dependencies-override`, and found in its
+ `dependency-search-paths` or `dependency-search-paths-override`, are loaded like project-level ones.
+*>
+fn void test_process_libs_loads_target_dependencies()
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path test_root = tmp_dir.tappend("c3_ls_target_lib_test")!!;
+	defer (void)path::rmtree(test_root);
+	save_test_lib(test_root.tappend("lib")!!, "vendor_sdl3.c3l", "vendor_sdl3", "vendor_init");
+	save_test_lib(test_root.tappend("lib")!!, "sdl3.c3l", "sdl", "sdl_init");
+	save_test_lib(test_root.tappend("target_lib")!!, "extra.c3l", "extra", "extra_init");
+	save_test_lib(test_root.tappend("override_lib")!!, "other.c3l", "other", "other_init");
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	file::save(test_root.tappend("project.json")!!, `{
+		"dependency-search-paths": [ "lib" ],
+		"dependencies": [ ],
+		"sources": [ "src/**" ],
+		"targets": {
+			"mehvender": { "type": "executable", "dependencies": [ "vendor_sdl3" ], },
+			"meh": { "type": "executable", "dependencies-override": [ "sdl" ], },
+			"extra": { "type": "executable", "dependency-search-paths": [ "target_lib" ], "dependencies": [ "extra" ] },
+			"other": { "type": "executable", "dependency-search-paths-override": [ "override_lib" ], "dependencies": [ "other" ] },
+		},
+	}`)!!;
+	config::load(&proj, { .uri = (LspUri)uri::from_file_path(tmem, test_root).to_raw_string(tmem) }, mem);
+
+	proj.process_libs();
+	proj.update();
+
+	assert(has_fn_symbol(&proj, "vendor_init"));
+	assert(has_fn_symbol(&proj, "sdl_init"));
+	assert(has_fn_symbol(&proj, "extra_init"));
+	assert(has_fn_symbol(&proj, "other_init"));
+}
+
+<*
  Issue: Type methods (`Vector2.scale`, `Vector2.reset`) should only be suggested
  on member access (`v.scale`), NEVER in bare global completion when typing
  inside a function body.
