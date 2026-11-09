@@ -1,6 +1,5 @@
 module lsp::bindgen;
 
-import analyzer::core::constants;
 import std;
 
 <*
@@ -32,7 +31,7 @@ fn void emit_constants(DString* sb, CTranslationUnit* tu) @local
 
 <*
  Emits typedefs and function pointer callbacks as C3 alias declarations.
- Deduplicates declarations to prevent shadowing.
+ Expects `cleanup_typedef_conflicts` to have run.
  @param sb : "String buffer accumulator."
  @param tu : "Parsed translation unit."
 *>
@@ -43,50 +42,9 @@ fn void emit_typedefs(DString* sb, CTranslationUnit* tu) @local
 		return;
 	}
 
-	HashSet{String} seen_aliases;
-	seen_aliases.tinit();
-
 	sb.append("// Type Aliases & Callbacks\n");
 	foreach (td : tu.typedefs)
 	{
-		if (td.c3_name == td.underlying_c3 || is_c3_type(td.c3_name) || is_c3_keyword(td.c3_name))
-		{
-			continue;
-		}
-
-		// Break self-referential handle definitions (e.g. alias Hstring = Hstring* -> alias Hstring = void*)
-		if (td.underlying_c3.ends_with("*") && extract_base_type_ident(td.underlying_c3) == td.c3_name)
-		{
-			td.underlying_c3 = "void*";
-		}
-
-		if (!seen_aliases.add(td.c3_name))
-		{
-			continue;
-		}
-
-		bool conflicts = false;
-		foreach (st : tu.structs)
-		{
-			if (st.c3_name == td.c3_name)
-			{
-				conflicts = true;
-				break;
-			}
-		}
-		foreach (e : tu.enums)
-		{
-			if (e.c3_name == td.c3_name)
-			{
-				conflicts = true;
-				break;
-			}
-		}
-		if (conflicts)
-		{
-			continue;
-		}
-
 		sb.appendf("alias %s = %s;\n", td.c3_name, td.underlying_c3);
 	}
 	sb.append_char('\n');
@@ -210,50 +168,17 @@ fn CStruct* find_struct_by_name(CTranslationUnit* tu, String name) @local
 	return null;
 }
 
-fn bool struct_has_fam(CTranslationUnit* tu, CStruct* st) @local
+<*
+ The struct holding the flexible array member that `st` ends with, following by-value last fields.
+*>
+fn CStruct* fam_owner(CTranslationUnit* tu, CStruct* st) @local
 {
-	if (!st || st.is_union || st.is_opaque || st.fields.len() == 0)
-	{
-		return false;
-	}
+	if (!st || st.is_union || st.is_opaque || st.fields.len() == 0) return null;
 	CField last_f = st.fields.get(st.fields.len() - 1);
-	if (last_f.c3_type.ends_with("[*]"))
-	{
-		return true;
-	}
-	if (!last_f.c3_type.contains("*") && !last_f.c3_type.contains("["))
-	{
-		String base = extract_base_type_ident(last_f.c3_type);
-		CStruct* sub = find_struct_by_name(tu, base);
-		if (sub && sub != st)
-		{
-			return struct_has_fam(tu, sub);
-		}
-	}
-	return false;
-}
-
-fn void remove_fam_from_struct(CTranslationUnit* tu, CStruct* st) @local
-{
-	if (!st || st.is_union || st.is_opaque || st.fields.len() == 0)
-	{
-		return;
-	}
-	CField last_f = st.fields.get(st.fields.len() - 1);
-	if (last_f.c3_type.ends_with("[*]"))
-	{
-		(void)st.fields.pop();
-		return;
-	}
-	if (!last_f.c3_type.contains("*") && !last_f.c3_type.contains("["))
-	{
-		String base = extract_base_type_ident(last_f.c3_type);
-		CStruct* sub = find_struct_by_name(tu, base);
-		if (sub && sub != st)
-		{
-			remove_fam_from_struct(tu, sub);
-		}
-	}
+	if (last_f.c3_type.ends_with("[*]")) return st;
+	if (last_f.c3_type.contains("*") || last_f.c3_type.contains("[")) return null;
+	CStruct* sub = find_struct_by_name(tu, extract_base_type_ident(last_f.c3_type));
+	return sub && sub != st ? fam_owner(tu, sub) : null;
 }
 
 <*
@@ -312,7 +237,7 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 
 		while (st.fields.len() > write_idx)
 		{
-			(void)st.fields.pop();
+			st.fields.remove_last();
 		}
 	}
 
@@ -336,9 +261,10 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 				{
 					String base = extract_base_type_ident(f.c3_type);
 					CStruct* sub_st = find_struct_by_name(tu, base);
-					if (sub_st && sub_st != st && struct_has_fam(tu, sub_st))
+					if (sub_st == st) continue;
+					if (CStruct* owner = fam_owner(tu, sub_st))
 					{
-						remove_fam_from_struct(tu, sub_st);
+						owner.fields.remove_last();
 						fam_modified = true;
 					}
 				}
@@ -465,7 +391,7 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 fn void record_missing_type(HashSet{String}* known, List{String}* missing, String type_str) @local
 {
 	String t = extract_base_type_ident(type_str);
-	if (t.len == 0 || t.len > MAX_IDENTIFIER_LEN || t[0] < 'A' || t[0] > 'Z' || t.contains("(") || t.contains(" "))
+	if (t.len == 0 || t.len > MAX_IDENTIFIER_LEN || t[0] < 'A' || t[0] > 'Z' || t.contains("(") || t.contains(" ") || is_c3_type(t))
 	{
 		return;
 	}
@@ -475,50 +401,27 @@ fn void record_missing_type(HashSet{String}* known, List{String}* missing, Strin
 	}
 }
 
+<*
+ Drops typedefs that cannot be emitted as aliases: identity or builtin names, keywords,
+ names taken by a struct or enum, and later duplicates. Breaks self-referential handles into void*.
+*>
 fn void cleanup_typedef_conflicts(CTranslationUnit* tu) @local
 {
-	HashSet{String} existing_types;
-	existing_types.tinit();
+	HashSet{String} taken_names;
+	taken_names.tinit();
+	tu.add_type_names(&taken_names, typedefs: false);
 
-	foreach (&st : tu.structs)
+	sz kept;
+	foreach (td : tu.typedefs)
 	{
-		existing_types.add(st.c3_name);
-	}
-	foreach (&e : tu.enums)
-	{
-		existing_types.add(e.c3_name);
-	}
-
-	HashSet{String} seen;
-	seen.tinit();
-
-	sz write_idx = 0;
-	sz total = tu.typedefs.len();
-	for (sz i = 0; i < total; i++)
-	{
-		CTypedef td = tu.typedefs.get(i);
-		if (existing_types.contains(td.c3_name))
+		if (td.c3_name == td.underlying_c3 || is_c3_type(td.c3_name) || is_c3_keyword(td.c3_name) || !taken_names.add(td.c3_name)) continue;
+		if (td.underlying_c3.ends_with("*") && extract_base_type_ident(td.underlying_c3) == td.c3_name)
 		{
-			continue;
+			td.underlying_c3 = "void*";
 		}
-		if (td.c3_name == td.underlying_c3 || is_c3_type(td.c3_name) || is_c3_keyword(td.c3_name))
-		{
-			continue;
-		}
-		if (!seen.add(td.c3_name))
-		{
-			continue;
-		}
-		if (write_idx != i)
-		{
-			tu.typedefs.set(write_idx, td);
-		}
-		write_idx++;
+		tu.typedefs[kept++] = td;
 	}
-	while (tu.typedefs.len() > write_idx)
-	{
-		(void)tu.typedefs.pop();
-	}
+	while (tu.typedefs.len() > kept) tu.typedefs.remove_last();
 }
 
 fn void emit_bitfield_members(DString* sb, List{CField}* fields, sz start_idx, sz end_idx, String indent) @local
@@ -620,30 +523,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 {
 	HashSet{String} known_types;
 	known_types.tinit();
-	foreach (pt : constants::PrimitiveType::values)
-	{
-		known_types.add(pt.name);
-	}
-	const String[*] EXTRA_BUILTINS = {
-		"String", "ZString", "CVaList", "CLong", "CULong", "CChar", "CSChar",
-		"CUChar", "CShort", "CUShort", "CInt", "CUInt", "CLongLong", "CULongLong", "CBool"
-	};
-	foreach (b : EXTRA_BUILTINS)
-	{
-		known_types.add(b);
-	}
-	foreach (td : tu.typedefs)
-	{
-		known_types.add(td.c3_name);
-	}
-	foreach (e : tu.enums)
-	{
-		known_types.add(e.c3_name);
-	}
-	foreach (st : tu.structs)
-	{
-		known_types.add(st.c3_name);
-	}
+	tu.add_type_names(&known_types);
 
 	List{String} missing_structs;
 	missing_structs.tinit();
@@ -674,23 +554,12 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 	{
 		if (td.is_func_ptr)
 		{
-			sz open_p = td.underlying_c3.index_of_char('(') ?? 0;
-			sz close_p = td.underlying_c3.rindex_of_char(')') ?? 0;
-
-			if (open_p > 3)
+			String sig = td.underlying_c3;
+			sz open = last_paren_group_open(sig)!!;
+			record_missing_type(&known_types, &missing_structs, sig["fn ".len..open - 1]);
+			foreach (param : split_top_level_commas(sig[open + 1..^2]))
 			{
-				String ret_part = td.underlying_c3[3 : open_p - 3].trim();
-				record_missing_type(&known_types, &missing_structs, ret_part);
-			}
-
-			if (close_p > open_p + 1)
-			{
-				String params_part = td.underlying_c3[open_p + 1 : close_p - (open_p + 1)];
-				String[] p_tokens = params_part.tsplit(",");
-				foreach (tok : p_tokens)
-				{
-					record_missing_type(&known_types, &missing_structs, tok.trim());
-				}
+				record_missing_type(&known_types, &missing_structs, param);
 			}
 		}
 		else
@@ -701,14 +570,7 @@ fn void emit_structs(DString* sb, CTranslationUnit* tu) @local
 
 	HashSet{String} seen_struct_names;
 	seen_struct_names.tinit();
-	foreach (e : tu.enums)
-	{
-		seen_struct_names.add(e.c3_name);
-	}
-	foreach (td : tu.typedefs)
-	{
-		seen_struct_names.add(td.c3_name);
-	}
+	tu.add_type_names(&seen_struct_names, structs: false);
 
 	foreach (&st : tu.structs)
 	{

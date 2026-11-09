@@ -175,6 +175,33 @@ fn void CTranslationUnit.free(&self)
 }
 
 <*
+ Adds the C3 names of the selected declaration kinds to `names`.
+*>
+fn void CTranslationUnit.add_type_names(&self, HashSet{String}* names, bool structs = true, bool enums = true, bool typedefs = true)
+{
+	if (structs)
+	{
+		foreach (&st : self.structs) names.add(st.c3_name);
+	}
+	if (enums)
+	{
+		foreach (&e : self.enums) names.add(e.c3_name);
+	}
+	if (typedefs)
+	{
+		foreach (&td : self.typedefs) names.add(td.c3_name);
+	}
+}
+
+fn bool CTranslationUnit.has_type_name(&self, String c3_name)
+{
+	foreach (&st : self.structs) if (st.c3_name == c3_name) return true;
+	foreach (&e : self.enums) if (e.c3_name == c3_name) return true;
+	foreach (&td : self.typedefs) if (td.c3_name == c3_name) return true;
+	return false;
+}
+
+<*
  Capitalizes the first ASCII character of an identifier if it is lowercase.
 *>
 fn String capitalize_ascii(Allocator allocator, String name)
@@ -245,41 +272,104 @@ fn List{String} clean_c_type_words(String s)
 	return clean_words;
 }
 
-fn String strip_clang_attributes(String raw)
+struct ParenSpan
 {
-	String s = raw;
-	while (try attr_idx = s.index_of("__attribute__"))
+	sz open;
+	sz close;
+}
+
+<*
+ Positions of the first '(' at or after `from` and its matching ')'.
+*>
+fn ParenSpan? find_paren_span(String s, sz from)
+{
+	sz open = s[from..].index_of_char('(')! + from;
+	int depth;
+	for (sz i = open; i < s.len; i++)
 	{
-		sz p = attr_idx + 13;
-		while (p < s.len && s[p] != '(')
+		switch (s[i])
 		{
-			p++;
+			case '(': depth++;
+			case ')': if (--depth == 0) return { open, i };
 		}
-		if (p < s.len && s[p] == '(')
+	}
+	return NOT_FOUND~;
+}
+
+<*
+ Index of the '(' matching the final ')' of `s`.
+*>
+fn sz? last_paren_group_open(String s)
+{
+	if (!s.ends_with(")")) return NOT_FOUND~;
+	int depth;
+	for (sz i = s.len; i > 0; i--)
+	{
+		switch (s[i - 1])
 		{
-			int depth = 1;
-			p++;
-			while (p < s.len && depth > 0)
-			{
-				if (s[p] == '(')
-				{
-					depth++;
-				}
-				else if (s[p] == ')')
-				{
-					depth--;
-				}
-				p++;
-			}
-			s = string::tformat("%s %s", s[:attr_idx], s[p..]).trim();
+			case ')': depth++;
+			case '(': if (--depth == 0) return i - 1;
 		}
-		else
+	}
+	return NOT_FOUND~;
+}
+
+<*
+ Splits on commas outside (), [] and {}, trimming each part.
+*>
+fn String[] split_top_level_commas(String s)
+{
+	List{String} parts;
+	parts.tinit();
+	int depth;
+	sz start;
+	foreach (i, c : s)
+	{
+		switch (c)
 		{
-			break;
+			case '(':
+			case '[':
+			case '{':
+				depth++;
+			case ')':
+			case ']':
+			case '}':
+				if (depth > 0) depth--;
+			case ',':
+				if (depth > 0) break;
+				parts.push(s[start:i - start].trim());
+				start = i + 1;
 		}
+	}
+	parts.push(s[start..].trim());
+	return parts.array_view();
+}
+
+<*
+ Text inside the parentheses following the first occurrence of `keyword`.
+*>
+fn String? attribute_argument(String s, String keyword)
+{
+	sz idx = s.index_of(keyword)!;
+	ParenSpan span = find_paren_span(s, idx + keyword.len)!;
+	return s[span.open + 1 : span.close - span.open - 1].trim();
+}
+
+<*
+ Removes every `keyword(...)` occurrence.
+*>
+fn String strip_paren_attribute(String s, String keyword)
+{
+	while (try idx = s.index_of(keyword))
+	{
+		ParenSpan? span = find_paren_span(s, idx + keyword.len);
+		if (catch span) break;
+		s = string::tformat("%s %s", s[:idx], s[span.close + 1..]).trim();
 	}
 	return s;
 }
+
+fn String strip_clang_attributes(String raw) => strip_paren_attribute(raw, "__attribute__");
 
 <*
  Normalizes a raw string into a valid C3 module identifier.
@@ -854,200 +944,53 @@ const sz DEFAULT_VECTOR_COUNT = 4;
 const sz DEFAULT_ELEM_BYTES = 4;
 
 <*
+ Byte size from a `vector_size` argument: a literal, or a product of literals and primitive type sizes.
+*>
+fn sz vector_size_bytes(String arg) @local
+{
+	if (try bytes = arg.to_ulong()) return (sz)bytes;
+
+	sz product = 1;
+	foreach (term : arg.tsplit("*"))
+	{
+		String t = term.trim().trim_left(" (").trim_right(" )");
+		if (try val = t.to_ulong())
+		{
+			product *= (sz)val;
+		}
+		else if (t.contains("double"))
+		{
+			product *= 8;
+		}
+		else if (t.contains("float") || t.contains("int"))
+		{
+			product *= 4;
+		}
+		else if (t.contains("short"))
+		{
+			product *= 2;
+		}
+	}
+	return product > 1 ? product : 0;
+}
+
+<*
  Parses GCC/Clang vector attributes using balanced parenthesis matching.
 *>
 fn String parse_vector_attribute_type(Allocator allocator, String raw) @local
 {
-	String s = raw.trim();
-	int pointer_depth = 0;
+	String s = raw;
+	int pointer_depth = strip_pointer_depth(&s);
 
-	while (true)
+	sz vec_bytes;
+	sz elem_count;
+	if (try arg = attribute_argument(s, "ext_vector_type") ?? attribute_argument(s, "neon_vector_type"))
 	{
-		s = s.trim();
-		if (s.ends_with("*"))
-		{
-			pointer_depth++;
-			s = s[:^1].trim_right();
-			continue;
-		}
-		if (s.ends_with("const"))
-		{
-			s = s[:^5].trim_right();
-			continue;
-		}
-		if (s.ends_with("volatile"))
-		{
-			s = s[:^8].trim_right();
-			continue;
-		}
-		if (s.ends_with("__volatile"))
-		{
-			s = s[:^10].trim_right();
-			continue;
-		}
-		if (s.ends_with("__volatile__"))
-		{
-			s = s[:^12].trim_right();
-			continue;
-		}
-		if (s.ends_with("restrict"))
-		{
-			s = s[:^8].trim_right();
-			continue;
-		}
-		if (s.ends_with("__restrict"))
-		{
-			s = s[:^10].trim_right();
-			continue;
-		}
-		if (s.ends_with("__restrict__"))
-		{
-			s = s[:^12].trim_right();
-			continue;
-		}
-		break;
+		elem_count = (sz)(arg.to_ulong() ?? 0);
 	}
-
-	sz vec_bytes = 0;
-	sz elem_count = 0;
-
-	if (try ext_idx = s.index_of("ext_vector_type"))
+	else if (try arg = attribute_argument(s, "vector_size"))
 	{
-		sz p = ext_idx + 15;
-		while (p < s.len && s[p] != '(')
-		{
-			p++;
-		}
-		if (p < s.len && s[p] == '(')
-		{
-			sz arg_start = p + 1;
-			int depth = 1;
-			p++;
-			while (p < s.len && depth > 0)
-			{
-				if (s[p] == '(')
-				{
-					depth++;
-				}
-				else if (s[p] == ')')
-				{
-					depth--;
-				}
-				if (depth == 0)
-				{
-					break;
-				}
-				p++;
-			}
-			String arg = s[arg_start : p - arg_start].trim();
-			if (try parsed = arg.to_ulong())
-			{
-				elem_count = (sz)parsed;
-			}
-		}
-	}
-	else if (try neon_idx = s.index_of("neon_vector_type"))
-	{
-		sz p = neon_idx + 16;
-		while (p < s.len && s[p] != '(')
-		{
-			p++;
-		}
-		if (p < s.len && s[p] == '(')
-		{
-			sz arg_start = p + 1;
-			int depth = 1;
-			p++;
-			while (p < s.len && depth > 0)
-			{
-				if (s[p] == '(')
-				{
-					depth++;
-				}
-				else if (s[p] == ')')
-				{
-					depth--;
-				}
-				if (depth == 0)
-				{
-					break;
-				}
-				p++;
-			}
-			String arg = s[arg_start : p - arg_start].trim();
-			if (try parsed = arg.to_ulong())
-			{
-				elem_count = (sz)parsed;
-			}
-		}
-	}
-	else if (try vec_idx = s.index_of("vector_size"))
-	{
-		sz p = vec_idx + 11;
-		while (p < s.len && s[p] != '(')
-		{
-			p++;
-		}
-		if (p < s.len && s[p] == '(')
-		{
-			sz arg_start = p + 1;
-			int depth = 1;
-			p++;
-			while (p < s.len && depth > 0)
-			{
-				if (s[p] == '(')
-				{
-					depth++;
-				}
-				else if (s[p] == ')')
-				{
-					depth--;
-				}
-				if (depth == 0)
-				{
-					break;
-				}
-				p++;
-			}
-			String arg = s[arg_start : p - arg_start].trim();
-			if (try parsed = arg.to_ulong())
-			{
-				vec_bytes = (sz)parsed;
-			}
-			else
-			{
-				String[] terms = arg.tsplit("*");
-				sz product = 1;
-				foreach (term : terms)
-				{
-					String t = term.trim().trim_left(" (").trim_right(" )");
-					if (try val = t.to_ulong())
-					{
-						product *= (sz)val;
-					}
-					else if (t.contains("double"))
-					{
-						product *= 8;
-					}
-					else if (t.contains("float") || t.contains("int"))
-					{
-						product *= 4;
-					}
-					else if (t.contains("short"))
-					{
-						product *= 2;
-					}
-					else if (t.contains("char"))
-					{
-						product *= 1;
-					}
-				}
-				if (product > 1)
-				{
-					vec_bytes = product;
-				}
-			}
-		}
+		vec_bytes = vector_size_bytes(arg);
 	}
 
 	if (vec_bytes == 0 && elem_count == 0)
@@ -1056,40 +999,9 @@ fn String parse_vector_attribute_type(Allocator allocator, String raw) @local
 	}
 
 	s = strip_clang_attributes(s);
-
-	const String[*] VEC_ATTRS = { "__vector_size__", "vector_size", "ext_vector_type", "neon_vector_type" };
-	foreach (va : VEC_ATTRS)
+	foreach (String attribute : { "__vector_size__", "vector_size", "ext_vector_type", "neon_vector_type" })
 	{
-		while (try va_idx = s.index_of(va))
-		{
-			sz p = va_idx + va.len;
-			while (p < s.len && s[p] != '(')
-			{
-				p++;
-			}
-			if (p < s.len && s[p] == '(')
-			{
-				int depth = 1;
-				p++;
-				while (p < s.len && depth > 0)
-				{
-					if (s[p] == '(')
-					{
-						depth++;
-					}
-					else if (s[p] == ')')
-					{
-						depth--;
-					}
-					p++;
-				}
-				s = string::tformat("%s %s", s[:va_idx], s[p..]).trim();
-			}
-			else
-			{
-				break;
-			}
-		}
+		s = strip_paren_attribute(s, attribute);
 	}
 
 	s = s.trim_left("() \t").trim_right("() \t");
@@ -1155,35 +1067,16 @@ fn String parse_vector_attribute_type(Allocator allocator, String raw) @local
 fn bool is_c_function_pointer(String c_type)
 {
 	String s = c_type.trim();
-	if (try idx = s.index_of("(*)"))
+	foreach (String marker : { "(*)", "(^)" })
 	{
-		String rest = s[idx + 3..].trim();
-		if (rest.starts_with("["))
+		if (try idx = s.index_of(marker))
 		{
-			return false;
-		}
-		if (rest.starts_with("("))
-		{
-			return true;
+			String rest = s[idx + marker.len..].trim();
+			if (rest.starts_with("[")) return false;
+			if (rest.starts_with("(")) return true;
 		}
 	}
-	if (try idx = s.index_of("(^)"))
-	{
-		String rest = s[idx + 3..].trim();
-		if (rest.starts_with("["))
-		{
-			return false;
-		}
-		if (rest.starts_with("("))
-		{
-			return true;
-		}
-	}
-	if (s.contains("(") && s.ends_with(")"))
-	{
-		return true;
-	}
-	return false;
+	return s.contains("(") && s.ends_with(")");
 }
 
 <*

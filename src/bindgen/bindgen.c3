@@ -52,14 +52,7 @@ fn String? find_missing_header_directory(BindgenOptions options, String missing_
 	search_roots.tinit();
 
 	String target_dir = options.header_path;
-	if (file::is_file(target_dir))
-	{
-		sz last_slash = target_dir.rindex_of_char('/') ?? target_dir.rindex_of_char('\\') ?? (sz)0;
-		if (last_slash > 0)
-		{
-			target_dir = target_dir[:last_slash];
-		}
-	}
+	if (file::is_file(target_dir)) target_dir = ((Path)target_dir).dirname();
 	target_dir = target_dir.trim_right("/\\");
 	if (target_dir.len > 0)
 	{
@@ -187,26 +180,9 @@ fn String deduce_package_dir(BindgenOptions options)
 		return dir;
 	}
 
-	sz last_slash = 0;
-	if (try idx = options.header_path.rindex_of_char('/'))
-	{
-		last_slash = idx + 1;
-	}
-	else if (try idx = options.header_path.rindex_of_char('\\'))
-	{
-		last_slash = idx + 1;
-	}
-
-	if (last_slash > 0)
-	{
-		String parent = options.header_path[:last_slash];
-		if (!is_include_root_dir(options, parent))
-		{
-			return parent;
-		}
-	}
-
-	return "";
+	String parent = ((Path)options.header_path).dirname();
+	if (parent == "." || is_include_root_dir(options, parent)) return "";
+	return options.header_path[:parent.len + 1];
 }
 
 <*
@@ -216,24 +192,11 @@ fn String deduce_package_dir(BindgenOptions options)
 fn void auto_discover_peer_includes(BindgenOptions* options)
 {
 	String base_dir = options.header_path;
-	if (file::is_file(base_dir))
-	{
-		sz last_slash = base_dir.rindex_of_char('/') ?? base_dir.rindex_of_char('\\') ?? (sz)0;
-		if (last_slash > 0)
-		{
-			base_dir = base_dir[:last_slash];
-		}
-	}
+	if (file::is_file(base_dir)) base_dir = ((Path)base_dir).dirname();
 	base_dir = base_dir.trim_right("/\\");
 
-	sz parent_slash = base_dir.rindex_of_char('/') ?? base_dir.rindex_of_char('\\') ?? (sz)0;
-	if (parent_slash == 0)
-	{
-		return;
-	}
-
-	String parent_dir = base_dir[:parent_slash];
-	if (parent_dir == "/" || parent_dir == "/usr" || parent_dir == "/usr/include" ||
+	String parent_dir = ((Path)base_dir).dirname();
+	if (parent_dir == "." || parent_dir == "/" || parent_dir == "/usr" || parent_dir == "/usr/include" ||
 		parent_dir == "/usr/local" || parent_dir == "/usr/local/include")
 	{
 		return;
@@ -269,6 +232,21 @@ fn void auto_discover_peer_includes(BindgenOptions* options)
 }
 
 <*
+ Reports an error on stderr for CLI runs, or through the logger otherwise.
+*>
+macro void report_error(bool is_cli, String $format, ...) @local
+{
+	if (is_cli)
+	{
+		io::eprintfn("Error: " +++ $format, ...$vaarg);
+	}
+	else
+	{
+		log::error($format, ...$vaarg);
+	}
+}
+
+<*
  Main coordinator for C binding generation.
  Runs clang with self-healing, parses AST JSON, translates types, and outputs C3 source code.
  @param options : "Bindgen configuration options."
@@ -280,27 +258,13 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 
 	if (options.header_path.len == 0)
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: No C header file or directory specified for --bindgen.");
-		}
-		else
-		{
-			log::error("No C header file or directory specified for bindgen.");
-		}
+		report_error(is_cli, "No C header file or directory specified for --bindgen.");
 		return 1;
 	}
 
 	if (!file::exists(options.header_path))
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: Specified header path '%s' does not exist.", options.header_path);
-		}
-		else
-		{
-			log::error("Specified header path '%s' does not exist.", options.header_path);
-		}
+		report_error(is_cli, "Specified header path '%s' does not exist.", options.header_path);
 		return 1;
 	}
 
@@ -316,46 +280,26 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		Path? dir_path = path::tnew(target_dir);
 		if (catch dir_path)
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: Invalid directory path '%s'.", target_dir);
-			}
+			report_error(is_cli, "Invalid directory path '%s'.", target_dir);
 			return 1;
 		}
 
 		PathList? entries = path::ls(tmem, dir_path, no_dirs: true, mask: "*.h", recursive: true, rebase: dir_path);
 		if (catch entries)
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: Failed to read directory '%s'.", target_dir);
-			}
-			else
-			{
-				log::error("Failed to read directory '%s'.", target_dir);
-			}
+			report_error(is_cli, "Failed to read directory '%s'.", target_dir);
 			return 1;
 		}
 		if (entries.len() == 0)
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: No .h header files found in directory '%s'.", target_dir);
-			}
-			else
-			{
-				log::error("No .h header files found in directory '%s'.", target_dir);
-			}
+			report_error(is_cli, "No .h header files found in directory '%s'.", target_dir);
 			return 1;
 		}
 
 		Path? tmp_dir = path::temp_directory(tmem);
 		if (catch tmp_dir)
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: Failed to access temporary directory.");
-			}
+			report_error(is_cli, "Failed to access temporary directory.");
 			return 1;
 		}
 
@@ -372,10 +316,7 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 
 		if (catch file::save(wrapper, wrap_content.str_view()))
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: Failed to create temporary wrapper header.");
-			}
+			report_error(is_cli, "Failed to create temporary wrapper header.");
 			return 1;
 		}
 
@@ -393,42 +334,21 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 	String? json_ast = run_clang_ast_dump(tmem, &options);
 	if (catch err = json_ast)
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: Failed to run clang AST dump (%s). Ensure 'clang' is installed and in PATH.", err);
-		}
-		else
-		{
-			log::error("Failed to run clang AST dump (%s). Ensure 'clang' is installed and in PATH.", err);
-		}
+		report_error(is_cli, "Failed to run clang AST dump (%s). Ensure 'clang' is installed and in PATH.", err);
 		return 1;
 	}
 
 	Object*? parsed = json::tparse(json_ast);
 	if (catch err = parsed)
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: Failed to parse Clang AST JSON output (%s).", err);
-		}
-		else
-		{
-			log::error("Failed to parse Clang AST JSON output (%s).", err);
-		}
+		report_error(is_cli, "Failed to parse Clang AST JSON output (%s).", err);
 		return 1;
 	}
 
 	Object* root_obj = parsed;
 	if (!root_obj)
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: Clang AST JSON output was empty.");
-		}
-		else
-		{
-			log::error("Clang AST JSON output was empty.");
-		}
+		report_error(is_cli, "Clang AST JSON output was empty.");
 		return 1;
 	}
 
@@ -441,14 +361,7 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 	String? macro_dump = run_clang_macro_dump(tmem, options);
 	if (catch err = macro_dump)
 	{
-		if (is_cli)
-		{
-			io::eprintfn("Error: Failed to run clang preprocessor (%s).", err);
-		}
-		else
-		{
-			log::error("Failed to run clang preprocessor (%s).", err);
-		}
+		report_error(is_cli, "Failed to run clang preprocessor (%s).", err);
 		return 1;
 	}
 	parse_macro_constants(tmem, &tu, macro_dump, options);
@@ -459,53 +372,24 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 	{
 		if (catch err = file::save(options.output_path, generated_code))
 		{
-			if (is_cli)
-			{
-				io::eprintfn("Error: Failed to write output file '%s' (%s).", options.output_path, err);
-			}
-			else
-			{
-				log::error("Failed to write output file '%s' (%s).", options.output_path, err);
-			}
+			report_error(is_cli, "Failed to write output file '%s' (%s).", options.output_path, err);
 			return 1;
 		}
-		sz enum_count = 0;
-		sz constdef_count = 0;
+		sz constdef_count;
 		foreach (e : tu.enums)
 		{
-			if (e.is_constdef)
-			{
-				constdef_count++;
-			}
-			else
-			{
-				enum_count++;
-			}
+			if (e.is_constdef) constdef_count++;
 		}
-
+		String summary = string::tformat("Generated C3 bindings: '%s' (%d functions, %d variables, %d structs, %d enums, %d constdefs, %d aliases).",
+			options.output_path, tu.functions.len(), tu.variables.len(), tu.structs.len(),
+			tu.enums.len() - constdef_count, constdef_count, tu.typedefs.len());
 		if (is_cli)
 		{
-			io::printfn("Generated C3 bindings: '%s' (%d functions, %d variables, %d structs, %d enums, %d constdefs, %d aliases).",
-				options.output_path,
-				(int)tu.functions.len(),
-				(int)tu.variables.len(),
-				(int)tu.structs.len(),
-				(int)enum_count,
-				(int)constdef_count,
-				(int)tu.typedefs.len()
-			);
+			io::printn(summary);
 		}
 		else
 		{
-			log::info("Generated C3 bindings: '%s' (%d functions, %d variables, %d structs, %d enums, %d constdefs, %d aliases).",
-				options.output_path,
-				(int)tu.functions.len(),
-				(int)tu.variables.len(),
-				(int)tu.structs.len(),
-				(int)enum_count,
-				(int)constdef_count,
-				(int)tu.typedefs.len()
-			);
+			log::info("%s", summary);
 		}
 		return 0;
 	}

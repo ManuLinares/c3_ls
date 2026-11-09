@@ -73,29 +73,7 @@ fn bool is_target_file(String node_file, BindgenOptions options) @local
 		return true;
 	}
 
-	sz last_slash_target = 0;
-	if (try idx = options.header_path.rindex_of_char('/'))
-	{
-		last_slash_target = idx + 1;
-	}
-	else if (try idx = options.header_path.rindex_of_char('\\'))
-	{
-		last_slash_target = idx + 1;
-	}
-	String base_target = options.header_path[last_slash_target..];
-
-	sz last_slash_node = 0;
-	if (try idx = node_file.rindex_of_char('/'))
-	{
-		last_slash_node = idx + 1;
-	}
-	else if (try idx = node_file.rindex_of_char('\\'))
-	{
-		last_slash_node = idx + 1;
-	}
-	String base_node = node_file[last_slash_node..];
-
-	return base_node == base_target;
+	return ((Path)node_file).basename() == ((Path)options.header_path).basename();
 }
 
 <*
@@ -274,6 +252,16 @@ fn Object* find_external_tag(
 }
 
 <*
+ Integer value of the first ConstantExpr, else IntegerLiteral, below `node`.
+*>
+fn long? constant_value(Object* node) @local
+{
+	Object* expr = find_descendant_by_kind(node, "ConstantExpr") ?: find_descendant_by_kind(node, "IntegerLiteral");
+	if (!expr) return NOT_FOUND~;
+	return expr.get_string("value")!.to_long();
+}
+
+<*
  Extracts the return type from a Clang function qualType string.
  Uses backward parenthesis matching to avoid terminating on nested attributes.
  @param qual_type : "Function signature string from Clang."
@@ -281,53 +269,71 @@ fn Object* find_external_tag(
 *>
 fn String extract_function_return_type(String qual_type) @local
 {
+	String s = function_signature(qual_type);
+	sz? open = last_paren_group_open(s);
+	if (catch open) return "void";
+	String ret = s[:open].trim();
+	return ret.len > 0 ? ret : "void";
+}
+
+<*
+ Function type string without attributes or anything after its parameter list.
+*>
+fn String function_signature(String qual_type) @local
+{
 	String s = strip_clang_attributes(qual_type).trim();
-	if (try last_paren = s.rindex_of_char(')'))
-	{
-		s = s[:last_paren + 1].trim();
-	}
+	if (try last_paren = s.rindex_of_char(')')) s = s[:last_paren + 1].trim();
+	return s;
+}
 
-	if (!s.ends_with(")"))
-	{
-		return "void";
-	}
+<*
+ State shared by the declaration parsers of one translation unit.
+*>
+struct ParseContext @local
+{
+	Allocator allocator;
+	CTranslationUnit* tu;
+	BindgenOptions options;
+	HashSet{String} seen_names;
+	HashSet{String} target_types;
+	HashMap{String, Object*} anon_records;
+	HashMap{String, Object*} anon_enums;
+	HashMap{String, String} external_typedefs;
+	HashMap{String, Object*} external_records;
+	HashMap{String, Object*} external_enums;
+	HashSet{String} used_external_types;
+}
 
-	int depth = 0;
-	for (sz i = s.len; i > 0; i--)
-	{
-		char c = s[i - 1];
-		if (c == ')')
-		{
-			depth++;
-		}
-		else if (c == '(')
-		{
-			depth--;
-			if (depth == 0)
-			{
-				String ret = s[:i - 1].trim();
-				return ret.len > 0 ? ret : "void";
-			}
-		}
-	}
+fn void ParseContext.init(&self, Allocator allocator, CTranslationUnit* tu, BindgenOptions options)
+{
+	*self = { .allocator = allocator, .tu = tu, .options = options };
+	self.seen_names.init(allocator);
+	self.target_types.init(allocator);
+	self.anon_records.init(allocator);
+	self.anon_enums.init(allocator);
+	self.external_typedefs.init(allocator);
+	self.external_records.init(allocator);
+	self.external_enums.init(allocator);
+	self.used_external_types.init(allocator);
+}
 
-	return "void";
+fn void ParseContext.free(&self)
+{
+	self.seen_names.free();
+	self.target_types.free();
+	self.anon_records.free();
+	self.anon_enums.free();
+	self.external_typedefs.free();
+	self.external_records.free();
+	self.external_enums.free();
+	self.used_external_types.free();
 }
 
 <*
  Formats a C3 function signature directly from a Clang FunctionProtoType AST node.
  Tracks return and parameter types for external alias/struct synthesis.
 *>
-fn String format_function_proto_from_ast(
-	Allocator allocator,
-	Object* fpt,
-	BindgenOptions options,
-	HashSet{String}* target_types = null,
-	HashMap{String, String}* external_typedefs = null,
-	HashMap{String, Object*}* external_records = null,
-	HashMap{String, Object*}* external_enums = null,
-	HashSet{String}* used_external_types = null
-) @local
+fn String ParseContext.format_function_proto_from_ast(&self, Object* fpt)
 {
 	Object* inner = fpt.get("inner") ?? null;
 	if (!inner || !inner.is_array() || inner.len() == 0)
@@ -336,14 +342,11 @@ fn String format_function_proto_from_ast(
 	}
 
 	RawTypeInfo ret_info = extract_type_info(inner.get_at(0));
-	if (target_types && external_typedefs && used_external_types)
-	{
-		track_external_type_usage(ret_info.qual_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
-	}
-	String ret_c3 = map_c_type_to_c3(allocator, ret_info.qual_type, options.type_prefix, false, desugared_unless_target_typedef(ret_info.qual_type, ret_info.desugared_type, target_types));
+	self.track_external_type_usage(ret_info.qual_type);
+	String ret_c3 = self.map_type(ret_info.qual_type, ret_info.desugared_type);
 
 	DString params_c3;
-	params_c3.init(allocator);
+	params_c3.init(self.allocator);
 
 	for (sz i = 1; i < inner.len(); i++)
 	{
@@ -354,11 +357,8 @@ fn String format_function_proto_from_ast(
 			continue;
 		}
 
-		if (target_types && external_typedefs && used_external_types)
-		{
-			track_external_type_usage(p_info.qual_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
-		}
-		String p_c3 = map_c_type_to_c3(allocator, p_info.qual_type, options.type_prefix, true, desugared_unless_target_typedef(p_info.qual_type, p_info.desugared_type, target_types));
+		self.track_external_type_usage(p_info.qual_type);
+		String p_c3 = self.map_type(p_info.qual_type, p_info.desugared_type, is_param: true);
 		if (params_c3.len() > 0)
 		{
 			params_c3.append(", ");
@@ -383,7 +383,7 @@ fn String format_function_proto_from_ast(
 		}
 	}
 
-	return string::format(allocator, "fn %s(%s)", ret_c3, params_c3.str_view());
+	return string::format(self.allocator, "fn %s(%s)", ret_c3, params_c3.str_view());
 }
 
 <*
@@ -421,15 +421,15 @@ fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOp
 <*
  Registers an alias named `<Owner><Member>Fn` for an inline function pointer type and returns that name.
 *>
-fn String push_callback_alias(Allocator allocator, CTranslationUnit* tu, String owner_name, String member_name, String c_type, BindgenOptions options) @local
+fn String ParseContext.push_callback_alias(&self, String owner_name, String member_name, String c_type)
 {
-	String cb_name = string::format(allocator, "%s%sFn", owner_name.snake_to_pascal_copy(allocator), member_name.snake_to_pascal_copy(allocator));
-	cb_name = sanitize_c3_type_name(allocator, cb_name, options.type_prefix);
-	tu.typedefs.push({
-		.c_name = cb_name.copy(allocator),
+	String cb_name = string::format(self.allocator, "%s%sFn", owner_name.snake_to_pascal_copy(self.allocator), member_name.snake_to_pascal_copy(self.allocator));
+	cb_name = sanitize_c3_type_name(self.allocator, cb_name, self.options.type_prefix);
+	self.tu.typedefs.push({
+		.c_name = cb_name.copy(self.allocator),
 		.c3_name = cb_name,
-		.underlying_c = c_type.copy(allocator),
-		.underlying_c3 = parse_function_pointer_type(allocator, c_type, options),
+		.underlying_c = c_type.copy(self.allocator),
+		.underlying_c3 = parse_function_pointer_type(self.allocator, c_type, self.options),
 		.is_func_ptr = true,
 		.comment = ""
 	});
@@ -437,172 +437,57 @@ fn String push_callback_alias(Allocator allocator, CTranslationUnit* tu, String 
 }
 
 <*
- Parses a function pointer C qualType string using depth-aware comma splitting.
+ Translates a C function or function pointer type string into a C3 `fn` signature.
 *>
 fn String parse_function_pointer_type(Allocator allocator, String qual_type, BindgenOptions options) @local
 {
-	String s = strip_clang_attributes(qual_type).trim();
-	if (try last_paren = s.rindex_of_char(')'))
+	String s = function_signature(qual_type);
+	String ret_c;
+	String params;
+	if (try marker = s.index_of("(*)") ?? s.index_of("(^)"))
 	{
-		s = s[:last_paren + 1].trim();
-	}
-	String ret_c = "void";
-	String rest = "";
-
-	if (try idx = s.index_of("(*)"))
-	{
-		ret_c = s[:idx].trim();
-		rest = s[idx + 3..].trim();
-	}
-	else if (try idx = s.index_of("(^)"))
-	{
-		ret_c = s[:idx].trim();
-		rest = s[idx + 3..].trim();
-	}
-	else if (s.ends_with(")"))
-	{
-		int depth = 0;
-		bool found = false;
-		for (sz i = s.len; i > 0; i--)
-		{
-			char c = s[i - 1];
-			if (c == ')')
-			{
-				depth++;
-			}
-			else if (c == '(')
-			{
-				depth--;
-				if (depth == 0)
-				{
-					ret_c = s[:i - 1].trim();
-					rest = s[i - 1..].trim();
-					found = true;
-					break;
-				}
-			}
-		}
-		if (!found)
-		{
-			return "fn void()";
-		}
+		ParenSpan? span = find_paren_span(s, marker + 3);
+		if (catch span) return "fn void()";
+		ret_c = string::tformat("%s%s", s[:marker], s[span.close + 1..]).trim();
+		params = s[span.open + 1 : span.close - span.open - 1];
 	}
 	else
 	{
-		return "fn void()";
+		sz? open = last_paren_group_open(s);
+		if (catch open) return "fn void()";
+		ret_c = s[:open].trim();
+		params = s[open + 1..^2];
 	}
-
-	if (ret_c.len == 0)
-	{
-		ret_c = "void";
-	}
-
-	String ret_c3 = map_c_type_to_c3(allocator, ret_c, options.type_prefix, false);
-
-	if (rest.starts_with("(") && rest.ends_with(")") && rest.len >= 2)
-	{
-		rest = rest[1 : ^2].trim();
-	}
-
-	if (rest.len == 0 || rest == "void")
-	{
-		return string::format(allocator, "fn %s()", ret_c3);
-	}
+	String ret_c3 = map_c_type_to_c3(allocator, ret_c.len > 0 ? ret_c : "void", options.type_prefix, false);
 
 	DString params_c3;
 	params_c3.init(allocator);
-
-	int depth = 0;
-	sz arg_start = 0;
-	for (sz i = 0; i < rest.len; i++)
+	foreach (param : split_top_level_commas(params))
 	{
-		char c = rest[i];
-		switch (c)
-		{
-			case '(':
-			case '[':
-			case '{':
-				depth++;
-			case ')':
-			case ']':
-			case '}':
-				if (depth > 0)
-				{
-					depth--;
-				}
-			case ',':
-				if (depth == 0)
-				{
-					String p = rest[arg_start : i - arg_start].trim();
-					if (p.len > 0 && p != "void")
-					{
-						if (params_c3.len() > 0)
-						{
-							params_c3.append(", ");
-						}
-						if (p == "..." || p.starts_with("..."))
-						{
-							params_c3.append("...");
-						}
-						else
-						{
-							params_c3.append(map_c_type_to_c3(allocator, p, options.type_prefix, true));
-						}
-					}
-					arg_start = i + 1;
-				}
-			default:
-				break;
-		}
+		if (param.len == 0 || param == "void") continue;
+		if (params_c3.len() > 0) params_c3.append(", ");
+		params_c3.append(param.starts_with("...") ? "..." : map_c_type_to_c3(allocator, param, options.type_prefix, true));
 	}
-
-	if (arg_start < rest.len)
-	{
-		String p = rest[arg_start..].trim();
-		if (p.len > 0 && p != "void")
-		{
-			if (params_c3.len() > 0)
-			{
-				params_c3.append(", ");
-			}
-			if (p == "..." || p.starts_with("..."))
-			{
-				params_c3.append("...");
-			}
-			else
-			{
-				params_c3.append(map_c_type_to_c3(allocator, p, options.type_prefix, true));
-			}
-		}
-	}
-
 	return string::format(allocator, "fn %s(%s)", ret_c3, params_c3.str_view());
 }
 
 <*
- Drops the desugared type when `qual_type` names a typedef declared in the target header,
- so mapping keeps the emitted alias instead of its underlying type.
+ Maps a C type to C3, ignoring the desugared type when `c_type` names a typedef declared in the
+ target header so the emitted alias is kept. Bitfields always map to the underlying type, which sizes their storage.
 *>
-fn String desugared_unless_target_typedef(String qual_type, String desugared_type, HashSet{String}* target_types) @local
+fn String ParseContext.map_type(&self, String c_type, String desugared_type, bool is_param = false, bool is_field = false, bool is_bitfield = false, bool* out_is_noalias = null)
 {
-	if (target_types && target_types.contains(extract_base_type_name(qual_type))) return "";
-	return desugared_type;
+	bool keep_alias = !is_bitfield && self.target_types.contains(extract_base_type_name(c_type));
+	return map_c_type_to_c3(self.allocator, c_type, self.options.type_prefix, is_param, keep_alias ? "" : desugared_type, out_is_noalias, is_field);
 }
 
 <*
  Records used external types that need alias, struct, or enum generation.
 *>
-fn void track_external_type_usage(
-	String qual_type,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashSet{String}* used_external_types
-) @local
+fn void ParseContext.track_external_type_usage(&self, String qual_type)
 {
 	String base = extract_base_type_name(qual_type);
-	if (base.len == 0 || is_fundamental_c_type(base) || target_types.contains(base))
+	if (base.len == 0 || is_fundamental_c_type(base) || self.target_types.contains(base))
 	{
 		return;
 	}
@@ -614,13 +499,13 @@ fn void track_external_type_usage(
 	}
 
 	String underscore_base = string::tformat("_%s", base);
-	if (external_typedefs.has_key(base) || external_records.has_key(base) || external_enums.has_key(base))
+	if (self.external_typedefs.has_key(base) || self.external_records.has_key(base) || self.external_enums.has_key(base))
 	{
-		used_external_types.add(base);
+		self.used_external_types.add(base);
 	}
-	else if (external_records.has_key(underscore_base) || external_enums.has_key(underscore_base))
+	else if (self.external_records.has_key(underscore_base) || self.external_enums.has_key(underscore_base))
 	{
-		used_external_types.add(base);
+		self.used_external_types.add(base);
 	}
 }
 
@@ -629,48 +514,36 @@ fn void track_external_type_usage(
  Passes restrict qualifier to mark is_noalias.
  Disambiguates function pointers from pointers-to-arrays.
 *>
-fn CParam parse_param_decl(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	String fn_c3_name,
-	Object* node,
-	int index,
-	BindgenOptions options,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashSet{String}* used_external_types
-) @local
+fn CParam ParseContext.parse_param_decl(&self, String fn_c3_name, Object* node, int index)
 {
 	String raw_name = node.get_string("name") ?? "";
 	if (raw_name.len == 0)
 	{
-		raw_name = string::format(allocator, "arg%d", index);
+		raw_name = string::format(self.allocator, "arg%d", index);
 	}
 
 	RawTypeInfo tinfo = extract_type_info(node);
 	String c_type = tinfo.qual_type;
 
-	track_external_type_usage(c_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
+	self.track_external_type_usage(c_type);
 
 	bool is_noalias = false;
 	String c3_type;
 
 	if (is_c_function_pointer(c_type))
 	{
-		c3_type = push_callback_alias(allocator, tu, fn_c3_name, raw_name, c_type, options);
+		c3_type = self.push_callback_alias(fn_c3_name, raw_name, c_type);
 	}
 	else
 	{
-		c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, true, desugared_unless_target_typedef(c_type, tinfo.desugared_type, target_types), &is_noalias);
+		c3_type = self.map_type(c_type, tinfo.desugared_type, is_param: true, out_is_noalias: &is_noalias);
 	}
 
-	String c3_name = to_snake_case(allocator, raw_name);
+	String c3_name = to_snake_case(self.allocator, raw_name);
 
 	return {
 		.name = c3_name,
-		.c_type = c_type.copy(allocator),
+		.c_type = c_type.copy(self.allocator),
 		.c3_type = c3_type,
 		.is_noalias = is_noalias
 	};
@@ -723,18 +596,7 @@ fn String strip_symbol_prefix(String name, BindgenOptions options) @local
 <*
  Parses a Clang VarDecl object.
 *>
-fn void parse_var_decl(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashSet{String}* used_external_types
-) @local
+fn void ParseContext.parse_var_decl(&self, Object* node)
 {
 	if (node.get_bool("isInvalid") ?? false)
 	{
@@ -742,7 +604,7 @@ fn void parse_var_decl(
 	}
 
 	String c_name = node.get_string("name") ?? "";
-	if (c_name.len == 0 || !seen_names.add(c_name))
+	if (c_name.len == 0 || !self.seen_names.add(c_name))
 	{
 		return;
 	}
@@ -754,29 +616,29 @@ fn void parse_var_decl(
 		return;
 	}
 
-	track_external_type_usage(c_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
+	self.track_external_type_usage(c_type);
 
-	String c3_type = map_c_type_to_c3(allocator, c_type, options.type_prefix, false, desugared_unless_target_typedef(c_type, tinfo.desugared_type, target_types));
+	String c3_type = self.map_type(c_type, tinfo.desugared_type);
 	String snake_name = to_snake_case(tmem, c_name);
-	String c3_name = strip_symbol_prefix(snake_name, options);
-	c3_name = sanitize_identifier(allocator, c3_name);
+	String c3_name = strip_symbol_prefix(snake_name, self.options);
+	c3_name = sanitize_identifier(self.allocator, c3_name);
 
 	HashSet{String} seen_var_names;
 	seen_var_names.tinit();
-	foreach (&v : tu.variables)
+	foreach (&v : self.tu.variables)
 	{
 		seen_var_names.add(v.c3_name);
 	}
-	foreach (&fn_item : tu.functions)
+	foreach (&fn_item : self.tu.functions)
 	{
 		seen_var_names.add(fn_item.c3_name);
 	}
-	c3_name = deduplicate_name(&seen_var_names, c3_name, allocator);
+	c3_name = deduplicate_name(&seen_var_names, c3_name, self.allocator);
 
-	tu.variables.push({
-		.c_name = c_name.copy(allocator),
+	self.tu.variables.push({
+		.c_name = c_name.copy(self.allocator),
 		.c3_name = c3_name,
-		.c_type = c_type.copy(allocator),
+		.c_type = c_type.copy(self.allocator),
 		.c3_type = c3_type,
 		.comment = ""
 	});
@@ -785,18 +647,7 @@ fn void parse_var_decl(
 <*
  Parses a Clang FunctionDecl object.
 *>
-fn void parse_function_decl(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashSet{String}* used_external_types
-) @local
+fn void ParseContext.parse_function_decl(&self, Object* node)
 {
 	if (node.get_bool("isInvalid") ?? false)
 	{
@@ -809,7 +660,7 @@ fn void parse_function_decl(
 		return;
 	}
 
-	if (!seen_names.add(c_name))
+	if (!self.seen_names.add(c_name))
 	{
 		return;
 	}
@@ -818,29 +669,29 @@ fn void parse_function_decl(
 	String qual_type = tinfo.qual_type;
 
 	String ret_c = extract_function_return_type(qual_type);
-	track_external_type_usage(ret_c, target_types, external_typedefs, external_records, external_enums, used_external_types);
+	self.track_external_type_usage(ret_c);
 
 	String ret_desugared = "";
 	if (tinfo.desugared_type.len > 0)
 	{
 		ret_desugared = extract_function_return_type(tinfo.desugared_type);
 	}
-	String ret_c3 = map_c_type_to_c3(allocator, ret_c, options.type_prefix, false, desugared_unless_target_typedef(ret_c, ret_desugared, target_types));
+	String ret_c3 = self.map_type(ret_c, ret_desugared);
 
 	String snake_name = to_snake_case(tmem, c_name);
-	String c3_name = strip_symbol_prefix(snake_name, options);
-	c3_name = sanitize_identifier(allocator, c3_name);
+	String c3_name = strip_symbol_prefix(snake_name, self.options);
+	c3_name = sanitize_identifier(self.allocator, c3_name);
 
 	HashSet{String} seen_fn_names;
 	seen_fn_names.tinit();
-	foreach (&fn_item : tu.functions)
+	foreach (&fn_item : self.tu.functions)
 	{
 		seen_fn_names.add(fn_item.c3_name);
 	}
-	c3_name = deduplicate_name(&seen_fn_names, c3_name, allocator);
+	c3_name = deduplicate_name(&seen_fn_names, c3_name, self.allocator);
 
 	List{CParam} params;
-	params.init(allocator);
+	params.init(self.allocator);
 
 	HashSet{String} seen_param_names;
 	seen_param_names.tinit();
@@ -872,17 +723,17 @@ fn void parse_function_decl(
 					continue;
 				}
 
-				CParam p = parse_param_decl(allocator, tu, c3_name, child, param_idx++, options, target_types, external_typedefs, external_records, external_enums, used_external_types);
-				p.name = deduplicate_name(&seen_param_names, p.name, allocator);
+				CParam p = self.parse_param_decl(c3_name, child, param_idx++);
+				p.name = deduplicate_name(&seen_param_names, p.name, self.allocator);
 				params.push(p);
 			}
 		}
 	}
 
-	tu.functions.push({
-		.c_name = c_name.copy(allocator),
+	self.tu.functions.push({
+		.c_name = c_name.copy(self.allocator),
 		.c3_name = c3_name,
-		.ret_type_c = ret_c.copy(allocator),
+		.ret_type_c = ret_c.copy(self.allocator),
 		.ret_type_c3 = ret_c3,
 		.params = params,
 		.is_variadic = is_variadic,
@@ -892,40 +743,10 @@ fn void parse_function_decl(
 
 fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
 {
-	if (is_c3_type(name) || constants::is_primitive(name))
-	{
-		return true;
-	}
-	foreach (&e : tu.enums)
-	{
-		if (e.c3_name == name) return true;
-	}
-	foreach (&st : tu.structs)
-	{
-		if (st.c3_name == name) return true;
-	}
-	foreach (&td : tu.typedefs)
-	{
-		if (td.c3_name == name) return true;
-	}
-	return false;
+	return is_c3_type(name) || constants::is_primitive(name) || tu.has_type_name(name);
 }
 
-fn bool parse_record_fields(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	String c_name,
-	List{CField}* fields,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashMap{String, Object*}* anon_records,
-	HashSet{String}* used_external_types
-) @local
+fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, List{CField}* fields)
 {
 	Object* inner_arr = node.get("inner") ?? null;
 	if (!inner_arr || !inner_arr.is_array())
@@ -949,14 +770,14 @@ fn bool parse_record_fields(
 			String sub_c_name = child.get_string("name") ?? "";
 			if (sub_c_name.len > 0)
 			{
-				parse_record_decl_with_name(allocator, tu, child, sub_c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
+				self.parse_record_decl_with_name(child, sub_c_name);
 			}
 			else
 			{
 				last_anon_rec = child;
 				if (try id = child.get_string("id"))
 				{
-					anon_records.set(id, child);
+					self.anon_records.set(id, child);
 				}
 			}
 			continue;
@@ -967,7 +788,7 @@ fn bool parse_record_fields(
 			String sub_c_name = child.get_string("name") ?? "";
 			if (sub_c_name.len > 0)
 			{
-				parse_enum_decl_with_name(allocator, tu, child, sub_c_name, options, seen_names, target_types);
+				self.parse_enum_decl_with_name(child, sub_c_name);
 			}
 			continue;
 		}
@@ -989,46 +810,23 @@ fn bool parse_record_fields(
 			return false;
 		}
 
-		int bit_width = -1;
-		if (child.get_bool("isBitfield") ?? false)
-		{
-			if (Object* cexpr = find_descendant_by_kind(child, "ConstantExpr"))
-			{
-				if (try v_str = cexpr.get_string("value"))
-				{
-					if (try parsed = v_str.to_int())
-					{
-						bit_width = parsed;
-					}
-				}
-			}
-			else if (Object* ilit = find_descendant_by_kind(child, "IntegerLiteral"))
-			{
-				if (try v_str = ilit.get_string("value"))
-				{
-					if (try parsed = v_str.to_int())
-					{
-						bit_width = parsed;
-					}
-				}
-			}
-		}
+		int bit_width = (child.get_bool("isBitfield") ?? false) ? (int)(constant_value(child) ?? -1) : -1;
 
 		String raw_f_name = child.get_string("name") ?? "";
 		String f_name = raw_f_name;
 		if (f_name.len == 0 && bit_width < 0)
 		{
-			f_name = string::format(allocator, "_field%d", (int)i);
+			f_name = string::format(self.allocator, "_field%d", (int)i);
 		}
 
 		String f_type_c3;
 		if (is_anonymous_tag_name(f_type_c))
 		{
-			String synth_name = string::format(allocator, "%s_%s", c_name, f_name);
+			String synth_name = string::format(self.allocator, "%s_%s", c_name, f_name);
 			Object* anon_rec = null;
 			if (f_tinfo.decl_id.len > 0)
 			{
-				anon_rec = anon_records.get(f_tinfo.decl_id) ?? null;
+				anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? null;
 			}
 			if (!anon_rec)
 			{
@@ -1036,15 +834,15 @@ fn bool parse_record_fields(
 			}
 			if (anon_rec)
 			{
-				parse_record_decl_with_name(allocator, tu, anon_rec, synth_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
-				f_type_c3 = sanitize_c3_type_name(allocator, synth_name, options.type_prefix);
+				self.parse_record_decl_with_name(anon_rec, synth_name);
+				f_type_c3 = sanitize_c3_type_name(self.allocator, synth_name, self.options.type_prefix);
 				if (try open_b = f_type_c.index_of_char('['))
 				{
-					f_type_c3 = string::format(allocator, "%s%s", f_type_c3, f_type_c[open_b..]);
+					f_type_c3 = string::format(self.allocator, "%s%s", f_type_c3, f_type_c[open_b..]);
 				}
 				else if (f_type_c.ends_with("*"))
 				{
-					f_type_c3 = string::format(allocator, "%s*", f_type_c3);
+					f_type_c3 = string::format(self.allocator, "%s*", f_type_c3);
 				}
 			}
 			else
@@ -1065,21 +863,20 @@ fn bool parse_record_fields(
 		}
 		else if (f_type_c.contains("(*)") && is_c_function_pointer(f_type_c))
 		{
-			f_type_c3 = push_callback_alias(allocator, tu, c_name, f_name, f_type_c, options);
+			f_type_c3 = self.push_callback_alias(c_name, f_name, f_type_c);
 		}
 		else
 		{
-			track_external_type_usage(f_type_c, target_types, external_typedefs, external_records, external_enums, used_external_types);
-			String f_desugared = bit_width >= 0 ? f_tinfo.desugared_type : desugared_unless_target_typedef(f_type_c, f_tinfo.desugared_type, target_types);
-			f_type_c3 = map_c_type_to_c3(allocator, f_type_c, options.type_prefix, false, f_desugared, is_field: true);
+			self.track_external_type_usage(f_type_c);
+			f_type_c3 = self.map_type(f_type_c, f_tinfo.desugared_type, is_field: true, is_bitfield: bit_width >= 0);
 		}
 
-		String f_name_c3 = f_name.len > 0 ? to_snake_case(allocator, f_name) : "";
+		String f_name_c3 = f_name.len > 0 ? to_snake_case(self.allocator, f_name) : "";
 
 		fields.push({
-			.c_name = raw_f_name.copy(allocator),
+			.c_name = raw_f_name.copy(self.allocator),
 			.c3_name = f_name_c3,
-			.c_type = f_type_c.copy(allocator),
+			.c_type = f_type_c.copy(self.allocator),
 			.c3_type = f_type_c3,
 			.bit_width = bit_width,
 			.bit_offset = 0,
@@ -1155,27 +952,7 @@ fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_ali
 					}
 					else if (k == "AlignedAttr")
 					{
-						uint align_val = 16;
-						if (Object* cexpr = find_descendant_by_kind(child, "ConstantExpr"))
-						{
-							if (try v_str = cexpr.get_string("value"))
-							{
-								if (try parsed = v_str.to_uint())
-								{
-									align_val = parsed;
-								}
-							}
-						}
-						else if (Object* ilit = find_descendant_by_kind(child, "IntegerLiteral"))
-						{
-							if (try v_str = ilit.get_string("value"))
-							{
-								if (try parsed = v_str.to_uint())
-								{
-									align_val = parsed;
-								}
-							}
-						}
+						uint align_val = (uint)(constant_value(child) ?? 16);
 						if (align_val > *out_alignment)
 						{
 							*out_alignment = align_val;
@@ -1192,20 +969,7 @@ fn void parse_record_attributes(Object* node, bool* out_is_packed, uint* out_ali
  Synthesizes named sub-records for anonymous union/struct fields.
  Emits all C structs as regular C3 structs, preventing invalid bitstructs.
 *>
-fn void parse_record_decl_with_name(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	String c_name,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashMap{String, Object*}* anon_records,
-	HashSet{String}* used_external_types
-) @local
+fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_name)
 {
 	if (c_name.len == 0)
 	{
@@ -1215,17 +979,17 @@ fn void parse_record_decl_with_name(
 	String tag = node.get_string("tagUsed") ?? "struct";
 	bool is_union = (tag == "union");
 	bool is_complete = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
-	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, c_name, options.type_prefix));
+	String c3_name = capitalize_ascii(self.allocator, sanitize_c3_type_name(self.allocator, c_name, self.options.type_prefix));
 
 	bool is_packed = false;
 	uint alignment = 0;
 	parse_record_attributes(node, &is_packed, &alignment);
 
 	String record_c_name;
-	sz? existing_idx = find_struct_index(tu, c3_name, c_name);
+	sz? existing_idx = find_struct_index(self.tu, c3_name, c_name);
 	if (try existing_idx)
 	{
-		CStruct* existing = &tu.structs[existing_idx];
+		CStruct* existing = &self.tu.structs[existing_idx];
 		if (!existing.is_opaque || !is_complete) return;
 		record_c_name = existing.c_name;
 		c3_name = existing.c3_name;
@@ -1234,22 +998,19 @@ fn void parse_record_decl_with_name(
 	{
 		HashSet{String} seen_type_names;
 		seen_type_names.tinit();
-		foreach (&e : tu.enums)
-		{
-			seen_type_names.add(e.c3_name);
-		}
-		c3_name = deduplicate_name(&seen_type_names, c3_name, allocator);
-		seen_names.add(c_name);
-		target_types.add(c_name);
-		record_c_name = c_name.copy(allocator);
+		self.tu.add_type_names(&seen_type_names, structs: false, typedefs: false);
+		c3_name = deduplicate_name(&seen_type_names, c3_name, self.allocator);
+		self.seen_names.add(c_name);
+		self.target_types.add(c_name);
+		record_c_name = c_name.copy(self.allocator);
 	}
 
 	List{CField} fields;
-	fields.init(allocator);
+	fields.init(self.allocator);
 
 	if (is_complete)
 	{
-		is_complete = parse_record_fields(allocator, tu, node, c_name, &fields, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
+		is_complete = self.parse_record_fields(node, c_name, &fields);
 	}
 
 	bool is_all_bitfields = compute_record_bitfields(&fields);
@@ -1278,11 +1039,11 @@ fn void parse_record_decl_with_name(
 
 	if (try existing_idx)
 	{
-		tu.structs[existing_idx] = record;
+		self.tu.structs[existing_idx] = record;
 	}
 	else
 	{
-		tu.structs.push(record);
+		self.tu.structs.push(record);
 	}
 }
 
@@ -1299,24 +1060,16 @@ fn sz? find_struct_index(CTranslationUnit* tu, String c3_name, String c_name) @l
  Core EnumDecl parser with explicit name parameter to support typedef wrapping.
  Deduplicates by both C name and sanitized C3 name to avoid enum shadowing.
 *>
-fn void parse_enum_decl_with_name(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	String c_name,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types
-) @local
+fn void ParseContext.parse_enum_decl_with_name(&self, Object* node, String c_name)
 {
 	if (c_name.len == 0)
 	{
 		return;
 	}
 
-	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, c_name, options.type_prefix));
+	String c3_name = capitalize_ascii(self.allocator, sanitize_c3_type_name(self.allocator, c_name, self.options.type_prefix));
 
-	foreach (&e : tu.enums)
+	foreach (&e : self.tu.enums)
 	{
 		if (e.c3_name == c3_name || e.c_name == c_name)
 		{
@@ -1326,24 +1079,21 @@ fn void parse_enum_decl_with_name(
 
 	HashSet{String} seen_struct_types;
 	seen_struct_types.tinit();
-	foreach (&st : tu.structs)
-	{
-		seen_struct_types.add(st.c3_name);
-	}
-	c3_name = deduplicate_name(&seen_struct_types, c3_name, allocator);
+	self.tu.add_type_names(&seen_struct_types, enums: false, typedefs: false);
+	c3_name = deduplicate_name(&seen_struct_types, c3_name, self.allocator);
 
-	if (!seen_names.add(c_name))
+	if (!self.seen_names.add(c_name))
 	{
 		return;
 	}
-	seen_names.add(c3_name);
+	self.seen_names.add(c3_name);
 
-	target_types.add(c_name);
-	target_types.add(c3_name);
+	self.target_types.add(c_name);
+	self.target_types.add(c3_name);
 
-	EnumBody body = parse_enum_body(allocator, node, options.strip_enum_prefix);
-	tu.enums.push({
-		.c_name = c_name.copy(allocator),
+	EnumBody body = parse_enum_body(self.allocator, node, self.options.strip_enum_prefix);
+	self.tu.enums.push({
+		.c_name = c_name.copy(self.allocator),
 		.c3_name = c3_name,
 		.is_constdef = !body.is_sequential,
 		.backing_type = body.backing_type,
@@ -1490,19 +1240,19 @@ fn EnumBody parse_enum_body(Allocator allocator, Object* node, String strip_pref
  Emits a top-level anonymous enum whose constants no typedef has claimed.
  A shared constant-name prefix becomes an inline constdef, otherwise each constant becomes a const.
 *>
-fn void parse_anonymous_enum(Allocator allocator, CTranslationUnit* tu, Object* node, BindgenOptions options) @local
+fn void ParseContext.parse_anonymous_enum(&self, Object* node)
 {
 	String prefix = common_enum_constant_prefix(node);
-	EnumBody body = parse_enum_body(allocator, node, prefix);
-	if (body.variants.len() == 0 || is_enum_constant_emitted(tu, body.variants[0].c_name)) return;
+	EnumBody body = parse_enum_body(self.allocator, node, prefix);
+	if (body.variants.len() == 0 || is_enum_constant_emitted(self.tu, body.variants[0].c_name)) return;
 
 	if (prefix.len == 0)
 	{
 		foreach (v : body.variants)
 		{
-			tu.constants.push({
+			self.tu.constants.push({
 				.name = v.c3_name,
-				.value = string::format(allocator, "%d", v.value),
+				.value = string::format(self.allocator, "%d", v.value),
 				.c3_type = body.backing_type
 			});
 		}
@@ -1511,15 +1261,13 @@ fn void parse_anonymous_enum(Allocator allocator, CTranslationUnit* tu, Object* 
 
 	HashSet{String} taken_type_names;
 	taken_type_names.tinit();
-	foreach (&st : tu.structs) taken_type_names.add(st.c3_name);
-	foreach (&td : tu.typedefs) taken_type_names.add(td.c3_name);
-	foreach (&e : tu.enums) taken_type_names.add(e.c3_name);
+	self.tu.add_type_names(&taken_type_names);
 
 	String type_c_name = prefix.trim("_").to_lower_copy(tmem);
-	String c3_name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, type_c_name, options.type_prefix));
-	if (taken_type_names.contains(c3_name)) c3_name = string::format(allocator, "%sKind", c3_name);
-	tu.enums.push({
-		.c3_name = deduplicate_name(&taken_type_names, c3_name, allocator),
+	String c3_name = capitalize_ascii(self.allocator, sanitize_c3_type_name(self.allocator, type_c_name, self.options.type_prefix));
+	if (taken_type_names.contains(c3_name)) c3_name = string::format(self.allocator, "%sKind", c3_name);
+	self.tu.enums.push({
+		.c3_name = deduplicate_name(&taken_type_names, c3_name, self.allocator),
 		.is_constdef = true,
 		.is_inline = true,
 		.backing_type = body.backing_type,
@@ -1578,20 +1326,7 @@ fn bool is_enum_constant_emitted(CTranslationUnit* tu, String c_name) @local
  Resolves anonymous RecordDecl / EnumDecl references by ID.
  Dispatches structured types (FunctionProtoType, VectorType) directly from Clang's AST.
 *>
-fn void parse_typedef_decl(
-	Allocator allocator,
-	CTranslationUnit* tu,
-	Object* node,
-	BindgenOptions options,
-	HashSet{String}* seen_names,
-	HashSet{String}* target_types,
-	HashMap{String, Object*}* anon_records,
-	HashMap{String, Object*}* anon_enums,
-	HashMap{String, String}* external_typedefs,
-	HashMap{String, Object*}* external_records,
-	HashMap{String, Object*}* external_enums,
-	HashSet{String}* used_external_types
-) @local
+fn void ParseContext.parse_typedef_decl(&self, Object* node)
 {
 	if (node.get_bool("isInvalid") ?? false)
 	{
@@ -1621,25 +1356,25 @@ fn void parse_typedef_decl(
 
 				if (Object* rec_child = find_descendant_by_kind(child, "RecordDecl"))
 				{
-					Object* full_rec = resolve_complete_decl(rec_child, anon_records);
+					Object* full_rec = resolve_complete_decl(rec_child, &self.anon_records);
 					String tag_name = full_rec.get_string("name") ?? "";
 					RawTypeInfo tinfo = extract_type_info(node);
 					bool is_ptr = tinfo.qual_type.contains("*") || tinfo.desugared_type.contains("*");
 					if (is_anonymous_tag_name(tag_name) || (tag_name.starts_with("_") && !is_ptr))
 					{
-						if (tag_name.len > 0) seen_names.add(tag_name);
-						parse_record_decl_with_name(allocator, tu, full_rec, c_name, options, seen_names, target_types, external_typedefs, external_records, external_enums, anon_records, used_external_types);
+						if (tag_name.len > 0) self.seen_names.add(tag_name);
+						self.parse_record_decl_with_name(full_rec, c_name);
 						return;
 					}
 				}
 				else if (Object* enum_child = find_descendant_by_kind(child, "EnumDecl"))
 				{
-					Object* full_enum = resolve_complete_decl(enum_child, anon_enums);
+					Object* full_enum = resolve_complete_decl(enum_child, &self.anon_enums);
 					String tag_name = full_enum.get_string("name") ?? "";
 					if (is_anonymous_tag_name(tag_name) || tag_name.starts_with("_"))
 					{
-						if (tag_name.len > 0) seen_names.add(tag_name);
-						parse_enum_decl_with_name(allocator, tu, full_enum, c_name, options, seen_names, target_types);
+						if (tag_name.len > 0) self.seen_names.add(tag_name);
+						self.parse_enum_decl_with_name(full_enum, c_name);
 						return;
 					}
 				}
@@ -1647,68 +1382,48 @@ fn void parse_typedef_decl(
 		}
 	}
 
-	if (!seen_names.add(c_name))
+	if (!self.seen_names.add(c_name))
 	{
 		return;
 	}
 
-	target_types.add(c_name);
+	self.target_types.add(c_name);
 
 	RawTypeInfo tinfo = extract_type_info(node);
 	String qual_type = tinfo.qual_type;
 
-	track_external_type_usage(qual_type, target_types, external_typedefs, external_records, external_enums, used_external_types);
+	self.track_external_type_usage(qual_type);
 
 	bool is_func_ptr = false;
-	String c3_name = sanitize_c3_type_name(allocator, c_name, options.type_prefix);
+	String c3_name = sanitize_c3_type_name(self.allocator, c_name, self.options.type_prefix);
 	String c3_underlying;
 
 	if (Object* fpt = find_descendant_by_kind(node, "FunctionProtoType"))
 	{
-		c3_underlying = format_function_proto_from_ast(allocator, fpt, options, target_types, external_typedefs, external_records, external_enums, used_external_types);
+		c3_underlying = self.format_function_proto_from_ast(fpt);
 		is_func_ptr = true;
 	}
 	else if (Object* vt = find_descendant_by_kind(node, "VectorType"))
 	{
-		c3_underlying = format_vector_type_from_ast(allocator, vt, options);
+		c3_underlying = format_vector_type_from_ast(self.allocator, vt, self.options);
 	}
 	else
 	{
 		is_func_ptr = is_c_function_pointer(qual_type);
 		if (is_func_ptr)
 		{
-			c3_underlying = parse_function_pointer_type(allocator, qual_type, options);
+			c3_underlying = parse_function_pointer_type(self.allocator, qual_type, self.options);
 		}
 		else
 		{
-			c3_underlying = map_c_type_to_c3(allocator, qual_type, options.type_prefix, false, tinfo.desugared_type);
+			c3_underlying = map_c_type_to_c3(self.allocator, qual_type, self.options.type_prefix, false, tinfo.desugared_type);
 		}
 	}
 
-	// Break recursive pointer aliases (typedef struct Foo *Foo;)
-	if (c3_underlying.ends_with("*") && extract_base_type_name(c3_underlying) == c3_name)
-	{
-		c3_underlying = "void*";
-	}
-
-	if (c3_name == c3_underlying || is_c3_type(c3_name) || is_c3_keyword(c3_name))
-	{
-		return;
-	}
-
-	foreach (&e : tu.enums)
-	{
-		if (e.c3_name == c3_name) return;
-	}
-	foreach (&st : tu.structs)
-	{
-		if (st.c3_name == c3_name) return;
-	}
-
-	tu.typedefs.push({
-		.c_name = c_name.copy(allocator),
+	self.tu.typedefs.push({
+		.c_name = c_name.copy(self.allocator),
 		.c3_name = c3_name,
-		.underlying_c = qual_type.copy(allocator),
+		.underlying_c = qual_type.copy(self.allocator),
 		.underlying_c3 = c3_underlying,
 		.is_func_ptr = is_func_ptr,
 		.comment = ""
@@ -1737,37 +1452,9 @@ fn void parse_clang_ast_json(
 		return;
 	}
 
-	HashSet{String} seen_names;
-	seen_names.init(allocator);
-	defer seen_names.free();
-
-	HashSet{String} target_types;
-	target_types.init(allocator);
-	defer target_types.free();
-
-	HashMap{String, Object*} anon_records;
-	anon_records.init(allocator);
-	defer anon_records.free();
-
-	HashMap{String, Object*} anon_enums;
-	anon_enums.init(allocator);
-	defer anon_enums.free();
-
-	HashMap{String, String} external_typedefs;
-	external_typedefs.init(allocator);
-	defer external_typedefs.free();
-
-	HashMap{String, Object*} external_records;
-	external_records.init(allocator);
-	defer external_records.free();
-
-	HashMap{String, Object*} external_enums;
-	external_enums.init(allocator);
-	defer external_enums.free();
-
-	HashSet{String} used_external_types;
-	used_external_types.init(allocator);
-	defer used_external_types.free();
+	ParseContext ctx;
+	ctx.init(allocator, tu, options);
+	defer ctx.free();
 
 	// Pass 1: Index typedefs and records across entire translation unit
 	for (sz i = 0; i < inner_arr.len(); i++)
@@ -1793,18 +1480,18 @@ fn void parse_clang_ast_json(
 				String desugared = tinfo.desugared_type.len > 0 ? tinfo.desugared_type : tinfo.qual_type;
 				if (desugared.len > 0)
 				{
-					external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
+					ctx.external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
 				}
 				bool is_indirect = desugared.contains("*") || desugared.contains("[");
 				if (Object* rec_child = find_descendant_by_kind(node, "RecordDecl"))
 				{
 					String reg_name = is_indirect ? (rec_child.get_string("name") ?? "") : td_name;
-					index_tag_decl(allocator, reg_name, rec_child, &external_records, &anon_records);
+					index_tag_decl(allocator, reg_name, rec_child, &ctx.external_records, &ctx.anon_records);
 				}
 				else if (Object* enum_child = find_descendant_by_kind(node, "EnumDecl"))
 				{
 					String reg_name = is_indirect ? (enum_child.get_string("name") ?? "") : td_name;
-					index_tag_decl(allocator, reg_name, enum_child, &external_enums, &anon_enums);
+					index_tag_decl(allocator, reg_name, enum_child, &ctx.external_enums, &ctx.anon_enums);
 				}
 			}
 			continue;
@@ -1812,13 +1499,13 @@ fn void parse_clang_ast_json(
 
 		if (kind == "RecordDecl")
 		{
-			index_tag_decl(allocator, node.get_string("name") ?? "", node, &external_records, &anon_records);
+			index_tag_decl(allocator, node.get_string("name") ?? "", node, &ctx.external_records, &ctx.anon_records);
 			continue;
 		}
 
 		if (kind == "EnumDecl")
 		{
-			index_tag_decl(allocator, node.get_string("name") ?? "", node, &external_enums, &anon_enums);
+			index_tag_decl(allocator, node.get_string("name") ?? "", node, &ctx.external_enums, &ctx.anon_enums);
 			continue;
 		}
 	}
@@ -1857,9 +1544,9 @@ fn void parse_clang_ast_json(
 		switch (kind)
 		{
 			case "FunctionDecl":
-				parse_function_decl(allocator, tu, node, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &used_external_types);
+				ctx.parse_function_decl(node);
 			case "VarDecl":
-				parse_var_decl(allocator, tu, node, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &used_external_types);
+				ctx.parse_var_decl(node);
 			case "RecordDecl":
 				{
 					String c_name = node.get_string("name") ?? "";
@@ -1867,12 +1554,12 @@ fn void parse_clang_ast_json(
 					{
 						if (try id = node.get_string("id"))
 						{
-							anon_records.set(id, node);
+							ctx.anon_records.set(id, node);
 						}
 					}
 					else
 					{
-						parse_record_decl_with_name(allocator, tu, node, c_name, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &anon_records, &used_external_types);
+						ctx.parse_record_decl_with_name(node, c_name);
 					}
 				}
 			case "EnumDecl":
@@ -1882,17 +1569,17 @@ fn void parse_clang_ast_json(
 					{
 						if (try id = node.get_string("id"))
 						{
-							anon_enums.set(id, node);
+							ctx.anon_enums.set(id, node);
 						}
 						anonymous_enums.push(node);
 					}
 					else
 					{
-						parse_enum_decl_with_name(allocator, tu, node, c_name, options, &seen_names, &target_types);
+						ctx.parse_enum_decl_with_name(node, c_name);
 					}
 				}
 			case "TypedefDecl":
-				parse_typedef_decl(allocator, tu, node, options, &seen_names, &target_types, &anon_records, &anon_enums, &external_typedefs, &external_records, &external_enums, &used_external_types);
+				ctx.parse_typedef_decl(node);
 			default:
 				break;
 		}
@@ -1901,7 +1588,7 @@ fn void parse_clang_ast_json(
 	// Pass 3: Synthesize referenced external types
 	List{String} ext_worklist;
 	ext_worklist.init(allocator);
-	used_external_types.@each(; name)
+	ctx.used_external_types.@each(; name)
 	{
 		ext_worklist.push(name);
 	};
@@ -1909,17 +1596,17 @@ fn void parse_clang_ast_json(
 	for (sz w_i = 0; w_i < ext_worklist.len(); w_i++)
 	{
 		String ext_name = ext_worklist.get(w_i);
-		Object* rec_node = find_external_tag(ext_name, &external_records, &external_typedefs);
-		Object* enum_node = !rec_node ? find_external_tag(ext_name, &external_enums, &external_typedefs) : null;
+		Object* rec_node = find_external_tag(ext_name, &ctx.external_records, &ctx.external_typedefs);
+		Object* enum_node = !rec_node ? find_external_tag(ext_name, &ctx.external_enums, &ctx.external_typedefs) : null;
 
 		if (rec_node)
 		{
-			rec_node = resolve_complete_decl(rec_node, &anon_records);
-			sz prev_count = used_external_types.count;
-			parse_record_decl_with_name(allocator, tu, rec_node, ext_name, options, &seen_names, &target_types, &external_typedefs, &external_records, &external_enums, &anon_records, &used_external_types);
-			if (used_external_types.count > prev_count)
+			rec_node = resolve_complete_decl(rec_node, &ctx.anon_records);
+			sz prev_count = ctx.used_external_types.count;
+			ctx.parse_record_decl_with_name(rec_node, ext_name);
+			if (ctx.used_external_types.count > prev_count)
 			{
-				used_external_types.@each(; newly_added)
+				ctx.used_external_types.@each(; newly_added)
 				{
 					if (!ext_worklist.contains(newly_added))
 					{
@@ -1930,38 +1617,15 @@ fn void parse_clang_ast_json(
 		}
 		else if (enum_node)
 		{
-			enum_node = resolve_complete_decl(enum_node, &anon_enums);
-			parse_enum_decl_with_name(allocator, tu, enum_node, ext_name, options, &seen_names, &target_types);
+			enum_node = resolve_complete_decl(enum_node, &ctx.anon_enums);
+			ctx.parse_enum_decl_with_name(enum_node, ext_name);
 		}
-		else if (try desugared_c = external_typedefs.get(ext_name))
+		else if (try desugared_c = ctx.external_typedefs.get(ext_name))
 		{
 			String c3_name = sanitize_c3_type_name(allocator, ext_name, options.type_prefix);
 			String c3_underlying = map_c_type_to_c3(allocator, desugared_c, options.type_prefix, false);
 
-			if (c3_underlying.ends_with("*") && extract_base_type_name(c3_underlying) == c3_name)
-			{
-				c3_underlying = "void*";
-			}
-
-			bool conflicts = false;
-			foreach (&st : tu.structs)
-			{
-				if (st.c3_name == c3_name)
-				{
-					conflicts = true;
-					break;
-				}
-			}
-			foreach (&e : tu.enums)
-			{
-				if (e.c3_name == c3_name)
-				{
-					conflicts = true;
-					break;
-				}
-			}
-
-			if (!conflicts && c3_name != c3_underlying && !is_c3_type(c3_name) && !is_c3_keyword(c3_name) && seen_names.add(ext_name))
+			if (ctx.seen_names.add(ext_name))
 			{
 				tu.typedefs.push({
 					.c_name = ext_name.copy(allocator),
@@ -1971,14 +1635,14 @@ fn void parse_clang_ast_json(
 					.is_func_ptr = false,
 					.comment = ""
 				});
-				target_types.add(ext_name);
+				ctx.target_types.add(ext_name);
 			}
 		}
 	};
 
 	foreach (node : anonymous_enums)
 	{
-		parse_anonymous_enum(allocator, tu, node, options);
+		ctx.parse_anonymous_enum(node);
 	}
 }
 <*

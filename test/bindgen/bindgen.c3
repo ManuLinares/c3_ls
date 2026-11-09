@@ -3136,3 +3136,38 @@ fn void test_object_like_macros_emit_constants()
 	assert(!code.contains("OTHER_SIZE"));
 	assert(!code.contains("= 32;"));
 }
+
+fn void test_function_pointer_returning_function_pointer()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{
+				"kind": "RecordDecl", "name": "sqlite3_vfs", "tagUsed": "struct", "completeDefinition": true, "loc": { "file": "test.h" },
+				"inner": [
+					{ "kind": "FieldDecl", "name": "xDlSym", "type": { "qualType": "void (*(*)(sqlite3_vfs *, void *, const char *))(void)" } },
+					{ "kind": "FieldDecl", "name": "xPlain", "type": { "qualType": "int (*)(int, const char *)" } }
+				]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("alias Sqlite3VfsXDlSymFn = fn void*(Sqlite3Vfs*, void*, ZString);"));
+	assert(code.contains("alias Sqlite3VfsXPlainFn = fn int(int, ZString);"));
+}
