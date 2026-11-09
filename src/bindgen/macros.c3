@@ -98,9 +98,9 @@ fn void parse_macro_probe(Allocator allocator, CTranslationUnit* tu, MacroDefini
 		Object*? relocated = probes.get(string::tformat("%s%s", MACRO_PROBE_PASSES[1], m.name));
 		if (catch decl, relocated) continue;
 
-		String? c3_type = macro_constant_type(allocator, decl, options);
-		String? value = macro_value_expr(allocator, first_inner(decl), options);
-		String? relocated_value = macro_value_expr(tmem, first_inner(relocated), options);
+		String? c3_type = macro_constant_type(allocator, decl, options, &tu.underscored_tags);
+		String? value = macro_value_expr(allocator, first_inner(decl), options, &tu.underscored_tags);
+		String? relocated_value = macro_value_expr(tmem, first_inner(relocated), options, &tu.underscored_tags);
 		if (catch c3_type, value, relocated_value) continue;
 		if (value != relocated_value) continue;
 
@@ -171,12 +171,12 @@ fn Object* core_expr(Object* node) @local
  C3 type of a probe declaration: ZString for string literals, otherwise the declared type without its
  top-level const. Pointer and array types are unsupported.
 *>
-fn String? macro_constant_type(Allocator allocator, Object* decl, BindgenOptions options) @local
+fn String? macro_constant_type(Allocator allocator, Object* decl, BindgenOptions options, HashSet{String}* underscored_tags) @local
 {
 	if ((core_expr(first_inner(decl)!).get_string("kind") ?? "") == "StringLiteral") return "ZString";
 	if (is_indirect_type(decl)) return UNSUPPORTED_MACRO_VALUE~;
 	RawTypeInfo t = extract_type_info(decl);
-	return map_c_type_to_c3(allocator, t.qual_type.strip_prefix("const "), options.type_prefix, false, t.desugared_type.strip_prefix("const "));
+	return map_c_type_to_c3(allocator, t.qual_type.strip_prefix("const "), options.type_prefix, underscored_tags, false, t.desugared_type.strip_prefix("const "));
 }
 
 <*
@@ -206,7 +206,7 @@ fn String? c3_number_literal(Allocator allocator, String body) @local
  C3 expression for a probe initializer. Binary operations are parenthesized because C3 operator
  precedence differs from C; literals whose C type is not int or double carry it explicitly.
 *>
-fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions options) @local
+fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions options, HashSet{String}* underscored_tags) @local
 {
 	String kind = node.get_string("kind") ?? "";
 	String c_type = node.get("type").get_string("qualType") ?? "";
@@ -216,11 +216,11 @@ fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions op
 		case "ImplicitCastExpr":
 		case "ConstantExpr":
 		case "CompoundLiteralExpr":
-			return macro_value_expr(allocator, first_inner(node), options);
+			return macro_value_expr(allocator, first_inner(node), options, underscored_tags);
 		case "IntegerLiteral":
 			String value = node.get_string("value")!;
 			if (c_type == "int") return value.copy(allocator);
-			return string::format(allocator, "(%s)%s", map_c_type_to_c3(tmem, c_type, options.type_prefix), value);
+			return string::format(allocator, "(%s)%s", map_c_type_to_c3(tmem, c_type, options.type_prefix, underscored_tags), value);
 		case "CharacterLiteral":
 			return string::format(allocator, "%d", node.get_long("value")!);
 		case "FloatingLiteral":
@@ -240,19 +240,19 @@ fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions op
 		case "UnaryOperator":
 			String op = node.get_string("opcode")!;
 			if (op != "-" && op != "+" && op != "~") return UNSUPPORTED_MACRO_VALUE~;
-			return string::format(allocator, "%s%s", op, macro_value_expr(allocator, first_inner(node), options)!);
+			return string::format(allocator, "%s%s", op, macro_value_expr(allocator, first_inner(node), options, underscored_tags)!);
 		case "BinaryOperator":
 			String op = node.get_string("opcode")!;
 			if (!is_arithmetic_operator(op)) return UNSUPPORTED_MACRO_VALUE~;
 			Object*[] operands = inner_nodes(node);
 			if (operands.len != 2) return UNSUPPORTED_MACRO_VALUE~;
-			String lhs = macro_value_expr(allocator, operands[0], options)!;
-			String rhs = macro_value_expr(allocator, operands[1], options)!;
+			String lhs = macro_value_expr(allocator, operands[0], options, underscored_tags)!;
+			String rhs = macro_value_expr(allocator, operands[1], options, underscored_tags)!;
 			return string::format(allocator, "(%s %s %s)", lhs, op, rhs);
 		case "CStyleCastExpr":
 			if (is_indirect_type(node)) return UNSUPPORTED_MACRO_VALUE~;
-			String operand = macro_value_expr(allocator, first_inner(node), options)!;
-			return string::format(allocator, "(%s)(%s)", map_c_type_to_c3(tmem, c_type, options.type_prefix), operand);
+			String operand = macro_value_expr(allocator, first_inner(node), options, underscored_tags)!;
+			return string::format(allocator, "(%s)(%s)", map_c_type_to_c3(tmem, c_type, options.type_prefix, underscored_tags), operand);
 		case "InitListExpr":
 			DString out;
 			out.init(allocator);
@@ -260,7 +260,7 @@ fn String? macro_value_expr(Allocator allocator, Object* node, BindgenOptions op
 			foreach (i, element : inner_nodes(node))
 			{
 				if (i > 0) out.append(", ");
-				out.append(macro_value_expr(allocator, element, options)!);
+				out.append(macro_value_expr(allocator, element, options, underscored_tags)!);
 			}
 			out.append(" }");
 			return out.str_view();

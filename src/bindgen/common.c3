@@ -151,6 +151,7 @@ struct CTranslationUnit
 	List{CStruct} structs;
 	List{CVariable} variables;
 	List{CFunction} functions;
+	HashSet{String} underscored_tags;
 }
 
 fn void CTranslationUnit.init(&self, Allocator allocator)
@@ -161,6 +162,7 @@ fn void CTranslationUnit.init(&self, Allocator allocator)
 	self.structs.init(allocator);
 	self.variables.init(allocator);
 	self.functions.init(allocator);
+	self.underscored_tags.init(allocator);
 }
 
 fn void CTranslationUnit.free(&self)
@@ -171,6 +173,7 @@ fn void CTranslationUnit.free(&self)
 	self.structs.free();
 	self.variables.free();
 	self.functions.free();
+	self.underscored_tags.free();
 }
 
 <*
@@ -342,16 +345,6 @@ fn String[] split_top_level_commas(String s)
 	}
 	parts.push(s[start..].trim());
 	return parts.array_view();
-}
-
-<*
- Text inside the parentheses following the first occurrence of `keyword`.
-*>
-fn String? attribute_argument(String s, String keyword)
-{
-	sz idx = s.index_of(keyword)!;
-	ParenSpan span = find_paren_span(s, idx + keyword.len)!;
-	return s[span.open + 1 : span.close - span.open - 1].trim();
 }
 
 <*
@@ -776,11 +769,12 @@ fn String header_dirname(String path) @private
 <*
  C3 name of a struct, union or enum tag. Tags in `underscored_tags` share their sanitized name with a
  different typedef, so they keep a leading '_' to stay distinct.
+ @param [&in] underscored_tags : "Tags that keep a leading underscore."
 *>
-fn String tag_c3_name(Allocator allocator, String tag, String type_prefix, HashSet{String}* underscored_tags = null)
+fn String tag_c3_name(Allocator allocator, String tag, String type_prefix, HashSet{String}* underscored_tags)
 {
 	String name = capitalize_ascii(allocator, sanitize_c3_type_name(allocator, tag, type_prefix));
-	return underscored_tags && underscored_tags.contains(tag) ? string::format(allocator, "_%s", name) : name;
+	return underscored_tags.contains(tag) ? string::format(allocator, "_%s", name) : name;
 }
 
 <*
@@ -974,126 +968,7 @@ fn String extract_base_type_name(String qual_type)
 	return clean_words.get(clean_words.len() - 1);
 }
 
-const sz DEFAULT_VECTOR_BYTES = 16;
 const sz DEFAULT_VECTOR_COUNT = 4;
-const sz DEFAULT_ELEM_BYTES = 4;
-
-<*
- Byte size from a `vector_size` argument: a literal, or a product of literals and primitive type sizes.
-*>
-fn sz vector_size_bytes(String arg) @local
-{
-	if (try bytes = arg.to_ulong()) return (sz)bytes;
-
-	sz product = 1;
-	foreach (term : arg.tsplit("*"))
-	{
-		String t = term.trim().trim_left(" (").trim_right(" )");
-		if (try val = t.to_ulong())
-		{
-			product *= (sz)val;
-		}
-		else if (t.contains("double"))
-		{
-			product *= 8;
-		}
-		else if (t.contains("float") || t.contains("int"))
-		{
-			product *= 4;
-		}
-		else if (t.contains("short"))
-		{
-			product *= 2;
-		}
-	}
-	return product > 1 ? product : 0;
-}
-
-<*
- Parses GCC/Clang vector attributes using balanced parenthesis matching.
-*>
-fn String parse_vector_attribute_type(Allocator allocator, String raw) @local
-{
-	String s = raw;
-	int pointer_depth = strip_pointer_depth(&s);
-
-	sz vec_bytes;
-	sz elem_count;
-	if (try arg = attribute_argument(s, "ext_vector_type") ?? attribute_argument(s, "neon_vector_type"))
-	{
-		elem_count = (sz)(arg.to_ulong() ?? 0);
-	}
-	else if (try arg = attribute_argument(s, "vector_size"))
-	{
-		vec_bytes = vector_size_bytes(arg);
-	}
-
-	if (vec_bytes == 0 && elem_count == 0)
-	{
-		vec_bytes = DEFAULT_VECTOR_BYTES;
-	}
-
-	s = strip_clang_attributes(s);
-	foreach (String attribute : { "__vector_size__", "vector_size", "ext_vector_type", "neon_vector_type" })
-	{
-		s = strip_paren_attribute(s, attribute);
-	}
-
-	s = s.trim_left("() \t").trim_right("() \t");
-	if (s.starts_with("__vector "))
-	{
-		s = s[9..].trim();
-	}
-	if (s.starts_with("vector "))
-	{
-		s = s[7..].trim();
-	}
-
-	String elem_c3 = map_c_type_to_c3(allocator, s, "");
-	if (elem_c3.len == 0)
-	{
-		elem_c3 = "float";
-	}
-
-	sz elem_bytes = DEFAULT_ELEM_BYTES;
-	switch (elem_c3)
-	{
-		case "char":
-		case "ichar":
-			elem_bytes = 1;
-		case "short":
-		case "ushort":
-			elem_bytes = 2;
-		case "int":
-		case "uint":
-		case "float":
-			elem_bytes = 4;
-		case "long":
-		case "ulong":
-		case "double":
-			elem_bytes = 8;
-		default:
-			elem_bytes = DEFAULT_ELEM_BYTES;
-	}
-
-	if (elem_count == 0)
-	{
-		elem_count = vec_bytes / elem_bytes;
-		if (elem_count == 0)
-		{
-			elem_count = DEFAULT_VECTOR_COUNT;
-		}
-	}
-
-	DString res;
-	res.init(allocator);
-	res.appendf("%s[<%d>]", elem_c3, (int)elem_count);
-	for (int p = 0; p < pointer_depth; p++)
-	{
-		res.append_char('*');
-	}
-	return res.str_view().copy(allocator);
-}
 
 <*
  Checks if a normalized C type string represents a function pointer or function type.
@@ -1127,11 +1002,11 @@ fn String map_c_type_to_c3(
 	Allocator allocator,
 	String c_type,
 	String type_prefix,
+	HashSet{String}* underscored_tags,
 	bool is_param = false,
 	String desugared_type = "",
 	bool* out_is_noalias = null,
-	bool is_field = false,
-	HashSet{String}* underscored_tags = null
+	bool is_field = false
 )
 {
 	if (out_is_noalias)

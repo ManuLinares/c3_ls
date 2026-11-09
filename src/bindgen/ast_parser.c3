@@ -5,16 +5,11 @@ import analyzer::core::constants;
 
 <*
  Extracts the source file path from a Clang AST location object.
- @param loc : "Clang AST location object."
- @return    "File path string or empty if unavailable."
+ @param [&in] loc : "Clang AST location object."
+ @return "File path string or empty if unavailable."
 *>
 fn String extract_file_from_loc(Object* loc) @local
 {
-	if (!loc)
-	{
-		return "";
-	}
-
 	return loc.get_string("file") ?? loc.get("expansionLoc").get_string("file") ?? "";
 }
 
@@ -25,16 +20,7 @@ fn String extract_file_from_loc(Object* loc) @local
 *>
 fn String extract_node_file(Object* node) @local
 {
-	if (try loc = node.get("loc"))
-	{
-		String f = extract_file_from_loc(loc);
-		if (f.len > 0)
-		{
-			return f;
-		}
-	}
-
-	return "";
+	return extract_file_from_loc(node.get("loc")) ?? "";
 }
 
 <*
@@ -73,6 +59,9 @@ struct RawTypeInfo
 	String decl_id;
 }
 
+<*
+ @param [&in] node : "Clang AST node with an optional `type` object."
+*>
 fn RawTypeInfo extract_type_info(Object* node) @private
 {
 	RawTypeInfo info = {
@@ -80,11 +69,6 @@ fn RawTypeInfo extract_type_info(Object* node) @private
 		.desugared_type = "",
 		.decl_id = ""
 	};
-	if (!node)
-	{
-		return info;
-	}
-
 	Object*? type_obj = node.get("type");
 	if (catch type_obj)
 	{
@@ -100,14 +84,10 @@ fn RawTypeInfo extract_type_info(Object* node) @private
 
 <*
  Recursively finds the first descendant AST node matching target_kind in inner.
+ @param [&in] node : "Node to search below."
 *>
-fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
+fn Object*? find_descendant_by_kind(Object* node, String target_kind) @local
 {
-	if (!node)
-	{
-		return null;
-	}
-
 	String[2] tag_keys = { "decl", "ownedTagDecl" };
 	foreach (key : tag_keys)
 	{
@@ -117,7 +97,7 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 			{
 				return child;
 			}
-			if (Object* found = find_descendant_by_kind(child, target_kind))
+			if (try found = find_descendant_by_kind(child, target_kind))
 			{
 				return found;
 			}
@@ -130,13 +110,13 @@ fn Object* find_descendant_by_kind(Object* node, String target_kind) @local
 		{
 			return child;
 		}
-		if (Object* found = find_descendant_by_kind(child, target_kind))
+		if (try found = find_descendant_by_kind(child, target_kind))
 		{
 			return found;
 		}
 	}
 
-	return null;
+	return NOT_FOUND~;
 }
 
 <*
@@ -162,13 +142,10 @@ fn Object*? first_inner(Object* node) @private
 
 <*
  Resolves an incomplete AST record or enum declaration against its full definition in an anonymous decl map.
+ @param [&in] node : "Record or enum declaration."
 *>
 fn Object* resolve_complete_decl(Object* node, HashMap{String, Object*}* anon_map) @local
 {
-	if (!node)
-	{
-		return null;
-	}
 	bool is_comp = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
 	if (is_comp)
 	{
@@ -187,6 +164,7 @@ fn bool is_anonymous_tag_name(String name) @local
 
 <*
  Indexes an external record or enum declaration and records its anonymous ID mapping.
+ @param [&in] node : "Record or enum declaration."
 *>
 fn void index_tag_decl(
 	Allocator allocator,
@@ -196,7 +174,6 @@ fn void index_tag_decl(
 	HashMap{String, Object*}* anon_map
 ) @local
 {
-	if (!node) return;
 	Object* full = resolve_complete_decl(node, anon_map);
 	if (name.len > 0)
 	{
@@ -211,7 +188,7 @@ fn void index_tag_decl(
 <*
  Looks up an external record or enum by name or underscore prefix, falling back to desugared typedef base names.
 *>
-fn Object* find_external_tag(
+fn Object*? find_external_tag(
 	String name,
 	HashMap{String, Object*}* tag_map,
 	HashMap{String, String}* typedef_map
@@ -220,11 +197,10 @@ fn Object* find_external_tag(
 	Object*? node = tag_map.get(name) ?? tag_map.get(string::tformat("_%s", name));
 	if (try node) return node;
 
-	String? desug = typedef_map.get(name);
-	if (catch desug) return null;
-	if (desug.contains("*") || desug.contains("[")) return null;
+	String desug = typedef_map.get(name)!;
+	if (desug.contains("*") || desug.contains("[")) return NOT_FOUND~;
 	String base_desug = extract_base_type_name(desug);
-	return tag_map.get(base_desug) ?? tag_map.get(string::tformat("_%s", base_desug)) ?? null;
+	return tag_map.get(base_desug) ?? tag_map.get(string::tformat("_%s", base_desug));
 }
 
 <*
@@ -232,8 +208,7 @@ fn Object* find_external_tag(
 *>
 fn long? constant_value(Object* node) @local
 {
-	Object* expr = find_descendant_by_kind(node, "ConstantExpr") ?: find_descendant_by_kind(node, "IntegerLiteral");
-	if (!expr) return NOT_FOUND~;
+	Object* expr = find_descendant_by_kind(node, "ConstantExpr") ?? find_descendant_by_kind(node, "IntegerLiteral")!;
 	return expr.get_string("value")!.to_long();
 }
 
@@ -273,7 +248,6 @@ struct ParseContext @local
 	HashSet{String} seen_names;
 	HashSet{String} target_types;
 	HashSet{String} function_types;
-	HashSet{String} underscored_tags;
 	HashMap{String, Object*} anon_records;
 	HashMap{String, Object*} anon_enums;
 	HashMap{String, String} external_typedefs;
@@ -288,7 +262,6 @@ fn void ParseContext.init(&self, Allocator allocator, CTranslationUnit* tu, Bind
 	self.seen_names.init(allocator);
 	self.target_types.init(allocator);
 	self.function_types.init(allocator);
-	self.underscored_tags.init(allocator);
 	self.anon_records.init(allocator);
 	self.anon_enums.init(allocator);
 	self.external_typedefs.init(allocator);
@@ -302,7 +275,6 @@ fn void ParseContext.free(&self)
 	self.seen_names.free();
 	self.target_types.free();
 	self.function_types.free();
-	self.underscored_tags.free();
 	self.anon_records.free();
 	self.anon_enums.free();
 	self.external_typedefs.free();
@@ -368,7 +340,7 @@ fn String ParseContext.format_function_proto_from_ast(&self, Object* fpt)
 <*
  Formats a C3 vector type directly from a Clang VectorType AST node.
 *>
-fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOptions options) @local
+fn String ParseContext.format_vector_type_from_ast(&self, Object* vt)
 {
 	sz count = (sz)(vt.get_int("numElements") ?? (long)DEFAULT_VECTOR_COUNT);
 
@@ -384,13 +356,13 @@ fn String format_vector_type_from_ast(Allocator allocator, Object* vt, BindgenOp
 		elem_qual = vt_info.qual_type;
 	}
 
-	String elem_c3 = map_c_type_to_c3(allocator, elem_qual, options.type_prefix, false);
+	String elem_c3 = self.map_type(elem_qual, "");
 	if (elem_c3.len == 0)
 	{
 		elem_c3 = "float";
 	}
 
-	return string::format(allocator, "%s[<%d>]", elem_c3, (int)count);
+	return string::format(self.allocator, "%s[<%d>]", elem_c3, (int)count);
 }
 
 <*
@@ -457,7 +429,7 @@ fn String ParseContext.map_type(&self, String c_type, String desugared_type, boo
 	if (!is_bitfield && self.target_types.contains(base)) desugared_type = "";
 	if (desugared_type.len == 0 || !is_fundamental_c_type(extract_base_type_name(desugared_type))) self.track_external_type_usage(c_type);
 	if (self.function_types.contains(base)) c_type = c_type[:c_type.rindex_of_char('*') ?? c_type.len];
-	return map_c_type_to_c3(self.allocator, c_type, self.options.type_prefix, is_param, desugared_type, out_is_noalias, is_field, &self.underscored_tags);
+	return map_c_type_to_c3(self.allocator, c_type, self.options.type_prefix, &self.tu.underscored_tags, is_param, desugared_type, out_is_noalias, is_field);
 }
 
 <*
@@ -471,7 +443,7 @@ fn void ParseContext.track_external_type_usage(&self, String qual_type)
 		return;
 	}
 
-	String c3_mapped = map_c_type_to_c3(tmem, base, "", false);
+	String c3_mapped = map_c_type_to_c3(tmem, base, "", &self.tu.underscored_tags);
 	if (is_c3_type(c3_mapped) || is_c3_type(base))
 	{
 		return;
@@ -703,7 +675,7 @@ fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
 
 fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, List{CField}* fields)
 {
-	Object* last_anon_rec = null;
+	Object*? last_anon_rec = NOT_FOUND~;
 
 	foreach (i, child : inner_nodes(node))
 	{
@@ -766,8 +738,7 @@ fn bool ParseContext.parse_record_fields(&self, Object* node, String c_name, Lis
 		if (is_anonymous_tag_name(f_type_c))
 		{
 			String synth_name = string::format(self.allocator, "%s_%s", c_name, f_name);
-			Object* anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? last_anon_rec;
-			if (anon_rec)
+			if (try anon_rec = self.anon_records.get(f_tinfo.decl_id) ?? last_anon_rec)
 			{
 				self.parse_record_decl_with_name(anon_rec, synth_name);
 				f_type_c3 = sanitize_c3_type_name(self.allocator, synth_name, self.options.type_prefix);
@@ -904,7 +875,7 @@ fn void ParseContext.parse_record_decl_with_name(&self, Object* node, String c_n
 	String tag = node.get_string("tagUsed") ?? "struct";
 	bool is_union = (tag == "union");
 	bool is_complete = node.get_bool("completeDefinition") ?? node.get_bool("isCompleteDefinition") ?? false;
-	String c3_name = tag_c3_name(self.allocator, c_name, self.options.type_prefix, &self.underscored_tags);
+	String c3_name = tag_c3_name(self.allocator, c_name, self.options.type_prefix, &self.tu.underscored_tags);
 
 	bool is_packed = false;
 	uint alignment = 0;
@@ -992,7 +963,7 @@ fn void ParseContext.parse_enum_decl_with_name(&self, Object* node, String c_nam
 		return;
 	}
 
-	String c3_name = tag_c3_name(self.allocator, c_name, self.options.type_prefix, &self.underscored_tags);
+	String c3_name = tag_c3_name(self.allocator, c_name, self.options.type_prefix, &self.tu.underscored_tags);
 
 	foreach (&e : self.tu.enums)
 	{
@@ -1235,7 +1206,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 			continue;
 		}
 
-		if (Object* rec_child = find_descendant_by_kind(child, "RecordDecl"))
+		if (try rec_child = find_descendant_by_kind(child, "RecordDecl"))
 		{
 			Object* full_rec = resolve_complete_decl(rec_child, &self.anon_records);
 			String tag_name = full_rec.get_string("name") ?? "";
@@ -1248,7 +1219,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 				return;
 			}
 		}
-		else if (Object* enum_child = find_descendant_by_kind(child, "EnumDecl"))
+		else if (try enum_child = find_descendant_by_kind(child, "EnumDecl"))
 		{
 			Object* full_enum = resolve_complete_decl(enum_child, &self.anon_enums);
 			String tag_name = full_enum.get_string("name") ?? "";
@@ -1261,7 +1232,7 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 		}
 	}
 
-	if (!self.seen_names.add(c_name) && !self.underscored_tags.contains(c_name))
+	if (!self.seen_names.add(c_name) && !self.tu.underscored_tags.contains(c_name))
 	{
 		return;
 	}
@@ -1275,14 +1246,14 @@ fn void ParseContext.parse_typedef_decl(&self, Object* node)
 	String c3_name = sanitize_c3_type_name(self.allocator, c_name, self.options.type_prefix);
 	String c3_underlying;
 
-	if (Object* fpt = find_descendant_by_kind(node, "FunctionProtoType"))
+	if (try fpt = find_descendant_by_kind(node, "FunctionProtoType"))
 	{
 		c3_underlying = self.format_function_proto_from_ast(fpt);
 		is_func_ptr = true;
 	}
-	else if (Object* vt = find_descendant_by_kind(node, "VectorType"))
+	else if (try vt = find_descendant_by_kind(node, "VectorType"))
 	{
-		c3_underlying = format_vector_type_from_ast(self.allocator, vt, self.options);
+		c3_underlying = self.format_vector_type_from_ast(vt);
 	}
 	else
 	{
@@ -1350,16 +1321,16 @@ fn void parse_clang_ast_json(
 					ctx.external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
 				}
 				bool is_indirect = desugared.contains("*") || desugared.contains("[");
-				if (Object* rec_child = find_descendant_by_kind(node, "RecordDecl"))
+				if (try rec_child = find_descendant_by_kind(node, "RecordDecl"))
 				{
 					String tag = rec_child.get_string("name") ?? "";
 					if (is_indirect && tag.len > 0 && !is_fundamental_c_type(tag) && sanitize_c3_type_name(tmem, tag, "") == sanitize_c3_type_name(tmem, td_name, ""))
 					{
-						ctx.underscored_tags.add(tag.copy(allocator));
+						tu.underscored_tags.add(tag.copy(allocator));
 					}
 					index_tag_decl(allocator, is_indirect ? tag : td_name, rec_child, &ctx.external_records, &ctx.anon_records);
 				}
-				else if (Object* enum_child = find_descendant_by_kind(node, "EnumDecl"))
+				else if (try enum_child = find_descendant_by_kind(node, "EnumDecl"))
 				{
 					String reg_name = is_indirect ? (enum_child.get_string("name") ?? "") : td_name;
 					index_tag_decl(allocator, reg_name, enum_child, &ctx.external_enums, &ctx.anon_enums);
@@ -1462,14 +1433,10 @@ fn void parse_clang_ast_json(
 	for (sz w_i = 0; w_i < ext_worklist.len(); w_i++)
 	{
 		String ext_name = ext_worklist.get(w_i);
-		Object* rec_node = find_external_tag(ext_name, &ctx.external_records, &ctx.external_typedefs);
-		Object* enum_node = !rec_node ? find_external_tag(ext_name, &ctx.external_enums, &ctx.external_typedefs) : null;
-
-		if (rec_node)
+		if (try rec_node = find_external_tag(ext_name, &ctx.external_records, &ctx.external_typedefs))
 		{
-			rec_node = resolve_complete_decl(rec_node, &ctx.anon_records);
 			sz prev_count = ctx.used_external_types.count;
-			ctx.parse_record_decl_with_name(rec_node, ext_name);
+			ctx.parse_record_decl_with_name(resolve_complete_decl(rec_node, &ctx.anon_records), ext_name);
 			if (ctx.used_external_types.count > prev_count)
 			{
 				ctx.used_external_types.@each(; newly_added)
@@ -1481,15 +1448,14 @@ fn void parse_clang_ast_json(
 				};
 			}
 		}
-		else if (enum_node)
+		else if (try enum_node = find_external_tag(ext_name, &ctx.external_enums, &ctx.external_typedefs))
 		{
-			enum_node = resolve_complete_decl(enum_node, &ctx.anon_enums);
-			ctx.parse_enum_decl_with_name(enum_node, ext_name);
+			ctx.parse_enum_decl_with_name(resolve_complete_decl(enum_node, &ctx.anon_enums), ext_name);
 		}
 		else if (try desugared_c = ctx.external_typedefs.get(ext_name))
 		{
 			String c3_name = sanitize_c3_type_name(allocator, ext_name, options.type_prefix);
-			String c3_underlying = map_c_type_to_c3(allocator, desugared_c, options.type_prefix, false);
+			String c3_underlying = map_c_type_to_c3(allocator, desugared_c, options.type_prefix, &tu.underscored_tags);
 
 			if (ctx.seen_names.add(ext_name))
 			{

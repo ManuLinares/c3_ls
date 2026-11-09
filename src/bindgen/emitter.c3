@@ -144,7 +144,7 @@ fn String extract_base_type_ident(String type_str) @local
 	return s.trim();
 }
 
-fn CStruct* find_struct_by_name(CTranslationUnit* tu, String name) @local
+fn CStruct*? find_struct_by_name(CTranslationUnit* tu, String name) @local
 {
 	foreach (&st : tu.structs)
 	{
@@ -159,26 +159,27 @@ fn CStruct* find_struct_by_name(CTranslationUnit* tu, String name) @local
 		{
 			if (td.is_func_ptr || td.underlying_c3.contains("*") || td.underlying_c3.contains("["))
 			{
-				return null;
+				return NOT_FOUND~;
 			}
-			String target = extract_base_type_ident(td.underlying_c3);
-			return find_struct_by_name(tu, target);
+			return find_struct_by_name(tu, extract_base_type_ident(td.underlying_c3));
 		}
 	}
-	return null;
+	return NOT_FOUND~;
 }
 
 <*
  The struct holding the flexible array member that `st` ends with, following by-value last fields.
+ @param [&in] st : "Struct to inspect."
 *>
-fn CStruct* fam_owner(CTranslationUnit* tu, CStruct* st) @local
+fn CStruct*? fam_owner(CTranslationUnit* tu, CStruct* st) @local
 {
-	if (!st || st.is_union || st.is_opaque || st.fields.len() == 0) return null;
+	if (st.is_union || st.is_opaque || st.fields.len() == 0) return NOT_FOUND~;
 	CField last_f = st.fields.get(st.fields.len() - 1);
 	if (last_f.c3_type.ends_with("[*]")) return st;
-	if (last_f.c3_type.contains("*") || last_f.c3_type.contains("[")) return null;
-	CStruct* sub = find_struct_by_name(tu, extract_base_type_ident(last_f.c3_type));
-	return sub && sub != st ? fam_owner(tu, sub) : null;
+	if (last_f.c3_type.contains("*") || last_f.c3_type.contains("[")) return NOT_FOUND~;
+	CStruct* sub = find_struct_by_name(tu, extract_base_type_ident(last_f.c3_type))!;
+	if (sub == st) return NOT_FOUND~;
+	return fam_owner(tu, sub);
 }
 
 <*
@@ -260,9 +261,10 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 				if (!f.c3_type.contains("*") && !f.c3_type.contains("["))
 				{
 					String base = extract_base_type_ident(f.c3_type);
-					CStruct* sub_st = find_struct_by_name(tu, base);
+					CStruct*? sub_st = find_struct_by_name(tu, base);
+					if (catch sub_st) continue;
 					if (sub_st == st) continue;
-					if (CStruct* owner = fam_owner(tu, sub_st))
+					if (try owner = fam_owner(tu, sub_st))
 					{
 						owner.fields.remove_last();
 						fam_modified = true;
@@ -391,7 +393,8 @@ fn void sanitize_fam_arrays(Allocator allocator, CTranslationUnit* tu) @local
 fn void record_missing_type(HashSet{String}* known, List{String}* missing, String type_str) @local
 {
 	String t = extract_base_type_ident(type_str);
-	if (t.len == 0 || t.len > MAX_IDENTIFIER_LEN || t[0] < 'A' || t[0] > 'Z' || t.contains("(") || t.contains(" ") || is_c3_type(t))
+	String name = t.trim_left("_");
+	if (name.len == 0 || t.len > MAX_IDENTIFIER_LEN || !name[0].is_upper() || t.contains("(") || t.contains(" ") || is_c3_type(t))
 	{
 		return;
 	}

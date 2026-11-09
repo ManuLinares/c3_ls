@@ -43,23 +43,25 @@ fn void test_type_sanitization_and_prefix()
 
 fn void test_c_type_mapping()
 {
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", true), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", false), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *", "", false), "char*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "long", "", false), "CLong");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "unsigned long", "", false), "CULong");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "int *", "", false), "int*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "void **", "", false), "void**");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "void *[2]", "", false), "void*[2]");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "int *[10]", "", false), "int*[10]");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char **", "", true), "ZString*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *const *", "", true), "ZString*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const *", "", true), "char**");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const", "", true), "char*");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "struct __va_list_tag *", "", true), "CVaList");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "va_list", "", true), "CVaList");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "png_const_charp", "", true, "const char *"), "ZString");
-	test::eq(bindgen::map_c_type_to_c3(tmem, "png_charp", "", true, "char *"), "char*");
+	HashSet{String} tags;
+	tags.tinit();
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tags, true), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *", "", &tags, false), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *", "", &tags, false), "char*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "long", "", &tags, false), "CLong");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "unsigned long", "", &tags, false), "CULong");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "int *", "", &tags, false), "int*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "void **", "", &tags, false), "void**");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "void *[2]", "", &tags, false), "void*[2]");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "int *[10]", "", &tags, false), "int*[10]");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char **", "", &tags, true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "const char *const *", "", &tags, true), "ZString*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const *", "", &tags, true), "char**");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "char *const", "", &tags, true), "char*");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "struct __va_list_tag *", "", &tags, true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "va_list", "", &tags, true), "CVaList");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_const_charp", "", &tags, true, "const char *"), "ZString");
+	test::eq(bindgen::map_c_type_to_c3(tmem, "png_charp", "", &tags, true, "char *"), "char*");
 }
 
 fn void test_clang_ast_json_mock_emission()
@@ -666,7 +668,9 @@ fn void test_module_name_length_limit_and_zero_length_array()
 	assert(sanitized_mod.len <= 31);
 	test::eq(sanitized_mod, "libvirt_gconfig_domain_graphics");
 
-	String code_zero_arr = bindgen::map_c_type_to_c3(tmem, "char[0]", "", is_field: true);
+	HashSet{String} tags;
+	tags.tinit();
+	String code_zero_arr = bindgen::map_c_type_to_c3(tmem, "char[0]", "", &tags, is_field: true);
 	test::eq(code_zero_arr, "char[*]");
 }
 
@@ -3523,6 +3527,50 @@ fn void test_clang_output_with_large_stderr_does_not_block() @feat(POSIX)
 	assert(out.stdout_str.starts_with("{"));
 	assert(out.stdout_str.contains("good_2999"));
 	json::tparse(out.stdout_str)!!;
+}
+
+fn void test_external_typedef_to_underscored_tag()
+{
+	String mock_json = `
+	{
+		"kind": "TranslationUnitDecl",
+		"inner": [
+			{ "kind": "RecordDecl", "name": "_ExtHandle", "tagUsed": "struct", "loc": { "file": "/usr/include/ext.h" } },
+			{
+				"kind": "TypedefDecl", "name": "ExtHandle", "loc": { "file": "/usr/include/ext.h" },
+				"type": { "qualType": "struct _ExtHandle *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "_ExtHandle" } } ] } ]
+			},
+			{
+				"kind": "TypedefDecl", "name": "ext_alias_t", "loc": { "file": "/usr/include/ext.h" },
+				"type": { "qualType": "struct _ExtHandle *" },
+				"inner": [ { "kind": "PointerType", "inner": [ { "kind": "RecordType", "decl": { "kind": "RecordDecl", "name": "_ExtHandle" } } ] } ]
+			},
+			{
+				"kind": "FunctionDecl", "name": "use_handle", "loc": { "file": "test.h" }, "type": { "qualType": "void (ext_alias_t)" },
+				"inner": [ { "kind": "ParmVarDecl", "name": "h", "type": { "qualType": "ext_alias_t", "desugaredQualType": "struct _ExtHandle *" } } ]
+			}
+		]
+	}
+	`;
+
+	Object* root_obj = json::tparse(mock_json)!!;
+
+	BindgenOptions opts = {
+		.header_path = "test.h",
+		.module_name = "test"
+	};
+
+	CTranslationUnit tu;
+	tu.init(tmem);
+
+	bindgen::parse_clang_ast_json(tmem, &tu, root_obj, opts);
+
+	String code = bindgen::emit_c3_bindings(tmem, &tu, opts);
+
+	assert(code.contains("alias ExtAliasT = _ExtHandle*;\n"));
+	assert(code.contains("typedef _ExtHandle = void;\n"));
+	assert(code.contains("extern fn void use_handle(ExtAliasT h)"));
 }
 
 module lsp::bindgen_test::posix_signal;

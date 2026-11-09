@@ -338,17 +338,10 @@ fn int run_bindgen(BindgenOptions options, bool is_cli = false) => @pool()
 		return 1;
 	}
 
-	Object*? parsed = json::tparse(json_ast);
-	if (catch err = parsed)
+	Object*? root_obj = json::tparse(json_ast);
+	if (catch err = root_obj)
 	{
 		report_error(is_cli, "Failed to parse Clang AST JSON output (%s).", err);
-		return 1;
-	}
-
-	Object* root_obj = parsed;
-	if (!root_obj)
-	{
-		report_error(is_cli, "Clang AST JSON output was empty.");
 		return 1;
 	}
 
