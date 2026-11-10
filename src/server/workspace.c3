@@ -13,6 +13,7 @@ import analyzer::lexer;
 import std::collections::list;
 import std::collections::map;
 import std::io;
+import uri;
 
 struct SymbolEntry
 {
@@ -91,19 +92,33 @@ fn void LspWorkspace.init(&self, Allocator allocator)
 	self.c3c_diagnostics.init(allocator);
 }
 
+<*
+ Frees the message of every diagnostic in `list` and empties it.
+*>
+fn void free_messages(List{LspDiagnostic}* list, Allocator allocator) @local
+{
+	foreach (d : *list) d.message.free(allocator);
+	list.clear();
+}
+
+<*
+ Frees every list in `map`, with its messages, and empties the map.
+*>
+fn void free_lists(HashMap{String, List{LspDiagnostic}}* map, Allocator allocator) @local
+{
+	map.@each_entry(; entry)
+	{
+		free_messages(&entry.value, allocator);
+		entry.value.free();
+	};
+	map.clear();
+}
+
 fn void LspWorkspace.free(&self)
 {
-	self.diagnostics.@each(; path, list)
-	{
-		foreach (d : list)
-		{
-			d.message.free(self.allocator);
-		}
-		list.free();
-	};
+	free_lists(&self.diagnostics, self.allocator);
 	self.diagnostics.free();
-
-	self.clear_all_c3c_diagnostics();
+	free_lists(&self.c3c_diagnostics, self.allocator);
 	self.c3c_diagnostics.free();
 
 	if (self.ctx)
@@ -360,16 +375,7 @@ fn bool ranges_overlap(LspRange a, LspRange b) @local
 
 fn LspDiagnostic[] LspWorkspace.get_diagnostics(&self, String path)
 {
-	String norm_path = path;
-	if (norm_path.contains("\\"))
-	{
-		char[] p = norm_path.copy(tmem);
-		for (sz i = 0; i < p.len; i++)
-		{
-			if (p[i] == '\\') p[i] = '/';
-		}
-		norm_path = (String)p;
-	}
+	String norm_path = uri::normalize_path(tmem, path);
 
 	List{LspDiagnostic}* analyzer_list = self.diagnostics.get_ref(path) ?? (norm_path != path ? self.diagnostics.get_ref(norm_path) : null) ?? null;
 	List{LspDiagnostic}* c3c_list = self.c3c_diagnostics.get_ref(norm_path) ?? (norm_path != path ? self.c3c_diagnostics.get_ref(path) : null) ?? null;
@@ -415,12 +421,9 @@ fn LspDiagnostic[] LspWorkspace.get_diagnostics(&self, String path)
 
 fn void LspWorkspace.clear_diagnostics_for_path(&self, String path)
 {
-	if (try list = self.diagnostics.get(path))
+	if (try list = self.diagnostics.get_ref(path))
 	{
-		foreach (d : list)
-		{
-			d.message.free(self.allocator);
-		}
+		free_messages(list, self.allocator);
 		list.free();
 		(void)self.diagnostics.remove(path);
 	}
@@ -428,49 +431,19 @@ fn void LspWorkspace.clear_diagnostics_for_path(&self, String path)
 
 fn void LspWorkspace.clear_c3c_diagnostics_for_path(&self, String path)
 {
-	String norm_path = path;
-	if (norm_path.contains("\\"))
+	if (try list = self.c3c_diagnostics.get_ref(uri::normalize_path(tmem, path)))
 	{
-		char[] p = norm_path.copy(tmem);
-		for (sz i = 0; i < p.len; i++)
-		{
-			if (p[i] == '\\') p[i] = '/';
-		}
-		norm_path = (String)p;
+		free_messages(list, self.allocator);
 	}
-
-	if (try list = self.c3c_diagnostics.get_ref(norm_path))
+	else if (try list = self.c3c_diagnostics.get_ref(path))
 	{
-		foreach (d : *list)
-		{
-			d.message.free(self.allocator);
-		}
-		list.clear();
-	}
-	else if (norm_path != path)
-	{
-		if (try list = self.c3c_diagnostics.get_ref(path))
-		{
-			foreach (d : *list)
-			{
-				d.message.free(self.allocator);
-			}
-			list.clear();
-		}
+		free_messages(list, self.allocator);
 	}
 }
 
 fn void LspWorkspace.clear_all_c3c_diagnostics(&self)
 {
-	self.c3c_diagnostics.@each(; path, list)
-	{
-		foreach (d : list)
-		{
-			d.message.free(self.allocator);
-		}
-		list.free();
-	};
-	self.c3c_diagnostics.clear();
+	free_lists(&self.c3c_diagnostics, self.allocator);
 }
 
 fn void LspWorkspace.add_c3c_diagnostic(&self, String path, LspDiagnostic diag)
@@ -573,20 +546,7 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 			default:      continue;
 		}
 
-		String norm_file = raw_file.copy(tmem);
-		for (sz i = 0; i < norm_file.len; i++)
-		{
-			if (norm_file[i] == '\\') norm_file[i] = '/';
-		}
-
-		$if env::WIN32:
-			if (norm_file.len >= 2 && norm_file[0].is_lower() && norm_file[1] == ':')
-			{
-				char[] p = norm_file.copy(tmem);
-				p[0] = p[0].to_upper();
-				norm_file = (String)p;
-			}
-		$endif
+		String norm_file = uri::normalize_path(tmem, raw_file);
 
 		if (!norm_file.starts_with("/") && !(norm_file.len >= 2 && norm_file[1] == ':'))
 		{

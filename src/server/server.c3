@@ -618,12 +618,8 @@ fn bool is_stdlib_file(String path)
 	if (std_path.len == 0) return false;
 	Path? root = path::tnew(std_path);
 	if (catch root) return false;
-	String r = (String)root;
-	$if env::WIN32:
-		// File keys use '/' (URI form) while normalized paths use '\\'.
-		r = r.treplace("\\", "/");
-		path = path.treplace("\\", "/");
-	$endif
+	String r = uri::normalize_path(tmem, (String)root);
+	path = uri::normalize_path(tmem, path);
 	return path.starts_with(r) && (path.len == r.len || path[r.len] == '/');
 }
 

@@ -59,3 +59,54 @@ fn void test_deleted_dependency_eviction_and_definition_guard()
 	assert(new_diags.len > 0);
 	assert(new_diags[0].message.contains("No module 'temp_dep' found"));
 }
+macro String file_uri(Path path) => uri::from_file_path(tmem, (String)path).to_raw_string(tmem);
+macro String file_key(Path path) => uri::from_file_path(tmem, (String)path).path;
+
+fn void test_file_text_lifecycle_frees_everything()
+{
+	Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_text_lifecycle_test")!!;
+	(void)path::rmtree(dir);
+	(void)path::mkdir(dir.tappend("lib")!!, recursive: true);
+	defer (void)path::rmtree(dir);
+	Path main_path = dir.tappend("main.c3")!!;
+	Path dep_path = dir.tappend("lib")!!.tappend("dep.c3")!!;
+	file::save(main_path, "module app;\n")!!;
+	file::save(dep_path, "module dep;\n")!!;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.open_file({ .uri = file_uri(main_path) }, from_disk: true);
+	proj.open_file({ .uri = file_uri(main_path), .text = "module app;\nfn void f() {}\n" });
+	TextDocumentContentChangeEvent[1] empty = { { .text = "" } };
+	proj.change_file({ .document = { .uri = file_uri(main_path), .version = 2 }, .content_changes = &empty });
+	TextDocumentContentChangeEvent[1] full = { { .text = "module app;\n" } };
+	proj.change_file({ .document = { .uri = file_uri(main_path), .version = 3 }, .content_changes = &full });
+	proj.close_document(file_uri(main_path));
+	assert(proj.files.has_key(file_key(main_path)));
+
+	proj.open_file({ .uri = file_uri(dep_path), .text = "module dep;\n" });
+	proj.update();
+	proj.close_file(file_uri(dir.tappend("lib")!!));
+	assert(!proj.files.has_key(file_key(dep_path)));
+}
+
+fn void test_evicting_directory_clears_c3c_diagnostics()
+{
+	Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_evict_diag_test")!!;
+	(void)path::rmtree(dir);
+	(void)path::mkdir(dir.tappend("lib")!!, recursive: true);
+	defer (void)path::rmtree(dir);
+	Path dep_path = dir.tappend("lib")!!.tappend("dep.c3")!!;
+	file::save(dep_path, "module dep;\n")!!;
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.open_file({ .uri = file_uri(dep_path), .text = "module dep;\n" });
+	proj.workspace.add_c3c_diagnostic(file_key(dep_path), { .message = "stale".copy(mem) });
+	proj.close_file(file_uri(dir.tappend("lib")!!));
+	assert(proj.workspace.get_diagnostics(file_key(dep_path)).len == 0);
+}

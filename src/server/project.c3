@@ -28,11 +28,18 @@ struct LspFile
 
 fn void LspFile.free(&self, Allocator allocator)
 {
-	if (self.text.len > 0)
-	{
-		self.text.free(allocator);
-	}
+	alloc::free(allocator, self.text.ptr);
 	self.uri.free();
+}
+
+<*
+ Replaces `text` with a copy of `new_text` allocated with `allocator`; an empty `new_text` clears it.
+*>
+fn void LspFile.set_text(&self, Allocator allocator, String new_text)
+{
+	String old = self.text;
+	self.text = new_text.len > 0 ? new_text.copy(allocator) : {};
+	alloc::free(allocator, old.ptr);
 }
 
 struct FileInput
@@ -127,8 +134,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 			return;
 		}
 
-		if (tracked.text.len > 0) tracked.text.free(self.allocator);
-		tracked.text = document.text.len > 0 ? document.text.copy(self.allocator) : "";
+		tracked.set_text(self.allocator, document.text);
 		tracked.version = 1;
 		tracked.is_library = false; // User opened this file in editor; publish diagnostics on edit!
 
@@ -147,10 +153,10 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	LspFile* lsp_file = alloc::new(self.allocator, LspFile);
 	*lsp_file = {
 		.uri = file_uri,
-		.text = document.text.len > 0 ? document.text.copy(self.allocator) : "",
 		.version = 1,
 		.is_library = from_disk,
 	};
+	lsp_file.set_text(self.allocator, document.text);
 
 	self.files[lookup_key] = lsp_file;
 
@@ -193,15 +199,7 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	file.version = params.document.version;
 	log::info("Reindexing: version = %d", file.version);
 
-	if (file.text.len > 0)
-	{
-		file.text.free(self.allocator);
-		file.text = "";
-	}
-	if (params.content_changes.len > 0 && params.content_changes[0].text.len > 0)
-	{
-		file.text = params.content_changes[0].text.copy(self.allocator);
-	}
+	file.set_text(self.allocator, params.content_changes.len > 0 ? params.content_changes[0].text : "");
 	FileInput input = {
 		.source_text = file.text,
 		.uri = file.uri.path,
@@ -227,11 +225,7 @@ fn void LspProject.close_document(&self, DocumentUri document)
 
 	if (file::exists(lookup_key) && !lookup_key.starts_with("/virtual/"))
 	{
-		if (file.text.len > 0)
-		{
-			file.text.free(self.allocator);
-			file.text = "";
-		}
+		file.set_text(self.allocator, "");
 		file.is_library = true;
 
 		FileInput input = {
@@ -274,43 +268,26 @@ fn void LspProject.close_file(&self, DocumentUri document)
 			}
 		};
 
-		foreach (p : to_evict)
-		{
-			if (try f = self.files.get(p))
-			{
-				if (self.workspace.ctx)
-				{
-					SourceFile* sf = self.workspace.get_source_file_by_path(p);
-					if (sf)
-					{
-						source_file::free(self.workspace.ctx, sf);
-					}
-				}
-				f.free(self.allocator);
-				alloc::free(self.allocator, f);
-				(void)self.files.remove(p);
-			}
-		}
+		foreach (p : to_evict) self.evict(p);
 		return;
 	}
 
-	LspFile* file = self.files.get(lookup_key) ?? null;
+	self.evict(lookup_key);
+}
+
+<*
+ Stops tracking the file at `path`: drops its c3c diagnostics and parsed source, and frees it.
+*>
+fn void LspProject.evict(&self, String path)
+{
+	LspFile* file = self.files.get(path) ?? null;
 	if (!file) return;
-
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
-
-	if (self.workspace.ctx)
-	{
-		SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
-		if (sf)
-		{
-			source_file::free(self.workspace.ctx, sf);
-		}
-	}
-
+	SourceFile* sf = self.workspace.get_source_file_by_path(path);
+	if (sf) source_file::free(self.workspace.ctx, sf);
 	file.free(self.allocator);
 	alloc::free(self.allocator, file);
-	self.files.remove(lookup_key);
+	(void)self.files.remove(path);
 }
 
 fn void LspProject.save_file(&self, DocumentUri document) => @pool()

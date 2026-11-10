@@ -80,11 +80,6 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 			decoded[write_idx++] = (char)((char.from_hex(h1) << 4) | char.from_hex(h2));
 			i += 3;
 		}
-		else if (remaining_path[i] == '\\')
-		{
-			decoded[write_idx++] = '/';
-			i++;
-		}
 		else
 		{
 			decoded[write_idx++] = remaining_path[i];
@@ -92,43 +87,34 @@ fn Uri? parse(Allocator allocator, String raw_uri) => @pool()
 		}
 	}
 
-	String native_path = (String)decoded[:write_idx];
-
-	$if env::WIN32:
-		if (native_path.len >= 2 && native_path[0].is_lower() && native_path[1] == ':')
-		{
-			native_path[0] = native_path[0].to_upper();
-		}
-	$endif
-
 	return {
 		.scheme = scheme.copy(allocator),
-		.path = native_path.copy(allocator),
+		.path = normalize_path(allocator, (String)decoded[:write_idx]),
 		.allocator = allocator
 	};
 }
 
+<*
+ Converts `native_path` to the form used for file keys: '/' separators and, on Windows, an uppercase drive letter.
+*>
+fn String normalize_path(Allocator allocator, String native_path)
+{
+	String path = native_path.copy(allocator);
+	foreach (&c : path)
+	{
+		if (*c == '\\') *c = '/';
+	}
+	$if env::WIN32:
+		if (path.len >= 2 && path[0].is_lower() && path[1] == ':') path[0] = path[0].to_upper();
+	$endif
+	return path;
+}
+
 fn Uri from_file_path(Allocator allocator, String native_path)
 {
-	String cleaned_path = native_path.copy(tmem);
-	for (sz i = 0; i < cleaned_path.len; i++)
-	{
-		if (cleaned_path[i] == '\\')
-		{
-			cleaned_path[i] = '/';
-		}
-	}
-
-	$if env::WIN32:
-		if (cleaned_path.len >= 2 && cleaned_path[0].is_lower() && cleaned_path[1] == ':')
-		{
-			cleaned_path[0] = cleaned_path[0].to_upper();
-		}
-	$endif
-
 	return {
 		.scheme = "file".copy(allocator),
-		.path = cleaned_path.copy(allocator),
+		.path = normalize_path(allocator, native_path),
 		.allocator = allocator
 	};
 }
