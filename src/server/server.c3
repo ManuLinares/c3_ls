@@ -435,7 +435,7 @@ fn void dispatch(LspMessage* message)
 
 		case COMPLETION_RESOLVE:
 			{
-				CompletionItem item = message.params.completion_resolve.item;
+				CompletionItem item = message.params.completion_resolve;
 				completion::resolve_item(project_manager.get_active_project(), &item);
 				LspCompletionResolveResponse res = {
 					.jsonrpc = message.rpc,

@@ -94,7 +94,7 @@ fn void test_decode_completion_resolve_keeps_text_edit()
 {
 	String msg = `{"jsonrpc":"2.0","id":7,"method":"completionItem/resolve","params":{"label":"@mac","kind":3,"textEdit":{"range":{"start":{"line":2,"character":1},"end":{"line":2,"character":4}},"newText":"lala::@mac();"}}}`;
 	LspMessage decoded = translator::decode(tmem, msg)!!.message;
-	TextEdit* edit = decoded.params.completion_resolve.item.textEdit;
+	TextEdit* edit = decoded.params.completion_resolve.textEdit;
 	assert(edit != null);
 	test::eq(edit.newText, "lala::@mac();");
 	assert(edit.range.start.line == 2, "%d", edit.range.start.line);

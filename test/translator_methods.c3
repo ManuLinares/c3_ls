@@ -141,7 +141,7 @@ fn void test_decode_completion_resolve_with_documentation()
 	defer res.message.free();
 
 	assert(res.message.method == COMPLETION_RESOLVE);
-	assert(res.message.params.completion_resolve.item.label == "size");
-	assert(res.message.params.completion_resolve.item.documentation.kind == "markdown");
-	assert(res.message.params.completion_resolve.item.documentation.value == "Size in bytes");
+	assert(res.message.params.completion_resolve.label == "size");
+	assert(res.message.params.completion_resolve.documentation.kind == "markdown");
+	assert(res.message.params.completion_resolve.documentation.value == "Size in bytes");
 }

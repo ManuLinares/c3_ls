@@ -110,7 +110,7 @@ fn void code_action_and_commands()
 
 fn void completion_resolve_keeps_documentation_and_edit()
 {
-	CompletionItem item = decode(`{"id":12,"method":"completionItem/resolve","params":{"label":"@mac","kind":3,"documentation":{"kind":"markdown","value":"doc"},"textEdit":{"range":{"start":{"line":2,"character":1},"end":{"line":2,"character":4}},"newText":"lala::@mac();"}}}`).params.completion_resolve.item;
+	CompletionItem item = decode(`{"id":12,"method":"completionItem/resolve","params":{"label":"@mac","kind":3,"documentation":{"kind":"markdown","value":"doc"},"textEdit":{"range":{"start":{"line":2,"character":1},"end":{"line":2,"character":4}},"newText":"lala::@mac();"}}}`).params.completion_resolve;
 	test::eq(item.label, "@mac");
 	test::eq(item.documentation.value, "doc");
 	test::eq(item.textEdit.newText, "lala::@mac();");
