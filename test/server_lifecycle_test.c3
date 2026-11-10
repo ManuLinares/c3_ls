@@ -89,3 +89,21 @@ fn void test_full_server_dispatch_flow()
 	String new_hover_content = analysis::hover::hover(&proj, doc_uri, new_hover_pos)!!;
 	assert(new_hover_content.contains("calculate_new"));
 }
+
+fn void initialize_options_replace_owned_paths()
+{
+	IoDecodeResult res = translator::decode(tmem, `{"id":1,"method":"initialize","params":{"initializationOptions":{"compiler_path":"/a/c3c","stdlib_path":"/a/lib/"}}}`)!!;
+	server::on_initialize(&res.message, &res.message.params.initialize)!!;
+	server::on_initialize(&res.message, &res.message.params.initialize)!!;
+	test::eq(server::compiler_path, "/a/c3c");
+	test::eq(server::std_path, "/a/lib");
+	server::set_std_path("");
+	server::set_compiler_path("");
+	assert(server::std_path.ptr == null && server::compiler_path.ptr == null);
+}
+
+fn void request_with_invalid_uri_fails()
+{
+	IoDecodeResult res = translator::decode(tmem, `{"id":1,"method":"textDocument/hover","params":{"textDocument":{"uri":"not a uri"},"position":{"line":0,"character":0}}}`)!!;
+	assert(@catch(server::on_hover(&res.message, &res.message.params.hover)));
+}

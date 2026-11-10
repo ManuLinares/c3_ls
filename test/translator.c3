@@ -1,12 +1,13 @@
 module lsp::translator @test;
 
+import std::collections::object;
 import std::io;
 import lsp;
 import lsp::server;
 
 fn void encode_message()
 {
-	LspShutdownResponse response = {
+	LspResponse{Object*} response = {
 		.jsonrpc = "2.0",
 		.id = 1,
 	};

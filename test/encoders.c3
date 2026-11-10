@@ -8,7 +8,7 @@ import std::io;
 
 fn void test_encode_initialize_response()
 {
-	LspInitializeResponse resp = {
+	LspResponse{InitializeResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 1,
 		.result = {
@@ -38,7 +38,7 @@ fn void test_encode_initialize_response()
 
 fn void test_encode_hover_response()
 {
-	LspHoverResponse resp = {
+	LspResponse{HoverResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 2,
 		.result = {
@@ -58,7 +58,7 @@ fn void test_encode_completion_response()
 			.label = "my_func",.kind = FUNCTION,.detail = "fn void()"
 		}
 	};
-	LspCompletionResponse resp = {
+	LspResponse{CompletionResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 3,
 		.result = {
@@ -79,7 +79,7 @@ fn void test_encode_completion_response_omits_absent_properties()
 		{ .label = "plain", .kind = FUNCTION },
 		{ .label = "@mac", .kind = FUNCTION, .textEdit = &edit },
 	};
-	LspCompletionResponse resp = {
+	LspResponse{CompletionResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 3,
 		.result = { .isIncomplete = false, .items = &items }
@@ -113,7 +113,7 @@ fn void test_encode_goto_definition_response()
 			}
 		}
 	};
-	LspGoToDefinitionResponse resp = {
+	LspResponse{LspLocation[]} resp = {
 		.jsonrpc = "2.0",
 		.id = 4,
 		.result = &locs
@@ -140,7 +140,7 @@ fn void test_encode_signature_help_response()
 			.activeParameter = 1
 		}
 	};
-	LspSignatureHelpResponse resp = {
+	LspResponse{SignatureHelpResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 5,
 		.result = {
@@ -163,7 +163,7 @@ fn void test_encode_references_response()
 			.range = {.start = {.line = 5,.character = 2 },.end = {.line = 5,.character = 10 } }
 		}
 	};
-	LspReferencesResponse resp = {
+	LspResponse{LspLocation[]} resp = {
 		.jsonrpc = "2.0",
 		.id = 6,
 		.result = &locs
@@ -186,7 +186,7 @@ fn void test_encode_rename_response()
 			.edits = &edits
 		}
 	};
-	LspRenameResponse resp = {
+	LspResponse{WorkspaceEdit} resp = {
 		.jsonrpc = "2.0",
 		.id = 7,
 		.result = {.documentChanges = &doc_edits }
@@ -200,7 +200,7 @@ fn void test_encode_rename_response()
 fn void test_encode_semantic_tokens_response()
 {
 	uint[5] data = { 0, 0, 6, 15, 0 };
-	LspSemanticTokensResponse resp = {
+	LspResponse{SemanticTokensResult} resp = {
 		.jsonrpc = "2.0",
 		.id = 8,
 		.result = {.data = &data }

@@ -14,23 +14,14 @@ macro @with_stdlib_project(; @body(LspProject* proj))
 		String dir = env::tget_var("C3C_STDLIB_DIR") ?? "";
 		if (dir.len > 0)
 		{
-			server::std_path = dir.copy(mem);
-			server::is_std_path_alloc = true;
+			server::set_std_path(dir);
 		}
 		else
 		{
 			server::setup_stdlib_path();
 		}
 	}
-	defer
-	{
-		if (server::is_std_path_alloc)
-		{
-			server::std_path.free(mem);
-			server::is_std_path_alloc = false;
-			server::std_path = "";
-		}
-	};
+	defer server::set_std_path("");
 	if (server::std_path.len == 0)
 	{
 		io::printn("stdlib not found (set C3C_STDLIB_DIR to c3c's lib directory); skipping");

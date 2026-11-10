@@ -179,7 +179,7 @@ fn void index_tag_decl(
 	Object* full = resolve_complete_decl(node, anon_map);
 	if (name.len > 0)
 	{
-		external_map.set(name.copy(allocator), full);
+		external_map.set(name, full);
 	}
 	if (try id = full.get_string("id"))
 	{
@@ -1394,7 +1394,7 @@ fn void parse_clang_ast_json(
 				String desugared = tinfo.desugared_type.len > 0 ? tinfo.desugared_type : tinfo.qual_type;
 				if (desugared.len > 0)
 				{
-					ctx.external_typedefs.set(td_name.copy(allocator), desugared.copy(allocator));
+					ctx.external_typedefs.set(td_name, desugared.copy(allocator));
 				}
 				bool is_indirect = desugared.contains("*") || desugared.contains("[");
 				String named_tag;

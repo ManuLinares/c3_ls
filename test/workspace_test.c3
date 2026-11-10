@@ -156,15 +156,7 @@ fn void test_standalone_file_initializes_stdlib()
 	{
 		server::setup_stdlib_path();
 	}
-	defer
-	{
-		if (server::is_std_path_alloc)
-		{
-			server::std_path.free(mem);
-			server::is_std_path_alloc = false;
-			server::std_path = "";
-		}
-	};
+	defer server::set_std_path("");
 
 	ProjectManager pm;
 	pm.init(mem);
@@ -270,4 +262,48 @@ fn void test_mixed_slash_stem_and_parent_dir()
 	test::eq(query::file_stem_from_path("/root/single.c3"), "single");
 	test::eq(query::file_stem_from_path("standalone.c3"), "standalone");
 	test::eq(query::file_stem_from_path("\\root_file.c3"), "root_file");
+}
+fn void test_project_manager_frees_registered_projects()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_project_manager_free_test")!!;
+	(void)path::rmtree(root);
+	(void)path::mkdir(root, recursive: true);
+	defer (void)path::rmtree(root);
+	file::save(root.tappend("project.json")!!, `{ "sources": [ "src/**" ] }`)!!;
+
+	ProjectManager pm;
+	pm.init(mem);
+	pm.add_workspace_folder({ .uri = (LspUri)uri::from_file_path(tmem, root).to_raw_string(tmem) });
+	assert(pm.projects.len() == 1);
+	pm.free();
+}
+
+fn void test_project_manager_frees_discovered_subprojects()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_project_manager_sub_test")!!;
+	(void)path::rmtree(root);
+	(void)path::mkdir(root.tappend("sub")!!, recursive: true);
+	defer (void)path::rmtree(root);
+	file::save(root.tappend("sub")!!.tappend("project.json")!!, `{ "sources": [ "src/**" ] }`)!!;
+
+	ProjectManager pm;
+	pm.init(mem);
+	pm.add_workspace_folder({ .uri = (LspUri)uri::from_file_path(tmem, root).to_raw_string(tmem) });
+	assert(pm.projects.len() == 1);
+	pm.free();
+}
+
+fn void test_project_manager_frees_attached_projects()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_project_manager_attach_test")!!;
+	(void)path::rmtree(root);
+	(void)path::mkdir(root, recursive: true);
+	defer (void)path::rmtree(root);
+	file::save(root.tappend("project.json")!!, `{ "sources": [ "src/**" ] }`)!!;
+
+	ProjectManager pm;
+	pm.init(mem);
+	(void)pm.get_or_create_project_for_path((String)root.tappend("main.c3")!!);
+	assert(pm.projects.len() == 1);
+	pm.free();
 }

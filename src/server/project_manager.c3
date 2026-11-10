@@ -96,7 +96,7 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 			LspProject* proj = alloc::new(self.allocator, LspProject);
 			proj.init(self.allocator);
 			config::load(proj, wf, self.allocator);
-			self.projects.set(root_str.copy(self.allocator), proj);
+			self.projects.set(root_str, proj);
 			log::info("Registered project root: %s", root_str);
 		}
 		return;
@@ -106,7 +106,7 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 	config::load(&self.default_project, wf, self.allocator);
 
 	// Shallow scan of immediate subdirectories (depth 1) for project roots
-	if (try entries = path::ls(tmem, root_p, no_dirs: false, mask: "", recursive: false, rebase: root_p))
+	if (try entries = path::ls(tmem, root_p, no_dirs: false, mask: "", recursive: false))
 	{
 		foreach (entry : entries)
 		{
@@ -125,10 +125,10 @@ fn void ProjectManager.add_workspace_folder(&self, WorkspaceFolder wf)
 					Uri sub_u = uri::from_file_path(tmem, sub_str);
 					WorkspaceFolder sub_wf = {
 						.uri = (DocumentUri)sub_u.to_raw_string(tmem),
-						.name = ((String)entry).copy(self.allocator)
+						.name = (String)entry
 					};
 					config::load(sub_proj_inst, sub_wf, self.allocator);
-					self.projects.set(sub_str.copy(self.allocator), sub_proj_inst);
+					self.projects.set(sub_str, sub_proj_inst);
 					log::info("Discovered subproject root: %s", sub_str);
 				}
 			}
@@ -195,7 +195,7 @@ fn LspProject* ProjectManager.get_or_create_project_for_path(&self, String file_
 		config::load(new_proj, wf, self.allocator);
 		new_proj.initial_process();
 
-		self.projects.set(enclosing_root.copy(self.allocator), new_proj);
+		self.projects.set(enclosing_root, new_proj);
 		log::info("Dynamically attached project root: %s", enclosing_root);
 
 		self.active_project = new_proj;
