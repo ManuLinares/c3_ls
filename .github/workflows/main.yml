@@ -28,6 +28,14 @@ jobs:
         with:
           version: nightly
 
+      # TEMP: remove if ManuLinares/c3c json_marshal is merged
+      - name: Patch stdlib with json_marshal branch
+        run: |
+          STDLIB=$(c3c compile --build-env | sed -n 's/^Stdlib *: *//p')
+          RAW=https://raw.githubusercontent.com/ManuLinares/c3c/c71e5453eab525df2e5c5f11c83f0ce0389bad9e/lib/std
+          curl -fsSL $RAW/encoding/json_marshal.c3 -o "$STDLIB/std/encoding/json_marshal.c3"
+          curl -fsSL $RAW/collections/object.c3 -o "$STDLIB/std/collections/object.c3"
+
       - name: Fetch Upstream c3c Unit Tests
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/c3lang/c3c.git ../c3c
