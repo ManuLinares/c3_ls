@@ -23,7 +23,6 @@ fn SemaContext* create(AnalyzerContext* context, Allocator alloc = tmem)
 
 	ctx.context = context;
 	ctx.allocator = alloc;
-	ctx.scope = scope::create(alloc, {});
 	ctx.imports.init(alloc);
 
 	return ctx;

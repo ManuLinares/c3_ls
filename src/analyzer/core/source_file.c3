@@ -19,12 +19,13 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.lexer = lexer;
 
 	source_file.identifiers.init(&source_file.arena);
-	foreach (tok : lexer.tokens)
+	foreach (&tok : lexer.tokens)
 	{
-		if (!tok.kind.is_identifier()) continue;
 		sz offset = tok.value.ptr - lexer.buffer.ptr;
-		source_file.identifiers.add(source_file.content[offset : tok.value.len]);
+		if (offset >= 0 && offset + tok.value.len <= lexer.buffer.len) tok.value = source_file.content[offset : tok.value.len];
+		if (tok.kind.is_identifier()) source_file.identifiers.add(tok.value);
 	}
+	lexer.buffer = source_file.content;
 
 	context.files.set(path, source_file);
 

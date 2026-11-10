@@ -203,9 +203,16 @@ fn void loop()
 	};
 }
 
+<*
+ Handles `message`. A failed request is logged and answered with a null result, so the client stops waiting.
+*>
 fn void dispatch(LspMessage* message)
 {
-	if (catch err = route(message)) log::error("%s failed: %s", message.method, err);
+	if (catch err = route(message))
+	{
+		log::error("%s failed: %s", message.method, err);
+		if (message.has_id) respond{Object*}(message, null);
+	}
 }
 
 fn void? route(LspMessage* message) @local

@@ -16,16 +16,6 @@ fn Scope* create(Allocator alloc, Range range, Scope* parent = null)
 	return scope;
 }
 
-fn void free(Scope* scope)
-{
-	if (!scope) return;
-
-	scope.children.free();
-	scope.functions.free();
-	scope.variables.free();
-	scope.types.free();
-}
-
 fn void add_variable(Scope* scope, Allocator alloc, String name, Node* node)
 {
 	VariableInfo* variable = alloc::new(alloc, VariableInfo);

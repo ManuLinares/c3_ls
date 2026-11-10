@@ -23,11 +23,6 @@ fn Registry* create(Allocator alloc)
 fn void free(AnalyzerContext* context, Registry* reg)
 {
 	if (!reg) return;
-
-	reg.functions.free();
-	reg.types.free();
-	reg.macros.free();
-	reg.attrmacros.free();
 	reg.arena.free();
 
 	alloc::free(context.allocator, reg);

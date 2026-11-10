@@ -21,8 +21,6 @@ fn Lookup* create(AnalyzerContext* context, Allocator alloc)
 fn void free(AnalyzerContext* context, Lookup* lookup)
 {
 	if (!lookup) return;
-
-	lookup.types.free();
 	lookup.arena.free();
 	alloc::free(context.allocator, lookup);
 }

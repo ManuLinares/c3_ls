@@ -7,20 +7,6 @@ import std::collections::maybe;
 import analyzer::core;
 import analyzer::lexer;
 
-fn ParseContext* create(AnalyzerContext* context)
-{
-	ParseContext* ctx = alloc::new(context.allocator, ParseContext);
-	ctx.allocator = context.allocator;
-	ctx.context = context;
-	ctx.current_section_visibility = Visibility.PUBLIC;
-	return ctx;
-}
-
-fn void free(AnalyzerContext* main_ctx, ParseContext* ctx)
-{
-	alloc::free(main_ctx.allocator, ctx);
-}
-
 struct ContextScope
 {
 	ParseContext* ctx;

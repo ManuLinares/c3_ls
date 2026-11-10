@@ -67,10 +67,8 @@ fn bool parse_and_register(AnalyzerContext* context, String buffer, String path)
 
 	SourceFile* source = source_file::create(context, lexer, path);
 
-	ParseContext* parse_ctx = parser::create(context);
-	defer parser::free(context, parse_ctx);
-
-	bool parse_ok = parser::parse(parse_ctx, source);
+	ParseContext parse_ctx = { .context = context };
+	bool parse_ok = parser::parse(&parse_ctx, source);
 	source.max_node_id = ast::next_node_id;
 
 	registry::register(context, source);
