@@ -374,6 +374,7 @@ fn void dispatch(LspMessage* message)
 				}
 
 				if (message.params.initialize.trace == TraceKind.VERBOSE) log::set_priority_all(VERBOSE);
+				if (try pid = message.params.initialize.process_id.value()) watch_parent_process(pid);
 				WorkspaceFolder[] folders = message.params.initialize.workspace_folders;
 				foreach (wf : folders)
 				{

@@ -26,5 +26,5 @@ fn void decode_message()
 	assert(actual.message.method == INITIALIZE);
 	assert(actual.message.has_id);
 	assert(actual.message.id == 42);
-	assert(actual.message.params.initialize.process_id == 123);
+	assert(actual.message.params.initialize.process_id.value()!! == 123);
 }

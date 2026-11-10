@@ -1,6 +1,7 @@
 module lsp;
 
 import std::collections::object;
+import std::collections::ref;
 import std::encoding::json;
 import uri;
 
@@ -103,7 +104,7 @@ struct InitializationOptions
 
 struct InitializeParams
 {
-	int process_id @Json("processId");
+	Nullable{int} process_id @Json("processId");
 	ClientInfo client_info @Json("clientInfo");
 	String locale;
 	DocumentUri root_uri @Json("rootUri");

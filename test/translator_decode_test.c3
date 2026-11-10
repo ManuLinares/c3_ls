@@ -3,6 +3,7 @@ module lsp::translator_decode_test @test;
 import lsp;
 import lsp::translator;
 import std::collections::object;
+import std::collections::ref;
 
 macro LspMessage decode(String json)
 {
@@ -16,7 +17,7 @@ fn void initialize_with_nulls_and_folders()
 	test::eq(msg.id, 1);
 	assert(msg.has_id);
 	InitializeParams p = msg.params.initialize;
-	test::eq(p.process_id, 0);
+	assert(p.process_id == null);
 	test::eq(p.root(tmem), "");
 	test::eq(p.trace, TraceKind.VERBOSE);
 	test::eq(p.client_info.name, "vscode");
@@ -30,6 +31,7 @@ fn void initialize_root_path_fallback_and_option_spellings()
 	test::eq(p.root(tmem), "file:///tmp/ws");
 	test::eq(p.options().compiler_path, "/bin/c3c");
 	test::eq(p.options().stdlib_path, "/lib/std");
+	test::eq(decode(`{"id":1,"method":"initialize","params":{"processId":4321}}`).params.initialize.process_id.value()!!, 4321);
 	test::eq(decode(`{"id":1,"method":"initialize","params":{"initializationOptions":{"compiler_path":"/c"}}}`).params.initialize.options().compiler_path, "/c");
 }
 
