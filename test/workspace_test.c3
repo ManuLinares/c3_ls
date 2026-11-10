@@ -65,7 +65,7 @@ fn void test_project_test_sources()
 
 	lsp::core::config::load(&proj, wf, mem);
 
-	assert(proj.config.test_sources.has_value);
+	assert(proj.config.test_sources.len > 0);
 
 	String test_file_path = string::tformat("%s/test/analyzer/statement_tests.c3", (String)cwd);
 
@@ -93,7 +93,7 @@ fn void test_project_multi_target_sources()
 	TargetConfig t2 = {};
 	String[] t2_sources = alloc::alloc_array(mem, String, 1);
 	t2_sources[0] = "extra_target/**".copy(mem);
-	t2.sources = maybe::value(t2_sources);
+	t2.sources = t2_sources;
 	proj.config.targets["secondary_target"] = t2;
 
 	proj.setup_source_groups();
@@ -250,7 +250,7 @@ fn void test_target_sources_lazy_loaded_on_file_open()
 	String[] s_sources = alloc::alloc_array(mem, String, 2);
 	s_sources[0] = "src/common/**".copy(mem);
 	s_sources[1] = "src/server/**".copy(mem);
-	server_target.sources = maybe::value(s_sources);
+	server_target.sources = s_sources;
 	proj.config.targets["server"] = server_target;
 
 	proj.setup_source_groups();

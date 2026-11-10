@@ -169,11 +169,11 @@ fn void test_process_libs_matches_manifest_provides()
 	proj.config.root_path = ((String)test_root).copy(mem);
 	String[] deps = alloc::alloc_array(mem, String, 1);
 	deps[0] = "sqlite".copy(mem);
-	proj.config.dependencies = maybe::value(deps);
+	proj.config.dependencies = deps;
 
 	String[] search_paths = alloc::alloc_array(mem, String, 1);
 	search_paths[0] = "lib".copy(mem);
-	proj.config.dependency_search_paths = maybe::value(search_paths);
+	proj.config.dependency_search_paths = search_paths;
 
 	// Process libraries and update
 	proj.process_libs();

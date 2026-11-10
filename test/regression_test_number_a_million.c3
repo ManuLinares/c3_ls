@@ -155,33 +155,6 @@ fn void main() {
 }
 
 <*
- Regression Test 6:
- Verifies that `dependency-search-paths` defaults to `["lib"]` when omitted from project.json.
-*>
-fn void test_default_dependency_search_paths()
-{
-	String project_json = `{"sources": ["src/**"], "dependencies": ["my_lib"]}`;
-	Object* dom = json::tparse(project_json)!!;
-
-	ProjectConfig conf;
-	conf.targets.init(tmem);
-	if (try search_paths = config::parse_string_array(tmem, dom, "dependency-search-paths"))
-	{
-		conf.dependency_search_paths = maybe::value(search_paths);
-	}
-	else
-	{
-		String[] default_paths = alloc::alloc_array(tmem, String, 1);
-		default_paths[0] = "lib".copy(tmem);
-		conf.dependency_search_paths = maybe::value(default_paths);
-	}
-
-	assert(conf.dependency_search_paths.has_value);
-	assert(conf.dependency_search_paths.value.len == 1);
-	assert(conf.dependency_search_paths.value[0] == "lib");
-}
-
-<*
  Regression Test 7:
  Verifies that typing incomplete `module` statements does not panic or crash.
 *>

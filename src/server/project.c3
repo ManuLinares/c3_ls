@@ -56,7 +56,6 @@ struct LspProject
 	List{FileInput} process_queue;
 	LspWorkspace workspace;
 	ProjectConfig config;
-	HashMap{String, ManifestConfig} manifests;
 	Allocator allocator;
 	List{SourceGroup} source_groups;
 	bool is_initialized;
@@ -83,11 +82,6 @@ fn void LspProject.free(&self)
 	self.files.free();
 	self.process_queue.free();
 	self.config.free(self.allocator);
-	self.manifests.@each(; name, conf)
-	{
-		conf.free(self.allocator);
-	};
-	self.manifests.free();
 	self.source_groups.free();
 }
 
@@ -388,23 +382,13 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 
 fn bool LspProject.is_test_source_file(&self, String file_path)
 {
-	if (try test_srcs = self.config.test_sources.get())
-	{
-		if (self.file_matches_patterns(file_path, test_srcs)) return true;
-	}
+	if (self.file_matches_patterns(file_path, self.config.test_sources)) return true;
 
 	if (self.config.targets.is_initialized())
 	{
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			if (try test_srcs = target_conf.test_sources_override.get())
-			{
-				if (self.file_matches_patterns(file_path, test_srcs)) return true;
-			}
-			else if (try test_srcs = target_conf.test_sources.get())
-			{
-				if (self.file_matches_patterns(file_path, test_srcs)) return true;
-			}
+			if (self.file_matches_patterns(file_path, target_conf.own_test_sources())) return true;
 		};
 	}
 
@@ -417,40 +401,13 @@ fn String LspProject.get_c3c_target(&self, String file_path)
 	{
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			if (try feats = target_conf.features_override.get())
-			{
-				foreach (f : feats)
-				{
-					if (f == "LSP_TARGET") return target_name;
-				}
-			}
-			else if (try feats = target_conf.features.get())
-			{
-				foreach (f : feats)
-				{
-					if (f == "LSP_TARGET") return target_name;
-				}
-			}
+			if (array::contains(target_conf.own_features(), "LSP_TARGET")) return target_name;
 		};
 
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			if (try srcs = target_conf.sources_override.get())
-			{
-				if (self.file_matches_patterns(file_path, srcs)) return target_name;
-			}
-			else if (try srcs = target_conf.sources.get())
-			{
-				if (self.file_matches_patterns(file_path, srcs)) return target_name;
-			}
-			if (try test_srcs = target_conf.test_sources_override.get())
-			{
-				if (self.file_matches_patterns(file_path, test_srcs)) return target_name;
-			}
-			else if (try test_srcs = target_conf.test_sources.get())
-			{
-				if (self.file_matches_patterns(file_path, test_srcs)) return target_name;
-			}
+			if (self.file_matches_patterns(file_path, target_conf.own_sources())) return target_name;
+			if (self.file_matches_patterns(file_path, target_conf.own_test_sources())) return target_name;
 		};
 	}
 
@@ -629,18 +586,6 @@ fn void LspProject.add_source_group(&self, String name, String[] patterns) @inli
 	self.source_groups.push({ .name = name, .patterns = patterns, .is_loaded = false });
 }
 
-macro void LspProject.add_group_if_present(&self, name, maybe_override, maybe_default)
-{
-	if (try p = maybe_override.get())
-	{
-		self.add_source_group(name, p);
-	}
-	else if (try p = maybe_default.get())
-	{
-		self.add_source_group(name, p);
-	}
-}
-
 fn void LspProject.setup_source_groups(&self)
 {
 	self.source_groups.clear();
@@ -650,17 +595,17 @@ fn void LspProject.setup_source_groups(&self)
 		self.add_source_group("sources", self.config.sources);
 	}
 
-	if (try test_srcs = self.config.test_sources.get())
+	if (self.config.test_sources.len > 0)
 	{
-		self.add_source_group("test-sources", test_srcs);
+		self.add_source_group("test-sources", self.config.test_sources);
 	}
 
 	if (self.config.targets.is_initialized())
 	{
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			self.add_group_if_present(target_name, target_conf.sources_override, target_conf.sources);
-			self.add_group_if_present(target_name, target_conf.test_sources_override, target_conf.test_sources);
+			if (target_conf.own_sources().len > 0) self.add_source_group(target_name, target_conf.own_sources());
+			if (target_conf.own_test_sources().len > 0) self.add_source_group(target_name, target_conf.own_test_sources());
 		};
 	}
 }
@@ -817,13 +762,13 @@ fn String[] LspProject.all_dependencies(&self)
 {
 	List{String} out;
 	out.tinit();
-	push_unique_all(&out, self.config.dependencies.get() ?? {});
+	push_unique_all(&out, self.config.dependencies);
 	if (self.config.targets.is_initialized())
 	{
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			push_unique_all(&out, target_conf.dependencies_override.get() ?? {});
-			push_unique_all(&out, target_conf.dependencies.get() ?? {});
+			push_unique_all(&out, target_conf.dependencies_override);
+			push_unique_all(&out, target_conf.dependencies);
 		};
 	}
 	return out.array_view();
@@ -836,13 +781,13 @@ fn String[] LspProject.all_dependency_search_paths(&self)
 {
 	List{String} out;
 	out.tinit();
-	push_unique_all(&out, self.config.dependency_search_paths.get() ?? (String[]){ "lib" });
+	push_unique_all(&out, self.config.dependency_search_paths.len > 0 ? self.config.dependency_search_paths : (String[]){ "lib" });
 	if (self.config.targets.is_initialized())
 	{
 		self.config.targets.@each(; target_name, target_conf)
 		{
-			push_unique_all(&out, target_conf.dependency_search_paths_override.get() ?? {});
-			push_unique_all(&out, target_conf.dependency_search_paths.get() ?? {});
+			push_unique_all(&out, target_conf.dependency_search_paths_override);
+			push_unique_all(&out, target_conf.dependency_search_paths);
 		};
 	}
 	return out.array_view();
@@ -1006,11 +951,6 @@ fn String[]? libs_installed(String dir) @local
 	return paths.to_tarray();
 }
 
-struct ManifestProvides @local
-{
-	String provides;
-}
-
 <*
  Reads the manifest of an installed lib. Handles both the directory layout and
  the zipped `.c3l` archive layout that c3c accepts.
@@ -1030,5 +970,5 @@ fn ManifestConfig? load_manifest(String lib_path) @private
 		data = (String)archive.read_file_all(tmem, config::MANIFEST_CONFIG_NAME)!;
 	}
 
-	return { .provides = json::unmarshal(tmem, data, ManifestProvides)!.provides };
+	return json::unmarshal(tmem, data, ManifestConfig)!;
 }

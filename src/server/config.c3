@@ -1,7 +1,6 @@
 module lsp::core::config;
 
 import std::collections::map;
-import std::collections::maybe;
 import std::collections::object;
 import std::encoding::json;
 import std::io;
@@ -11,74 +10,49 @@ import uri;
 const String PROJECT_CONFIG_NAME = "project.json";
 const String MANIFEST_CONFIG_NAME = "manifest.json";
 
-macro void free_maybe_string_array(Allocator allocator, maybe_arr)
-{
-	if (try val = maybe_arr.get())
-	{
-		foreach (s : val) s.free(allocator);
-		alloc::free(allocator, val);
-	}
-}
-
 struct TargetConfig
 {
-	Maybe{String[]} sources;
-	Maybe{String[]} sources_override;
-	Maybe{String[]} test_sources;
-	Maybe{String[]} test_sources_override;
-	Maybe{String[]} features;
-	Maybe{String[]} features_override;
-	Maybe{String[]} link_args;
-	Maybe{String[]} link_args_override;
-	Maybe{String[]} dependencies;
-	Maybe{String[]} dependencies_override;
-	Maybe{String[]} dependency_search_paths;
-	Maybe{String[]} dependency_search_paths_override;
-	Maybe{String[]} linked_libraries;
-	Maybe{String[]} linked_libraries_override;
+	String[] sources;
+	String[] sources_override @Json("sources-override");
+	String[] test_sources @Json("test-sources");
+	String[] test_sources_override @Json("test-sources-override");
+	String[] features;
+	String[] features_override @Json("features-override");
+	String[] dependencies;
+	String[] dependencies_override @Json("dependencies-override");
+	String[] dependency_search_paths @Json("dependency-search-paths");
+	String[] dependency_search_paths_override @Json("dependency-search-paths-override");
 }
 
-fn void TargetConfig.free(&self, Allocator allocator)
-{
-	free_maybe_string_array(allocator, self.sources);
-	free_maybe_string_array(allocator, self.sources_override);
-	free_maybe_string_array(allocator, self.test_sources);
-	free_maybe_string_array(allocator, self.test_sources_override);
-	free_maybe_string_array(allocator, self.features);
-	free_maybe_string_array(allocator, self.features_override);
-	free_maybe_string_array(allocator, self.link_args);
-	free_maybe_string_array(allocator, self.link_args_override);
-	free_maybe_string_array(allocator, self.dependencies);
-	free_maybe_string_array(allocator, self.dependencies_override);
-	free_maybe_string_array(allocator, self.dependency_search_paths);
-	free_maybe_string_array(allocator, self.dependency_search_paths_override);
-	free_maybe_string_array(allocator, self.linked_libraries);
-	free_maybe_string_array(allocator, self.linked_libraries_override);
-}
+fn void TargetConfig.free(&self, Allocator allocator) => object::recursively_free{TargetConfig}(allocator, self);
+
+<*
+ The target's sources, test sources and features: its `-override` list if set, else its own list.
+*>
+fn String[] TargetConfig.own_sources(&self) => self.sources_override.len > 0 ? self.sources_override : self.sources;
+fn String[] TargetConfig.own_test_sources(&self) => self.test_sources_override.len > 0 ? self.test_sources_override : self.test_sources;
+fn String[] TargetConfig.own_features(&self) => self.features_override.len > 0 ? self.features_override : self.features;
 
 struct ProjectConfig
 {
 	String root_path;
 	String[] sources;
-	Maybe{String[]} test_sources;
-	Maybe{String[]} dependency_search_paths;
-	Maybe{String[]} dependencies;
-	Maybe{String[]} features;
+	String[] test_sources;
+	String[] dependency_search_paths;
+	String[] dependencies;
+	String[] features;
 	HashMap{String, TargetConfig} targets;
+}
+
+fn void free_lists(Allocator allocator, String[][] lists) @local
+{
+	foreach (list : lists) object::recursively_free{String[]}(allocator, &list);
 }
 
 fn void ProjectConfig.free(&self, Allocator allocator)
 {
-	if (self.root_path.len > 0) self.root_path.free(allocator);
-	if (self.sources.len > 0)
-	{
-		foreach (s : self.sources) s.free(allocator);
-		alloc::free(allocator, self.sources);
-	}
-	free_maybe_string_array(allocator, self.test_sources);
-	free_maybe_string_array(allocator, self.dependency_search_paths);
-	free_maybe_string_array(allocator, self.dependencies);
-	free_maybe_string_array(allocator, self.features);
+	self.root_path.free(allocator);
+	free_lists(allocator, { self.sources, self.test_sources, self.dependency_search_paths, self.dependencies, self.features });
 	if (self.targets.is_initialized())
 	{
 		self.targets.@each(; name, conf)
@@ -86,66 +60,26 @@ fn void ProjectConfig.free(&self, Allocator allocator)
 			conf.free(allocator);
 		};
 	}
-
 	self.targets.free();
+}
+
+<*
+ The top level of project.json. Targets are an object keyed by name, which json::unmarshal cannot decode
+ into a map, so each one is decoded from its Object*.
+*>
+struct ProjectFile @local
+{
+	String[] sources;
+	String[] test_sources @Json("test-sources");
+	String[] dependency_search_paths @Json("dependency-search-paths");
+	String[] dependencies;
+	String[] features;
+	Object* targets;
 }
 
 struct ManifestConfig
 {
 	String provides;
-	String[] sources;
-	HashMap{String, TargetConfig} targets;
-}
-
-fn void ManifestConfig.free(&self, Allocator alloc)
-{
-	if (self.provides.len > 0) self.provides.free(alloc);
-	if (self.sources.len > 0)
-	{
-		foreach (s : self.sources) s.free(alloc);
-		alloc::free(alloc, self.sources);
-	}
-
-	self.targets.@each(; name, conf)
-	{
-		conf.free(alloc);
-	};
-
-	self.targets.free();
-}
-
-fn String[]? parse_string_array(Allocator alloc, Object* obj, String key)
-{
-	Object* arr_obj = obj.get(key) ?? null;
-	if (!arr_obj || !arr_obj.is_array() || arr_obj.len() == 0) return NOT_FOUND~;
-
-	sz count = arr_obj.len();
-	String[] result = alloc::alloc_array(alloc, String, count);
-	for (sz i = 0; i < count; i++)
-	{
-		result[i] = (arr_obj.get_string_at(i) ?? "").copy(alloc);
-	}
-	return result;
-}
-
-fn TargetConfig parse_target(Allocator alloc, Object* target_obj)
-{
-	TargetConfig conf = {};
-	if (try s = parse_string_array(alloc, target_obj, "sources")) conf.sources = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "sources-override")) conf.sources_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "test-sources")) conf.test_sources = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "test-sources-override")) conf.test_sources_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "features")) conf.features = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "features-override")) conf.features_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "dependencies")) conf.dependencies = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "dependencies-override")) conf.dependencies_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "dependency-search-paths")) conf.dependency_search_paths = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "dependency-search-paths-override")) conf.dependency_search_paths_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "linked-libraries")) conf.linked_libraries = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "linked-libraries-override")) conf.linked_libraries_override = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "link-args")) conf.link_args = maybe::value(s);
-	if (try s = parse_string_array(alloc, target_obj, "link-args-override")) conf.link_args_override = maybe::value(s);
-	return conf;
 }
 
 fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
@@ -187,69 +121,53 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 		return;
 	}
 
-	Object*? dom_parsed = json::tparse(json_content);
-	if (catch dom_parsed)
+	ProjectFile? parsed = json::unmarshal(allocator, json_content, ProjectFile);
+	if (catch err = parsed)
 	{
-		log::error("Failed to parse %s JSON", filename);
+		log::error("Failed to parse %s (%s)", filename, err);
 		return;
 	}
-	if (!dom_parsed)
-	{
-		log::error("Failed to parse %s JSON", filename);
-		return;
-	}
-	Object* dom = dom_parsed;
+	ProjectFile file = parsed;
+	defer if (file.targets) file.targets.free();
 
-	if (found_project)
+	if (!found_project)
+	{
+		log::info("Found manifest in root.");
+		lsp_project.config.sources = file.sources;
+		free_lists(allocator, { file.test_sources, file.dependency_search_paths, file.dependencies, file.features });
+	}
+	else
 	{
 		log::info("Found project.json at (%s)", config_path);
-		ProjectConfig conf;
+		if (file.dependency_search_paths.len == 0)
+		{
+			file.dependency_search_paths = alloc::new_array(allocator, String, 1);
+			file.dependency_search_paths[0] = "lib".copy(allocator);
+		}
+		ProjectConfig conf = {
+			.sources = file.sources,
+			.test_sources = file.test_sources,
+			.dependency_search_paths = file.dependency_search_paths,
+			.dependencies = file.dependencies,
+			.features = file.features,
+		};
 		conf.targets.init(allocator);
-		if (try srcs = parse_string_array(allocator, dom, "sources"))
+		if (file.targets && file.targets.is_map())
 		{
-			conf.sources = srcs;
-		}
-		if (try test_srcs = parse_string_array(allocator, dom, "test-sources"))
-		{
-			conf.test_sources = maybe::value(test_srcs);
-		}
-		if (try search_paths = parse_string_array(allocator, dom, "dependency-search-paths"))
-		{
-			conf.dependency_search_paths = maybe::value(search_paths);
-		}
-		else
-		{
-			String[] default_paths = alloc::alloc_array(allocator, String, 1);
-			default_paths[0] = "lib".copy(allocator);
-			conf.dependency_search_paths = maybe::value(default_paths);
-		}
-		if (try deps = parse_string_array(allocator, dom, "dependencies"))
-		{
-			conf.dependencies = maybe::value(deps);
-		}
-		if (try feats = parse_string_array(allocator, dom, "features"))
-		{
-			conf.features = maybe::value(feats);
-		}
-		if (try targets_obj = dom.get("targets"))
-		{
-			targets_obj.@each_entry(; target_name, target_val)
+			file.targets.@each_entry(; target_name, target_val)
 			{
-				if (target_val.is_map())
+				TargetConfig? target = json::unmarshal(allocator, json::marshal(tmem, target_val), TargetConfig);
+				if (catch err = target)
 				{
-					conf.targets[target_name] = parse_target(allocator, target_val);
+					log::error("Failed to parse target '%s' in %s (%s)", target_name, filename, err);
+				}
+				else
+				{
+					conf.targets[target_name] = target;
 				}
 			};
 		}
 		lsp_project.config = conf;
-	}
-	else
-	{
-		log::info("Found manifest in root.");
-		if (try srcs = parse_string_array(allocator, dom, "sources"))
-		{
-			lsp_project.config.sources = srcs;
-		}
 	}
 
 	lsp_project.config.root_path = root_path.copy(allocator);

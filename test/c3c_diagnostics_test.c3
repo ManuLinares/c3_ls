@@ -128,7 +128,7 @@ fn void test_c3c_target_and_command_selection()
 
 	String[] test_srcs = alloc::alloc_array(mem, String, 1);
 	test_srcs[0] = "test/**".copy(mem);
-	proj.config.test_sources = maybe::value(test_srcs);
+	proj.config.test_sources = test_srcs;
 
 	test::eq(proj.is_test_source_file("/home/mb/project/src/app.c3"), false);
 	test::eq(proj.is_test_source_file("/home/mb/project/test/app_test.c3"), true);
@@ -140,13 +140,13 @@ fn void test_c3c_target_and_command_selection()
 	TargetConfig t1 = {};
 	String[] t1_feats = alloc::alloc_array(mem, String, 1);
 	t1_feats[0] = "OTHER_FEAT".copy(mem);
-	t1.features = maybe::value(t1_feats);
+	t1.features = t1_feats;
 	proj.config.targets["t1"] = t1;
 
 	TargetConfig t2 = {};
 	String[] t2_feats = alloc::alloc_array(mem, String, 1);
 	t2_feats[0] = "LSP_TARGET".copy(mem);
-	t2.features = maybe::value(t2_feats);
+	t2.features = t2_feats;
 	proj.config.targets["t2_target"] = t2;
 
 	test::eq(proj.get_c3c_target("/home/mb/project/src/app.c3"), "t2_target");
