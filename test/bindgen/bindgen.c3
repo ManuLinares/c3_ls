@@ -4196,6 +4196,23 @@ fn void test_simd_vector_types_map_to_simd_typedefs()
 	test::eq(code.index_of("typedef SimdFloatx4") ?? 0, code.rindex_of("typedef SimdFloatx4") ?? 1);
 }
 
+fn void test_translation_unit_init_and_free_every_container()
+{
+	CTranslationUnit tu;
+	tu.init(mem);
+	$foreach $m : CTranslationUnit::members:
+		$if $defined(tu.$m.is_initialized()):
+			assert(tu.$m.is_initialized());
+			$if $defined(tu.$m.push({})):
+				tu.$m.push({});
+			$else
+				tu.$m.add("x");
+			$endif
+		$endif
+	$endforeach
+	tu.free();
+}
+
 module lsp::bindgen_test::posix_signal;
 
 extern fn uint alarm(uint seconds) @cname("alarm");

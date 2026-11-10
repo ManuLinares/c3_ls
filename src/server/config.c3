@@ -24,8 +24,6 @@ struct TargetConfig
 	String[] dependency_search_paths_override @Json("dependency-search-paths-override");
 }
 
-fn void TargetConfig.free(&self, Allocator allocator) => object::recursively_free{TargetConfig}(allocator, self);
-
 <*
  The target's sources, test sources and features: its `-override` list if set, else its own list.
 *>
@@ -44,24 +42,7 @@ struct ProjectConfig
 	HashMap{String, TargetConfig} targets;
 }
 
-fn void free_lists(Allocator allocator, String[][] lists) @local
-{
-	foreach (list : lists) object::recursively_free{String[]}(allocator, &list);
-}
-
-fn void ProjectConfig.free(&self, Allocator allocator)
-{
-	self.root_path.free(allocator);
-	free_lists(allocator, { self.sources, self.test_sources, self.dependency_search_paths, self.dependencies, self.features });
-	if (self.targets.is_initialized())
-	{
-		self.targets.@each(; name, conf)
-		{
-			conf.free(allocator);
-		};
-	}
-	self.targets.free();
-}
+fn void ProjectConfig.free(&self, Allocator allocator) => object::recursively_free{ProjectConfig}(allocator, self);
 
 <*
  The top level of project.json. Targets are an object keyed by name, which json::unmarshal cannot decode
@@ -128,13 +109,14 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 		return;
 	}
 	ProjectFile file = parsed;
-	defer if (file.targets) file.targets.free();
+	defer object::recursively_free{ProjectFile}(allocator, &file);
 
+	ProjectConfig conf;
 	if (!found_project)
 	{
 		log::info("Found manifest in root.");
-		lsp_project.config.sources = file.sources;
-		free_lists(allocator, { file.test_sources, file.dependency_search_paths, file.dependencies, file.features });
+		conf.sources = file.sources;
+		file.sources = {};
 	}
 	else
 	{
@@ -144,13 +126,14 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 			file.dependency_search_paths = alloc::new_array(allocator, String, 1);
 			file.dependency_search_paths[0] = "lib".copy(allocator);
 		}
-		ProjectConfig conf = {
+		conf = {
 			.sources = file.sources,
 			.test_sources = file.test_sources,
 			.dependency_search_paths = file.dependency_search_paths,
 			.dependencies = file.dependencies,
 			.features = file.features,
 		};
+		file = { .targets = file.targets };
 		conf.targets.init(allocator);
 		if (file.targets && file.targets.is_map())
 		{
@@ -167,9 +150,10 @@ fn void load(LspProject* lsp_project, WorkspaceFolder wf, Allocator allocator)
 				}
 			};
 		}
-		lsp_project.config = conf;
 	}
 
-	lsp_project.config.root_path = root_path.copy(allocator);
-	log::info("Set config.root_path: %s", lsp_project.config.root_path);
+	conf.root_path = root_path.copy(allocator);
+	lsp_project.config.free(allocator);
+	lsp_project.config = conf;
+	log::info("Set config.root_path: %s", conf.root_path);
 }

@@ -75,3 +75,18 @@ fn void explicit_dependency_search_paths_replace_the_default()
 	test::eq(proj.config.dependency_search_paths.len, 2);
 	test::eq(proj.config.dependency_search_paths[1], "more");
 }
+
+fn void reloading_config_frees_previous_one()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_project_config_reload_test")!!;
+	(void)path::rmtree(root);
+	(void)path::mkdir(root, recursive: true);
+	defer (void)path::rmtree(root);
+	file::save(root.tappend("project.json")!!, `{ "sources": [ "src/**" ], "features": [ "F" ], "targets": { "app": { "sources-override": [ "app/**" ] } } }`)!!;
+
+	LspProject proj;
+	WorkspaceFolder wf = { .uri = (LspUri)uri::from_file_path(tmem, root).to_raw_string(tmem) };
+	config::load(&proj, wf, mem);
+	config::load(&proj, wf, mem);
+	proj.config.free(mem);
+}

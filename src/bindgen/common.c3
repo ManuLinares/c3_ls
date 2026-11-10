@@ -164,27 +164,38 @@ struct CTranslationUnit
 	bool ms_bitfields; // Bitfields are laid out as MSVC does, which Windows targets use.
 }
 
-fn void CTranslationUnit.init(&self, Allocator allocator)
+macro bool @is_container($Type) @local
 {
-	self.constants.init(allocator);
-	self.typedefs.init(allocator);
-	self.enums.init(allocator);
-	self.structs.init(allocator);
-	self.variables.init(allocator);
-	self.functions.init(allocator);
-	self.underscored_tags.init(allocator);
+	return $Type::is_generic(List) ||| $Type::is_generic(HashMap) ||| $Type::is_generic(HashSet);
 }
 
-fn void CTranslationUnit.free(&self)
+<*
+ Initializes every List, HashMap and HashSet member of `*self`.
+*>
+macro void @init_containers(self, Allocator allocator)
 {
-	self.constants.free();
-	self.typedefs.free();
-	self.enums.free();
-	self.structs.free();
-	self.variables.free();
-	self.functions.free();
-	self.underscored_tags.free();
+	$foreach $m : $Typeof(*self)::members:
+		$if @is_container($m.type):
+			self.$m.init(allocator);
+		$endif
+	$endforeach
 }
+
+<*
+ Frees every List, HashMap and HashSet member of `*self`.
+*>
+macro void @free_containers(self)
+{
+	$foreach $m : $Typeof(*self)::members:
+		$if @is_container($m.type):
+			self.$m.free();
+		$endif
+	$endforeach
+}
+
+fn void CTranslationUnit.init(&self, Allocator allocator) => @init_containers(self, allocator);
+
+fn void CTranslationUnit.free(&self) => @free_containers(self);
 
 <*
  Adds the C3 names of the selected declaration kinds to `names`.

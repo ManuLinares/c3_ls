@@ -262,31 +262,10 @@ struct ParseContext @local
 fn void ParseContext.init(&self, Allocator allocator, CTranslationUnit* tu, BindgenOptions options)
 {
 	*self = { .allocator = allocator, .tu = tu, .options = options };
-	self.seen_names.init(allocator);
-	self.target_types.init(allocator);
-	self.function_types.init(allocator);
-	self.anon_records.init(allocator);
-	self.anon_enums.init(allocator);
-	self.unnamed_record_names.init(allocator);
-	self.external_typedefs.init(allocator);
-	self.external_records.init(allocator);
-	self.external_enums.init(allocator);
-	self.used_external_types.init(allocator);
+	@init_containers(self, allocator);
 }
 
-fn void ParseContext.free(&self)
-{
-	self.seen_names.free();
-	self.target_types.free();
-	self.function_types.free();
-	self.anon_records.free();
-	self.anon_enums.free();
-	self.unnamed_record_names.free();
-	self.external_typedefs.free();
-	self.external_records.free();
-	self.external_enums.free();
-	self.used_external_types.free();
-}
+fn void ParseContext.free(&self) => @free_containers(self);
 
 <*
  Formats a C3 function signature directly from a Clang FunctionProtoType AST node.

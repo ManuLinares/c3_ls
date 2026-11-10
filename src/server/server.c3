@@ -292,482 +292,33 @@ fn void dispatch(LspMessage* message)
 {
 	switch (message.method)
 	{
-		case INITIALIZE:
-			{
-				LspInitializeResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = {
-						.capabilities = {
-							.textDocumentSync = {
-								.openClose = true,
-								.change = FULL,
-								.save = { .includeText = false },
-							},
-							.completionProvider = {
-								.triggerCharacters = { ".", ":", "@", " " },
-								.resolveProvider = true,
-								.completionItem = {.labelDetailSupport = true }
-							},
-							.hoverProvider = true,
-							.definitionProvider = true,
-							.signatureHelpProvider = {
-								.triggerCharacters = { "(", "," },
-								.retriggerCharacters = { "," }
-							},
-							.referencesProvider = true,
-							.renameProvider = {.prepareProvider = true },
-							.semanticTokensProvider = {
-								.legend = {
-									.tokenTypes = semantic_tokens::get_token_types(),
-									.tokenModifiers = semantic_tokens::get_token_modifiers()
-								},
-								.full = true
-							},
-							.documentSymbolProvider = true,
-							.workspaceSymbolProvider = true,
-							.inlayHintProvider = true,
-							.foldingRangeProvider = true,
-							.documentFormattingProvider = true,
-							.documentRangeFormattingProvider = true,
-							.codeActionProvider = true,
-							.executeCommandProvider = {
-								.commands = { code_actions::CMD_GENERATE_BINDINGS }
-							}
-						},
-						.serverInfo = {
-							.name = "c3_ls",
-							.version = env::PROJECT_VERSION,
-						},
-					},
-				};
-				io_handler::write(translator::encode(resp, tmem));
-
-				InitializationOptions init_opts = message.params.initialize.options();
-				{
-					if (!cli_compiler_path_set && init_opts.compiler_path.len > 0)
-					{
-						if (is_compiler_path_alloc) compiler_path.free(mem);
-						compiler_path = init_opts.compiler_path.copy(mem);
-						is_compiler_path_alloc = true;
-						log::info("Updated compiler_path from initializationOptions: %s", compiler_path);
-						if (!cli_std_path_set && init_opts.stdlib_path.len == 0)
-						{
-							if (is_std_path_alloc)
-							{
-								std_path.free(mem);
-								is_std_path_alloc = false;
-							}
-							setup_stdlib_path();
-						}
-					}
-					if (!cli_std_path_set && init_opts.stdlib_path.len > 0)
-					{
-						if (is_std_path_alloc)
-						{
-							std_path.free(mem);
-						}
-						std_path = init_opts.stdlib_path.trim_right("/\\").copy(mem);
-						is_std_path_alloc = true;
-						log::info("Updated std_path from initializationOptions: %s", std_path);
-					}
-				}
-
-				if (message.params.initialize.trace == TraceKind.VERBOSE) log::set_priority_all(VERBOSE);
-				if (try pid = message.params.initialize.process_id.value()) watch_parent_process(pid);
-				WorkspaceFolder[] folders = message.params.initialize.workspace_folders;
-				foreach (wf : folders)
-				{
-					project_manager.add_workspace_folder(wf);
-				}
-				DocumentUri root = message.params.initialize.root(tmem);
-				if (folders.len == 0 && root.len > 0)
-				{
-					project_manager.add_workspace_folder({ .uri = root });
-				}
-			}
-
+		case INITIALIZE: on_initialize(message, &message.params.initialize);
 		case INITIALIZED:
 			log::info("received Initialized");
 			is_ready = true;
 			project_manager.initial_process_all();
-
-		case DID_OPEN:
-			{
-				LspProject* proj = get_project_for_raw_uri(message.params.did_open.document.uri);
-				proj.open_file(message.params.did_open.document);
-			}
-
-		case DID_CHANGE:
-			{
-				LspProject* proj = get_project_for_raw_uri(message.params.did_change.document.uri);
-				proj.change_file(message.params.did_change);
-			}
-
-		case DID_CLOSE:
-			{
-				LspProject* proj = get_project_for_raw_uri(message.params.did_close.document.uri);
-				proj.close_document(message.params.did_close.document.uri);
-			}
-
-		case DID_SAVE:
-			{
-				LspProject* proj = get_project_for_raw_uri(message.params.did_save.document.uri);
-				proj.save_file(message.params.did_save.document.uri);
-			}
-
-		case COMPLETION:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.completion.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				CompletionItem[]? items = completion::resolve(proj, file_uri, message.params.completion.position);
-				LspCompletionResponse res = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = {
-						.isIncomplete = true,
-						.items = items ?? {},
-					}
-				};
-				io_handler::write(translator::encode(res, tmem));
-			}
-
-		case COMPLETION_RESOLVE:
-			{
-				CompletionItem item = message.params.completion_resolve;
-				completion::resolve_item(project_manager.get_active_project(), &item);
-				LspCompletionResolveResponse res = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = item
-				};
-				io_handler::write(translator::encode(res, tmem));
-			}
-
-		case HOVER:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.hover.document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				String? h = hover::hover(proj, file_uri, message.params.hover.position);
-				LspHoverResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = {
-						.contents = {
-							.kind = MARKDOWN,
-							.value = h ?? "",
-						},
-					}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case DEFINITION:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.definition.document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				LspLocation[]? defs = definition::goto_definition(proj, file_uri, message.params.definition.position);
-				LspGoToDefinitionResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = defs ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case HELP:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.signature_help.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				SignatureHelpResult? help_res = signature_help::signature_help(proj, file_uri, message.params.signature_help.position);
-				LspSignatureHelpResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = help_res ??
-					{
-						.signatures = {}
-					}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case REFERENCES:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.references.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				LspLocation[]? refs = references::find_references(proj, file_uri, message.params.references.position, message.params.references.context);
-				LspReferencesResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = refs ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case PREPARE_RENAME:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.prepare_rename.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				LspRange? prep_res = rename::prepare_rename(proj, file_uri, message.params.prepare_rename.position);
-				if (catch prep_res)
-				{
-					LspShutdownResponse null_resp = {
-						.jsonrpc = message.rpc,
-						.id = message.has_id ? message.id : -1,
-						.result = null
-					};
-					io_handler::write(translator::encode(null_resp, tmem));
-					return;
-				}
-				LspPrepareRenameResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = prep_res
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case RENAME:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.rename.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				WorkspaceEdit? edit_res = rename::rename(proj, file_uri, message.params.rename.position, message.params.rename.newName);
-				LspRenameResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = edit_res ??
-					{
-						.documentChanges = {}
-					}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case FULL:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.semantic_tokens.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				SemanticTokensResult? tokens_res = semantic_tokens::compute_semantic_tokens(proj, file_uri);
-				LspSemanticTokensResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = tokens_res ??
-					{
-						.data = {}
-					}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case SYMBOL:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.document_symbol.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				SymbolInformation[]? syms = symbols::get_document_symbols(proj, file_uri);
-				LspDocumentSymbolResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = syms ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case WS_SYMBOL:
-			{
-				List{SymbolInformation} all_syms;
-				all_syms.tinit();
-				if (try syms = symbols::query_workspace_symbols(&project_manager.default_project, message.params.workspace_symbol.query))
-				{
-					all_syms.push_all(syms);
-				}
-				project_manager.projects.@each(; root, proj)
-				{
-					if (try syms = symbols::query_workspace_symbols(proj, message.params.workspace_symbol.query))
-					{
-						all_syms.push_all(syms);
-					}
-				};
-				LspWorkspaceSymbolResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = all_syms.to_tarray()
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case INLAY_HINT:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.inlay_hint.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				InlayHint[]? hints = inlay_hints::get_inlay_hints(proj, file_uri, message.params.inlay_hint.range);
-				LspInlayHintResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = hints ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case FOLDING_RANGE:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.folding_range.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				FoldingRange[]? ranges = folding_ranges::get_folding_ranges(proj, file_uri);
-				LspFoldingRangeResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = ranges ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case FORMATTING:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.formatting.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				TextEdit[]? edits = formatting::format_document(proj, file_uri, message.params.formatting.options);
-				LspFormattingResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = edits ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case RANGE_FORMATTING:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.range_formatting.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				TextEdit[]? edits = formatting::format_range(proj, file_uri, message.params.range_formatting.range, message.params.range_formatting.options);
-				LspFormattingResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = edits ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case CODE_ACTION:
-			{
-				Uri? file_uri = uri::parse(tmem, message.params.code_action.text_document.uri);
-				if (catch file_uri) return;
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
-				CodeAction[]? actions = code_actions::get_code_actions(proj, file_uri, message.params.code_action);
-				LspCodeActionResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = actions ?? {}
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case WS_EXECUTE_COMMAND:
-			{
-				String cmd_name = message.params.execute_command.command;
-				if (cmd_name == code_actions::CMD_GENERATE_BINDINGS)
-				{
-					String[] args = message.params.execute_command.arguments;
-					if (args.len >= 3)
-					{
-						String header_path = args[0];
-						String module_name = args[1];
-						String output_path = args[2];
-
-						sz last_slash = output_path.rindex_of_char('/') ?? output_path.rindex_of_char('\\') ?? (sz)0;
-						if (last_slash > 0)
-						{
-							String dir = output_path[:last_slash];
-							if (!file::exists(dir))
-							{
-								(void)path::mkdir(dir, recursive: true);
-							}
-						}
-
-						bindgen::BindgenOptions opts = {
-							.header_path = header_path,
-							.output_path = output_path,
-							.module_name = module_name,
-							.type_prefix = "",
-							.strip_func_prefix = "",
-							.clang_path = "clang"
-						};
-
-						int run_res = bindgen::run_bindgen(opts, is_cli: false);
-						if (run_res == 0)
-						{
-							Uri file_u = uri::from_file_path(tmem, output_path);
-							DocumentUri out_uri = (DocumentUri)file_u.to_raw_string(tmem);
-							LspProject* proj = project_manager.get_or_create_project_for_uri(file_u);
-							proj.open_file({ .uri = out_uri }, from_disk: true);
-
-							// Queue all open user documents for re-analysis so the new module clears diagnostics
-							proj.files.@each(; path_key, lsp_f)
-							{
-								if (lsp_f && !lsp_f.is_library)
-								{
-									proj.process_queue.push({
-										.source_text = lsp_f.text,
-										.uri = lsp_f.uri.path,
-										.path = lsp_f.uri.path,
-										.is_library = false
-									});
-								}
-							};
-
-							proj.update();
-						}
-					}
-				}
-
-				LspExecuteCommandResponse resp = {
-					.jsonrpc = message.rpc,
-					.id = message.has_id ? message.id : -1,
-					.result = null
-				};
-				io_handler::write(translator::encode(resp, tmem));
-			}
-
-		case WS_CHANGE_WATCHED:
-			{
-				foreach (ev : message.params.did_change_watched.changes)
-				{
-					if (ev.type == 3) // FileChangeType.DELETED
-					{
-						LspProject* proj = get_project_for_raw_uri(ev.uri);
-						proj.close_file(ev.uri);
-						proj.files.@each(; path_key, lsp_f)
-						{
-							if (lsp_f && !lsp_f.is_library)
-							{
-								proj.process_queue.push({
-									.source_text = lsp_f.text,
-									.uri = lsp_f.uri.path,
-									.path = lsp_f.uri.path,
-									.is_library = false
-								});
-							}
-						};
-						proj.update();
-					}
-				}
-			}
-
-		case SET_TRACE:
-			break;
-
+		case DID_OPEN: on_did_open(message, &message.params.did_open);
+		case DID_CHANGE: on_did_change(message, &message.params.did_change);
+		case DID_CLOSE: on_did_close(message, &message.params.did_close);
+		case DID_SAVE: on_did_save(message, &message.params.did_save);
+		case FULL: on_semantic_tokens(message, &message.params.semantic_tokens);
+		case SYMBOL: on_document_symbol(message, &message.params.document_symbol);
+		case HOVER: on_hover(message, &message.params.hover);
+		case COMPLETION: on_completion(message, &message.params.completion);
+		case DEFINITION: on_definition(message, &message.params.definition);
+		case REFERENCES: on_references(message, &message.params.references);
+		case HELP: on_signature_help(message, &message.params.signature_help);
+		case RENAME: on_rename(message, &message.params.rename);
+		case PREPARE_RENAME: on_prepare_rename(message, &message.params.prepare_rename);
+		case FORMATTING: on_formatting(message, &message.params.formatting);
+		case RANGE_FORMATTING: on_range_formatting(message, &message.params.range_formatting);
+		case CODE_ACTION: on_code_action(message, &message.params.code_action);
+		case FOLDING_RANGE: on_folding_range(message, &message.params.folding_range);
+		case INLAY_HINT: on_inlay_hint(message, &message.params.inlay_hint);
+		case WS_CHANGE_WATCHED: on_did_change_watched(message, &message.params.did_change_watched);
+		case WS_SYMBOL: on_workspace_symbol(message, &message.params.workspace_symbol);
+		case WS_EXECUTE_COMMAND: on_execute_command(message, &message.params.execute_command);
+		case COMPLETION_RESOLVE: on_completion_resolve(message, &message.params.completion_resolve);
 		case SHUTDOWN:
 			{
 				LspShutdownResponse response = {
@@ -777,13 +328,520 @@ fn void dispatch(LspMessage* message)
 				};
 				io_handler::write(translator::encode(response, tmem));
 			}
-
 		case EXIT:
 			log::info("Exit notification received. Terminating process.");
 			running = false;
-
-		default:
+		case SET_TRACE:
+			break;
+		case UNKNOWN:
+		case DECLERATION:
+		case WILL_SAVE:
+		case WILL_SAVE_WAIT:
+		case ON_TYPE_FORMAT:
+		case CODE_LENS:
+		case CODE_LENS_RESOLVE:
+		case SELECTION_RANGE:
+		case TYPE_DEFINITION:
+		case IMPLEMENTATION:
+		case INLAY_HINT_RESOLVE:
+		case DIAGNOSTIC:
+		case SEM_TOKENS_RANGE:
+		case SEM_TOKENS_DELTA:
+		case PREPARE_CALL_HIER:
+		case LINKED_EDITING:
+		case MONIKER:
+		case PUB_DIAG:
+		case SHOW_MESSAGE:
+		case LOG_MESSAGE:
+		case SHOW_MSG_REQUEST:
+		case SHOW_DOCUMENT:
+		case WDP_CREATE:
+		case WDP_CANCEL:
+		case WS_CHANGE_CONFIG:
+		case WS_CHANGE_FOLDERS:
+		case WS_APPLY_EDIT:
+		case WS_CONFIGURATION:
+		case WS_DIAGNOSTIC:
+		case WS_DIAG_REFRESH:
+		case WS_SEM_REFRESH:
+		case WS_CODELENS_REFRESH:
+		case WS_INLAY_REFRESH:
+		case CALL_INCOMING:
+		case CALL_OUTGOING:
+		case TYPE_SUPERTYPES:
+		case TYPE_SUBTYPES:
+		case CANCEL:
+		case PROGRESS:
+		case LOG_TRACE:
 			log::verbose("Unhandled LSP method: %s", message.method);
+	}
+}
+
+fn void on_initialize(LspMessage* message, InitializeParams* params)
+{
+	LspInitializeResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = {
+			.capabilities = {
+				.textDocumentSync = {
+					.openClose = true,
+					.change = FULL,
+					.save = { .includeText = false },
+				},
+				.completionProvider = {
+					.triggerCharacters = { ".", ":", "@", " " },
+					.resolveProvider = true,
+					.completionItem = {.labelDetailSupport = true }
+				},
+				.hoverProvider = true,
+				.definitionProvider = true,
+				.signatureHelpProvider = {
+					.triggerCharacters = { "(", "," },
+					.retriggerCharacters = { "," }
+				},
+				.referencesProvider = true,
+				.renameProvider = {.prepareProvider = true },
+				.semanticTokensProvider = {
+					.legend = {
+						.tokenTypes = semantic_tokens::get_token_types(),
+						.tokenModifiers = semantic_tokens::get_token_modifiers()
+					},
+					.full = true
+				},
+				.documentSymbolProvider = true,
+				.workspaceSymbolProvider = true,
+				.inlayHintProvider = true,
+				.foldingRangeProvider = true,
+				.documentFormattingProvider = true,
+				.documentRangeFormattingProvider = true,
+				.codeActionProvider = true,
+				.executeCommandProvider = {
+					.commands = { code_actions::CMD_GENERATE_BINDINGS }
+				}
+			},
+			.serverInfo = {
+				.name = "c3_ls",
+				.version = env::PROJECT_VERSION,
+			},
+		},
+	};
+	io_handler::write(translator::encode(resp, tmem));
+
+	InitializationOptions init_opts = params.options();
+	{
+		if (!cli_compiler_path_set && init_opts.compiler_path.len > 0)
+		{
+			if (is_compiler_path_alloc) compiler_path.free(mem);
+			compiler_path = init_opts.compiler_path.copy(mem);
+			is_compiler_path_alloc = true;
+			log::info("Updated compiler_path from initializationOptions: %s", compiler_path);
+			if (!cli_std_path_set && init_opts.stdlib_path.len == 0)
+			{
+				if (is_std_path_alloc)
+				{
+					std_path.free(mem);
+					is_std_path_alloc = false;
+				}
+				setup_stdlib_path();
+			}
+		}
+		if (!cli_std_path_set && init_opts.stdlib_path.len > 0)
+		{
+			if (is_std_path_alloc)
+			{
+				std_path.free(mem);
+			}
+			std_path = init_opts.stdlib_path.trim_right("/\\").copy(mem);
+			is_std_path_alloc = true;
+			log::info("Updated std_path from initializationOptions: %s", std_path);
+		}
+	}
+
+	if (params.trace == TraceKind.VERBOSE) log::set_priority_all(VERBOSE);
+	if (try pid = params.process_id.value()) watch_parent_process(pid);
+	WorkspaceFolder[] folders = params.workspace_folders;
+	foreach (wf : folders)
+	{
+		project_manager.add_workspace_folder(wf);
+	}
+	DocumentUri root = params.root(tmem);
+	if (folders.len == 0 && root.len > 0)
+	{
+		project_manager.add_workspace_folder({ .uri = root });
+	}
+}
+
+fn void on_did_open(LspMessage* message, DidOpenParams* params)
+{
+	LspProject* proj = get_project_for_raw_uri(params.document.uri);
+	proj.open_file(params.document);
+}
+
+fn void on_did_change(LspMessage* message, DidChangeParams* params)
+{
+	LspProject* proj = get_project_for_raw_uri(params.document.uri);
+	proj.change_file(*params);
+}
+
+fn void on_did_close(LspMessage* message, DidCloseParams* params)
+{
+	LspProject* proj = get_project_for_raw_uri(params.document.uri);
+	proj.close_document(params.document.uri);
+}
+
+fn void on_did_save(LspMessage* message, DidSaveParams* params)
+{
+	LspProject* proj = get_project_for_raw_uri(params.document.uri);
+	proj.save_file(params.document.uri);
+}
+
+fn void on_completion(LspMessage* message, CompletionParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	CompletionItem[]? items = completion::resolve(proj, file_uri, params.position);
+	LspCompletionResponse res = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = {
+			.isIncomplete = true,
+			.items = items ?? {},
+		}
+	};
+	io_handler::write(translator::encode(res, tmem));
+}
+
+fn void on_completion_resolve(LspMessage* message, CompletionItem* params)
+{
+	CompletionItem item = *params;
+	completion::resolve_item(project_manager.get_active_project(), &item);
+	LspCompletionResolveResponse res = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = item
+	};
+	io_handler::write(translator::encode(res, tmem));
+}
+
+fn void on_hover(LspMessage* message, HoverParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	String? h = hover::hover(proj, file_uri, params.position);
+	LspHoverResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = {
+			.contents = {
+				.kind = MARKDOWN,
+				.value = h ?? "",
+			},
+		}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_definition(LspMessage* message, GoToDefinitionParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	LspLocation[]? defs = definition::goto_definition(proj, file_uri, params.position);
+	LspGoToDefinitionResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = defs ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_signature_help(LspMessage* message, SignatureHelpParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	SignatureHelpResult? help_res = signature_help::signature_help(proj, file_uri, params.position);
+	LspSignatureHelpResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = help_res ??
+		{
+			.signatures = {}
+		}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_references(LspMessage* message, ReferenceParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	LspLocation[]? refs = references::find_references(proj, file_uri, params.position, params.context);
+	LspReferencesResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = refs ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_prepare_rename(LspMessage* message, PrepareRenameParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	LspRange? prep_res = rename::prepare_rename(proj, file_uri, params.position);
+	if (catch prep_res)
+	{
+		LspShutdownResponse null_resp = {
+			.jsonrpc = message.rpc,
+			.id = message.has_id ? message.id : -1,
+			.result = null
+		};
+		io_handler::write(translator::encode(null_resp, tmem));
+		return;
+	}
+	LspPrepareRenameResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = prep_res
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_rename(LspMessage* message, RenameParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	WorkspaceEdit? edit_res = rename::rename(proj, file_uri, params.position, params.newName);
+	LspRenameResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = edit_res ??
+		{
+			.documentChanges = {}
+		}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_semantic_tokens(LspMessage* message, SemanticTokensParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	SemanticTokensResult? tokens_res = semantic_tokens::compute_semantic_tokens(proj, file_uri);
+	LspSemanticTokensResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = tokens_res ??
+		{
+			.data = {}
+		}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_document_symbol(LspMessage* message, DocumentSymbolParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	SymbolInformation[]? syms = symbols::get_document_symbols(proj, file_uri);
+	LspDocumentSymbolResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = syms ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_workspace_symbol(LspMessage* message, WorkspaceSymbolParams* params)
+{
+	List{SymbolInformation} all_syms;
+	all_syms.tinit();
+	if (try syms = symbols::query_workspace_symbols(&project_manager.default_project, params.query))
+	{
+		all_syms.push_all(syms);
+	}
+	project_manager.projects.@each(; root, proj)
+	{
+		if (try syms = symbols::query_workspace_symbols(proj, params.query))
+		{
+			all_syms.push_all(syms);
+		}
+	};
+	LspWorkspaceSymbolResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = all_syms.to_tarray()
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_inlay_hint(LspMessage* message, InlayHintParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	InlayHint[]? hints = inlay_hints::get_inlay_hints(proj, file_uri, params.range);
+	LspInlayHintResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = hints ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_folding_range(LspMessage* message, FoldingRangeParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	FoldingRange[]? ranges = folding_ranges::get_folding_ranges(proj, file_uri);
+	LspFoldingRangeResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = ranges ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_formatting(LspMessage* message, DocumentFormattingParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	TextEdit[]? edits = formatting::format_document(proj, file_uri, params.options);
+	LspFormattingResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = edits ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_range_formatting(LspMessage* message, DocumentRangeFormattingParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	TextEdit[]? edits = formatting::format_range(proj, file_uri, params.range, params.options);
+	LspFormattingResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = edits ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_code_action(LspMessage* message, CodeActionParams* params)
+{
+	Uri? file_uri = uri::parse(tmem, params.text_document.uri);
+	if (catch file_uri) return;
+	LspProject* proj = project_manager.get_or_create_project_for_uri(file_uri);
+	CodeAction[]? actions = code_actions::get_code_actions(proj, file_uri, *params);
+	LspCodeActionResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = actions ?? {}
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_execute_command(LspMessage* message, ExecuteCommandParams* params)
+{
+	String cmd_name = params.command;
+	if (cmd_name == code_actions::CMD_GENERATE_BINDINGS)
+	{
+		String[] args = params.arguments;
+		if (args.len >= 3)
+		{
+			String header_path = args[0];
+			String module_name = args[1];
+			String output_path = args[2];
+
+			sz last_slash = output_path.rindex_of_char('/') ?? output_path.rindex_of_char('\\') ?? (sz)0;
+			if (last_slash > 0)
+			{
+				String dir = output_path[:last_slash];
+				if (!file::exists(dir))
+				{
+					(void)path::mkdir(dir, recursive: true);
+				}
+			}
+
+			bindgen::BindgenOptions opts = {
+				.header_path = header_path,
+				.output_path = output_path,
+				.module_name = module_name,
+				.type_prefix = "",
+				.strip_func_prefix = "",
+				.clang_path = "clang"
+			};
+
+			int run_res = bindgen::run_bindgen(opts, is_cli: false);
+			if (run_res == 0)
+			{
+				Uri file_u = uri::from_file_path(tmem, output_path);
+				DocumentUri out_uri = (DocumentUri)file_u.to_raw_string(tmem);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(file_u);
+				proj.open_file({ .uri = out_uri }, from_disk: true);
+
+				// Queue all open user documents for re-analysis so the new module clears diagnostics
+				proj.files.@each(; path_key, lsp_f)
+				{
+					if (lsp_f && !lsp_f.is_library)
+					{
+						proj.process_queue.push({
+							.source_text = lsp_f.text,
+							.uri = lsp_f.uri.path,
+							.path = lsp_f.uri.path,
+							.is_library = false
+						});
+					}
+				};
+
+				proj.update();
+			}
+		}
+	}
+
+	LspExecuteCommandResponse resp = {
+		.jsonrpc = message.rpc,
+		.id = message.has_id ? message.id : -1,
+		.result = null
+	};
+	io_handler::write(translator::encode(resp, tmem));
+}
+
+fn void on_did_change_watched(LspMessage* message, DidChangeWatchedFilesParams* params)
+{
+	foreach (ev : params.changes)
+	{
+		if (ev.type == 3) // FileChangeType.DELETED
+		{
+			LspProject* proj = get_project_for_raw_uri(ev.uri);
+			proj.close_file(ev.uri);
+			proj.files.@each(; path_key, lsp_f)
+			{
+				if (lsp_f && !lsp_f.is_library)
+				{
+					proj.process_queue.push({
+						.source_text = lsp_f.text,
+						.uri = lsp_f.uri.path,
+						.path = lsp_f.uri.path,
+						.is_library = false
+					});
+				}
+			};
+			proj.update();
+		}
 	}
 }
 
