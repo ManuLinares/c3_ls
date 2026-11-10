@@ -18,9 +18,18 @@ fn bool is_process_alive(int pid) @feat(!WIN32)
 fn bool is_process_alive(int pid) @feat(WIN32)
 {
 	Win32_HANDLE process = open_process(SYNCHRONIZE, 0, (Win32_DWORD)pid);
-	if (!process) return false;
+	if (!process) return !open_failed_on_missing_process();
 	defer win32::closeHandle(process);
 	return win32::waitForSingleObject(process, 0) == win32::WAIT_TIMEOUT;
+}
+
+<*
+ Whether the last `OpenProcess` failed because no process has that pid, rather than the process
+ being inaccessible.
+*>
+fn bool open_failed_on_missing_process() @feat(WIN32) @local
+{
+	return win32::getLastError() == win32::ERROR_INVALID_PARAMETER;
 }
 
 <*
@@ -43,6 +52,11 @@ fn int wait_for_parent_exit(void* arg) @local
 	int pid = (int)(iptr)arg;
 	$if env::WIN32:
 		Win32_HANDLE process = open_process(SYNCHRONIZE, 0, (Win32_DWORD)pid);
+		if (!process && !open_failed_on_missing_process())
+		{
+			log::error("Could not watch the editor process %d: error %d", pid, win32::getLastError());
+			return 0;
+		}
 		if (process) win32::waitForSingleObject(process, win32::INFINITE);
 	$else
 		while (is_process_alive(pid)) thread::sleep_ms(PARENT_POLL_MS);
