@@ -27,16 +27,14 @@ fn void LspMessage.free(&self)
 	if (self.allocator == tmem) return;
 	self.rpc.free(self.allocator);
 	$foreach $m : MessageParams::members:
-		$if $m.has_tag("kind"):
-			if (self.method == $m.get_tag("kind")) object::recursively_free{$m.type}(self.allocator, &self.params.$m);
-		$endif
+		if (self.method.params == $m.type) object::recursively_free{$m.type}(self.allocator, &self.params.$m);
 	$endforeach
 }
 
 <*
-	Turn data into JSONRPC string
-	@param [in] expr
-	@return "JSONRPC string allocated with `allocator`"
+ Turn data into JSONRPC string
+ @param [in] expr
+ @return "JSONRPC string allocated with `allocator`"
 *>
 macro String encode(expr, Allocator allocator, int indent = 0)
 {
@@ -68,11 +66,9 @@ struct Request <Params> @local
 	Params params;
 }
 
-macro @params(Allocator allocator, String message, $Params) @local
+fn ParamsType? params(Allocator allocator, String message) <ParamsType> @local
 {
-	Request{$Params}? request = json::unmarshal(allocator, message, Request{$Params});
-	if (catch request) return INVALID_MESSAGE~;
-	return request.params;
+	return json::unmarshal(allocator, message, Request{ParamsType}).params ?? INVALID_MESSAGE~!;
 }
 
 <*
@@ -102,16 +98,13 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 	$foreach $k : MessageKind::values:
 		int $n = 0;
 		$foreach $m : MessageParams::members:
-			$if $m.has_tag("kind") &&& $m.get_tag("kind") == $k:
-				$n++;
+			$if $m.type == $k.params: $n++;
 			$endif
 		$endforeach
-		$assert $n == (int)$k.has_params : "MessageParams tag mismatch";
+		$assert $n == (int)($k.params != void) : "MessageParams must hold exactly one member per params type";
 	$endforeach
 	$foreach $m : MessageParams::members:
-		$if $m.has_tag("kind"):
-			if (msg.method == $m.get_tag("kind")) msg.params.$m = @params(allocator, message, $m.type)!;
-		$endif
+		if (msg.method.params == $m.type) msg.params.$m = params{$m.type}(allocator, message)!;
 	$endforeach
 
 	return {

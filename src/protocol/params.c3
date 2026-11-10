@@ -5,81 +5,81 @@ import std::collections::ref;
 import std::encoding::json;
 import uri;
 
-enum MessageKind : char (String name, bool has_params)
+enum MessageKind : char (String name, typeid params)
 {
-	UNKNOWN      { "unknown", false },
-	INITIALIZE   { "initialize", true },
-	INITIALIZED  { "initialized", false },
-	DID_OPEN     { "textDocument/didOpen", true },
-	DID_CHANGE   { "textDocument/didChange", true },
-	DID_CLOSE    { "textDocument/didClose", true },
-	DID_SAVE     { "textDocument/didSave", true },
-	FULL         { "textDocument/semanticTokens/full", true },
-	SYMBOL       { "textDocument/documentSymbol", true },
-	HOVER        { "textDocument/hover", true },
-	COMPLETION   { "textDocument/completion", true },
-	DEFINITION   { "textDocument/definition", true },
-	DECLERATION  { "textDocument/declaration", false },
-	REFERENCES   { "textDocument/references", true },
-	HELP         { "textDocument/signatureHelp", true },
-	RENAME             { "textDocument/rename", true },
-	PREPARE_RENAME     { "textDocument/prepareRename", true },
-	WILL_SAVE          { "textDocument/willSave", false },
-	WILL_SAVE_WAIT     { "textDocument/willSaveWaitUntil", false },
-	FORMATTING         { "textDocument/formatting", true },
-	RANGE_FORMATTING   { "textDocument/rangeFormatting", true },
-	ON_TYPE_FORMAT     { "textDocument/onTypeFormatting", false },
-	CODE_ACTION        { "textDocument/codeAction", true },
-	CODE_LENS          { "textDocument/codeLens", false },
-	CODE_LENS_RESOLVE  { "textDocument/codeLens/resolve", false },
-	FOLDING_RANGE      { "textDocument/foldingRange", true },
-	SELECTION_RANGE    { "textDocument/selectionRange", false },
-	TYPE_DEFINITION    { "textDocument/typeDefinition", false },
-	IMPLEMENTATION     { "textDocument/implementation", false },
-	INLAY_HINT         { "textDocument/inlayHint", true },
-	INLAY_HINT_RESOLVE { "textDocument/inlayHint/resolve", false },
-	DIAGNOSTIC         { "textDocument/diagnostic", false },
-	SEM_TOKENS_RANGE   { "textDocument/semanticTokens/range", false },
-	SEM_TOKENS_DELTA   { "textDocument/semanticTokens/full/delta", false },
-	PREPARE_CALL_HIER  { "textDocument/prepareCallHierarchy", false },
-	LINKED_EDITING     { "textDocument/linkedEditingRange", false },
-	MONIKER            { "textDocument/moniker", false },
+	UNKNOWN             { "unknown", void },
+	INITIALIZE          { "initialize", InitializeParams },
+	INITIALIZED         { "initialized", void },
+	DID_OPEN            { "textDocument/didOpen", DidOpenParams },
+	DID_CHANGE          { "textDocument/didChange", DidChangeParams },
+	DID_CLOSE           { "textDocument/didClose", DidCloseParams },
+	DID_SAVE            { "textDocument/didSave", DidSaveParams },
+	FULL                { "textDocument/semanticTokens/full", SemanticTokensParams },
+	SYMBOL              { "textDocument/documentSymbol", DocumentSymbolParams },
+	HOVER               { "textDocument/hover", HoverParams },
+	COMPLETION          { "textDocument/completion", CompletionParams },
+	DEFINITION          { "textDocument/definition", GoToDefinitionParams },
+	DECLERATION         { "textDocument/declaration", void },
+	REFERENCES          { "textDocument/references", ReferenceParams },
+	HELP                { "textDocument/signatureHelp", SignatureHelpParams },
+	RENAME              { "textDocument/rename", RenameParams },
+	PREPARE_RENAME      { "textDocument/prepareRename", PrepareRenameParams },
+	WILL_SAVE           { "textDocument/willSave", void },
+	WILL_SAVE_WAIT      { "textDocument/willSaveWaitUntil", void },
+	FORMATTING          { "textDocument/formatting", DocumentFormattingParams },
+	RANGE_FORMATTING    { "textDocument/rangeFormatting", DocumentRangeFormattingParams },
+	ON_TYPE_FORMAT      { "textDocument/onTypeFormatting", void },
+	CODE_ACTION         { "textDocument/codeAction", CodeActionParams },
+	CODE_LENS           { "textDocument/codeLens", void },
+	CODE_LENS_RESOLVE   { "textDocument/codeLens/resolve", void },
+	FOLDING_RANGE       { "textDocument/foldingRange", FoldingRangeParams },
+	SELECTION_RANGE     { "textDocument/selectionRange", void },
+	TYPE_DEFINITION     { "textDocument/typeDefinition", void },
+	IMPLEMENTATION      { "textDocument/implementation", void },
+	INLAY_HINT          { "textDocument/inlayHint", InlayHintParams },
+	INLAY_HINT_RESOLVE  { "textDocument/inlayHint/resolve", void },
+	DIAGNOSTIC          { "textDocument/diagnostic", void },
+	SEM_TOKENS_RANGE    { "textDocument/semanticTokens/range", void },
+	SEM_TOKENS_DELTA    { "textDocument/semanticTokens/full/delta", void },
+	PREPARE_CALL_HIER   { "textDocument/prepareCallHierarchy", void },
+	LINKED_EDITING      { "textDocument/linkedEditingRange", void },
+	MONIKER             { "textDocument/moniker", void },
 
-	PUB_DIAG         { "textDocument/publishDiagnostics", false },
+	PUB_DIAG            { "textDocument/publishDiagnostics", void },
 
-	SHOW_MESSAGE     { "window/showMessage", false },
-	LOG_MESSAGE      { "window/logMessage", false },
-	SHOW_MSG_REQUEST { "window/showMessageRequest", false },
-	SHOW_DOCUMENT    { "window/showDocument", false },
-	WDP_CREATE       { "window/workDoneProgress/create", false },
-	WDP_CANCEL       { "window/workDoneProgress/cancel", false },
+	SHOW_MESSAGE        { "window/showMessage", void },
+	LOG_MESSAGE         { "window/logMessage", void },
+	SHOW_MSG_REQUEST    { "window/showMessageRequest", void },
+	SHOW_DOCUMENT       { "window/showDocument", void },
+	WDP_CREATE          { "window/workDoneProgress/create", void },
+	WDP_CANCEL          { "window/workDoneProgress/cancel", void },
 
-	WS_CHANGE_CONFIG    { "workspace/didChangeConfiguration", false },
-	WS_CHANGE_WATCHED   { "workspace/didChangeWatchedFiles", true },
-	WS_CHANGE_FOLDERS   { "workspace/didChangeWorkspaceFolders", false },
-	WS_SYMBOL           { "workspace/symbol", true },
-	WS_EXECUTE_COMMAND  { "workspace/executeCommand", true },
-	WS_APPLY_EDIT       { "workspace/applyEdit", false },
-	WS_CONFIGURATION    { "workspace/configuration", false },
-	WS_DIAGNOSTIC       { "workspace/diagnostic", false },
-	WS_DIAG_REFRESH     { "workspace/diagnostic/refresh", false },
-	WS_SEM_REFRESH      { "workspace/semanticTokens/refresh", false },
-	WS_CODELENS_REFRESH { "workspace/codeLens/refresh", false },
-	WS_INLAY_REFRESH    { "workspace/inlayHint/refresh", false },
+	WS_CHANGE_CONFIG    { "workspace/didChangeConfiguration", void },
+	WS_CHANGE_WATCHED   { "workspace/didChangeWatchedFiles", DidChangeWatchedFilesParams },
+	WS_CHANGE_FOLDERS   { "workspace/didChangeWorkspaceFolders", void },
+	WS_SYMBOL           { "workspace/symbol", WorkspaceSymbolParams },
+	WS_EXECUTE_COMMAND  { "workspace/executeCommand", ExecuteCommandParams },
+	WS_APPLY_EDIT       { "workspace/applyEdit", void },
+	WS_CONFIGURATION    { "workspace/configuration", void },
+	WS_DIAGNOSTIC       { "workspace/diagnostic", void },
+	WS_DIAG_REFRESH     { "workspace/diagnostic/refresh", void },
+	WS_SEM_REFRESH      { "workspace/semanticTokens/refresh", void },
+	WS_CODELENS_REFRESH { "workspace/codeLens/refresh", void },
+	WS_INLAY_REFRESH    { "workspace/inlayHint/refresh", void },
 
-	CALL_INCOMING    { "callHierarchy/incomingCalls", false },
-	CALL_OUTGOING    { "callHierarchy/outgoingCalls", false },
-	TYPE_SUPERTYPES  { "typeHierarchy/supertypes", false },
-	TYPE_SUBTYPES    { "typeHierarchy/subtypes", false },
+	CALL_INCOMING    { "callHierarchy/incomingCalls", void },
+	CALL_OUTGOING    { "callHierarchy/outgoingCalls", void },
+	TYPE_SUPERTYPES  { "typeHierarchy/supertypes", void },
+	TYPE_SUBTYPES    { "typeHierarchy/subtypes", void },
 
-	COMPLETION_RESOLVE { "completionItem/resolve", true },
+	COMPLETION_RESOLVE { "completionItem/resolve", CompletionItem },
 
-	SHUTDOWN     { "shutdown", false },
-	EXIT         { "exit", false },
-	CANCEL       { "$/cancelRequest", false },
-	SET_TRACE    { "$/setTrace", false },
-	PROGRESS     { "$/progress", false },
-	LOG_TRACE    { "$/logTrace", false },
+	SHUTDOWN     { "shutdown", void },
+	EXIT         { "exit", void },
+	CANCEL       { "$/cancelRequest", void },
+	SET_TRACE    { "$/setTrace", void },
+	PROGRESS     { "$/progress", void },
+	LOG_TRACE    { "$/logTrace", void },
 }
 
 fn MessageKind message_kind_from_string(String s)
@@ -218,10 +218,10 @@ struct CompletionParams
 
 constdef MessageSeverityConst : int
 {
-	ERROR = 1,
+	ERROR   = 1,
 	WARNING = 2,
-	INFO = 3,
-	HINT = 4,
+	INFO    = 3,
+	HINT    = 4,
 }
 
 struct LspDiagnostic
@@ -271,28 +271,28 @@ struct LogMessageParams
 
 union MessageParams
 {
-	InitializeParams initialize @tag("kind", MessageKind.INITIALIZE);
-	DidOpenParams did_open @tag("kind", MessageKind.DID_OPEN);
-	DidChangeParams did_change @tag("kind", MessageKind.DID_CHANGE);
-	DidCloseParams did_close @tag("kind", MessageKind.DID_CLOSE);
-	DidSaveParams did_save @tag("kind", MessageKind.DID_SAVE);
-	HoverParams hover @tag("kind", MessageKind.HOVER);
-	CompletionParams completion @tag("kind", MessageKind.COMPLETION);
-	CompletionItem completion_resolve @tag("kind", MessageKind.COMPLETION_RESOLVE);
-	GoToDefinitionParams definition @tag("kind", MessageKind.DEFINITION);
-	SignatureHelpParams signature_help @tag("kind", MessageKind.HELP);
-	ReferenceParams references @tag("kind", MessageKind.REFERENCES);
-	PrepareRenameParams prepare_rename @tag("kind", MessageKind.PREPARE_RENAME);
-	RenameParams rename @tag("kind", MessageKind.RENAME);
-	SemanticTokensParams semantic_tokens @tag("kind", MessageKind.FULL);
-	DocumentSymbolParams document_symbol @tag("kind", MessageKind.SYMBOL);
-	WorkspaceSymbolParams workspace_symbol @tag("kind", MessageKind.WS_SYMBOL);
-	InlayHintParams inlay_hint @tag("kind", MessageKind.INLAY_HINT);
-	FoldingRangeParams folding_range @tag("kind", MessageKind.FOLDING_RANGE);
-	DocumentFormattingParams formatting @tag("kind", MessageKind.FORMATTING);
-	DocumentRangeFormattingParams range_formatting @tag("kind", MessageKind.RANGE_FORMATTING);
-	CodeActionParams code_action @tag("kind", MessageKind.CODE_ACTION);
-	ExecuteCommandParams execute_command @tag("kind", MessageKind.WS_EXECUTE_COMMAND);
+	InitializeParams initialize;
+	DidOpenParams did_open;
+	DidChangeParams did_change;
+	DidCloseParams did_close;
+	DidSaveParams did_save;
+	HoverParams hover;
+	CompletionParams completion;
+	CompletionItem completion_resolve;
+	GoToDefinitionParams definition;
+	SignatureHelpParams signature_help;
+	ReferenceParams references;
+	PrepareRenameParams prepare_rename;
+	RenameParams rename;
+	SemanticTokensParams semantic_tokens;
+	DocumentSymbolParams document_symbol;
+	WorkspaceSymbolParams workspace_symbol;
+	InlayHintParams inlay_hint;
+	FoldingRangeParams folding_range;
+	DocumentFormattingParams formatting;
+	DocumentRangeFormattingParams range_formatting;
+	CodeActionParams code_action;
+	ExecuteCommandParams execute_command;
 
 	PublishDiagnosticsParams pub_diag;
 	LogMessageParams log_message;
@@ -300,7 +300,7 @@ union MessageParams
 	CancelParams cancel;
 	SetTraceParams set_trace;
 
-	DidChangeWatchedFilesParams did_change_watched @tag("kind", MessageKind.WS_CHANGE_WATCHED);
+	DidChangeWatchedFilesParams did_change_watched;
 }
 
 struct FormattingOptions
