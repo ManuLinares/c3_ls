@@ -1006,6 +1006,11 @@ fn String[]? libs_installed(String dir) @local
 	return paths.to_tarray();
 }
 
+struct ManifestProvides @local
+{
+	String provides;
+}
+
 <*
  Reads the manifest of an installed lib. Handles both the directory layout and
  the zipped `.c3l` archive layout that c3c accepts.
@@ -1025,8 +1030,5 @@ fn ManifestConfig? load_manifest(String lib_path) @private
 		data = (String)archive.read_file_all(tmem, config::MANIFEST_CONFIG_NAME)!;
 	}
 
-	Object* dom = json::tparse(data)!;
-	ManifestConfig conf;
-	conf.provides = (dom.get_string("provides") ?? "").copy(tmem);
-	return conf;
+	return { .provides = json::unmarshal(tmem, data, ManifestProvides)!.provides };
 }

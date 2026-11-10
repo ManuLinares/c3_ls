@@ -66,7 +66,7 @@ fn void test_encode_completion_response()
 			.items = &items
 		}
 	};
-	String encoded = translator::encode_omitting_absent(resp, tmem);
+	String encoded = translator::encode(resp, tmem);
 	assert(encoded.starts_with("Content-Length:"));
 	assert(encoded.contains(`"label":"my_func"`));
 	assert(encoded.contains(`"isIncomplete":false`));
@@ -84,7 +84,7 @@ fn void test_encode_completion_response_omits_absent_properties()
 		.id = 3,
 		.result = { .isIncomplete = false, .items = &items }
 	};
-	String encoded = translator::encode_omitting_absent(resp, tmem);
+	String encoded = translator::encode(resp, tmem);
 	assert(encoded.contains(`"isIncomplete":false`), "%s", encoded);
 	assert(encoded.contains(`{"label":"plain","kind":3}`), "%s", encoded);
 	assert(encoded.contains(`"textEdit":{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":7}},"newText":"lala::@mac()"}`), "%s", encoded);

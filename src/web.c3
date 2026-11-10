@@ -7,8 +7,8 @@ struct WebDiag
 {
 	int line;
 	int column;
-	int end_line;
-	int end_column;
+	int end_line @Json("endLine");
+	int end_column @Json("endColumn");
 	String level;
 	String message;
 }
@@ -34,24 +34,6 @@ fn void on_web_diagnostic(SourceFile* file, Range range, DiagnosticLevel level, 
 		.level = lvl,
 		.message = message.copy(mem)
 	});
-}
-
-fn void ser_json_string(DString* out, String s) @local
-{
-	out.append_char('"');
-	foreach (char c : s)
-	{
-		switch (c)
-		{
-			case '"': out.append("\\\"");
-			case '\\': out.append("\\\\");
-			case '\n': out.append("\\n");
-			case '\r': out.append("\\r");
-			case '\t': out.append("\\t");
-			default: out.append_char(c);
-		}
-	}
-	out.append_char('"');
 }
 
 fn int main()
@@ -85,18 +67,9 @@ fn ZString parse_c3_ast(ZString source_cstr) @export("parse_c3_ast")
 
 		context::process(ctx, source_cstr.str_view(), "playground.c3");
 
-		result_buf.append("{\"errors\":[");
-		for (sz i = 0; i < current_diags.len(); i++)
-		{
-			WebDiag d = current_diags.get(i);
-			if (i > 0) result_buf.append_char(',');
-			result_buf.appendf("{\"line\":%d,\"column\":%d,\"endLine\":%d,\"endColumn\":%d,\"level\":",
-				d.line, d.column, d.end_line, d.end_column);
-			result_buf.appendf("\"%s\",\"message\":", d.level);
-			ser_json_string(&result_buf, d.message);
-			result_buf.append_char('}');
-		}
-		result_buf.append("],\"ast\":[");
+		result_buf.append("{\"errors\":");
+		json::marshal_to(&result_buf, current_diags.array_view())!!;
+		result_buf.append(",\"ast\":[");
 
 		if (try sf = ctx.files.get("playground.c3"))
 		{

@@ -1,7 +1,6 @@
 module lsp::core::cache;
 
 import std::encoding::json;
-import std::collections::object;
 import std::io;
 import std::time;
 
@@ -49,11 +48,9 @@ fn bool? is_library_outdated(String library_name, String root_cache_path, String
 	String? content = (String)file::load(tmem, meta_file);
 	if (catch content) return true;
 
-	Object*? parsed = json::tparse(content);
-	if (catch parsed) return true;
-	if (!parsed) return true;
-
-	long mod_val = parsed.get_int("modified_time") ?? 0;
+	MetaData? meta = json::unmarshal(tmem, content, MetaData);
+	if (catch meta) return true;
+	long mod_val = meta.modified_time;
 
 	Path src_path = path::tnew(source_archive)!;
 	Time modified_time = file::last_modified(src_path)!;

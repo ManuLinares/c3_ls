@@ -21,10 +21,10 @@ fn void test_server_initialize_and_config_load()
 	defer decoded.message.free();
 
 	assert(decoded.message.method == INITIALIZE);
-	assert(decoded.message.params.initialize.root_uri.has_value);
+	assert(decoded.message.params.initialize.root_uri.len > 0);
 
 	WorkspaceFolder wf = {
-		.uri = decoded.message.params.initialize.root_uri.value,
+		.uri = decoded.message.params.initialize.root_uri,
 		.name = "mock_workspace"
 	};
 	// Uri parsing validation

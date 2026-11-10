@@ -343,7 +343,7 @@ fn void dispatch(LspMessage* message)
 				};
 				io_handler::write(translator::encode(resp, tmem));
 
-				if (try init_opts = message.params.initialize.initialization_options.get())
+				InitializationOptions init_opts = message.params.initialize.options();
 				{
 					if (!cli_compiler_path_set && init_opts.compiler_path.len > 0)
 					{
@@ -373,21 +373,16 @@ fn void dispatch(LspMessage* message)
 					}
 				}
 
-				if (try value = message.params.initialize.trace.get())
+				if (message.params.initialize.trace == TraceKind.VERBOSE) log::set_priority_all(VERBOSE);
+				WorkspaceFolder[] folders = message.params.initialize.workspace_folders;
+				foreach (wf : folders)
 				{
-					if (value == VERBOSE) log::set_priority_all(VERBOSE);
-				}
-				if (try value = message.params.initialize.workspace_folders.get() && value.len > 0)
-				{
-					foreach (wf : value)
-					{
-						project_manager.add_workspace_folder(wf);
-					}
-				}
-				else if (try root_uri_str = message.params.initialize.root_uri.get() && root_uri_str.len > 0)
-				{
-					WorkspaceFolder wf = {.uri = root_uri_str,.name = "" };
 					project_manager.add_workspace_folder(wf);
+				}
+				DocumentUri root = message.params.initialize.root(tmem);
+				if (folders.len == 0 && root.len > 0)
+				{
+					project_manager.add_workspace_folder({ .uri = root });
 				}
 			}
 
@@ -434,7 +429,7 @@ fn void dispatch(LspMessage* message)
 						.items = items ?? {},
 					}
 				};
-				io_handler::write(translator::encode_omitting_absent(res, tmem));
+				io_handler::write(translator::encode(res, tmem));
 			}
 
 		case COMPLETION_RESOLVE:
@@ -446,7 +441,7 @@ fn void dispatch(LspMessage* message)
 					.id = message.has_id ? message.id : -1,
 					.result = item
 				};
-				io_handler::write(translator::encode_omitting_absent(res, tmem));
+				io_handler::write(translator::encode(res, tmem));
 			}
 
 		case HOVER:

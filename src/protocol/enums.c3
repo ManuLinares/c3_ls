@@ -17,11 +17,11 @@ constdef MarkupKind : inline String
 PLAIN_TEXT = "plaintext",
 MARKDOWN = "markdown"}
 
-enum TraceKind : char (String name)
+constdef TraceKind : inline String
 {
-	OFF      { "off" },
-	MESSAGES { "messages" },
-	VERBOSE  { "verbose" }
+	OFF = "off",
+	MESSAGES = "messages",
+	VERBOSE = "verbose",
 }
 
 constdef InsertTextFormat : int

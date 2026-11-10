@@ -1,7 +1,8 @@
 module lsp;
 
 import std::collections::object;
-import std::collections::maybe;
+import std::encoding::json;
+import uri;
 
 enum MessageKind : char (String name)
 {
@@ -102,18 +103,41 @@ struct InitializationOptions
 
 struct InitializeParams
 {
-	int process_id;
-	ClientInfo client_info;
+	int process_id @Json("processId");
+	ClientInfo client_info @Json("clientInfo");
 	String locale;
-	Maybe{DocumentUri} root_uri;
-	Maybe{TraceKind} trace;
-	Maybe{WorkspaceFolder[]} workspace_folders;
-	Maybe{InitializationOptions} initialization_options;
+	DocumentUri root_uri @Json("rootUri");
+	String root_path @Json("rootPath");
+	TraceKind trace;
+	WorkspaceFolder[] workspace_folders @Json("workspaceFolders");
+	Object* initialization_options @Json("initializationOptions");
+}
+
+<*
+ The workspace root: `rootUri`, or else the deprecated `rootPath` as a URI.
+*>
+fn DocumentUri InitializeParams.root(&self, Allocator allocator)
+{
+	if (self.root_uri.len > 0 || self.root_path.len == 0) return self.root_uri;
+	return (DocumentUri)uri::from_file_path(allocator, self.root_path).to_raw_string(allocator);
+}
+
+<*
+ Compiler and stdlib paths from `initializationOptions`, under any of the key spellings clients use.
+*>
+fn InitializationOptions InitializeParams.options(&self)
+{
+	Object* opts = self.initialization_options;
+	if (!opts || !opts.is_map()) return {};
+	return {
+		.compiler_path = opts.get_string("compiler-path") ?? opts.get_string("compilerPath") ?? opts.get_string("compiler_path") ?? "",
+		.stdlib_path = opts.get_string("stdlib-path") ?? opts.get_string("stdlibPath") ?? opts.get_string("stdlib_path") ?? "",
+	};
 }
 
 struct DidOpenParams
 {
-	TextDocumentItem document;
+	TextDocumentItem document @Json("textDocument");
 }
 
 struct TextDocumentIdentifier
@@ -123,29 +147,29 @@ struct TextDocumentIdentifier
 
 struct DidCloseParams
 {
-	TextDocumentIdentifier document;
+	TextDocumentIdentifier document @Json("textDocument");
 }
 
 struct DidSaveParams
 {
-	TextDocumentIdentifier document;
+	TextDocumentIdentifier document @Json("textDocument");
 }
 
 struct HoverParams
 {
-	TextDocumentIdentifier document;
+	TextDocumentIdentifier document @Json("textDocument");
 	LspPosition position;
 }
 
 struct GoToDefinitionParams
 {
-	TextDocumentIdentifier document;
+	TextDocumentIdentifier document @Json("textDocument");
 	LspPosition position;
 }
 
 struct SignatureHelpParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspPosition position;
 }
 
@@ -156,27 +180,27 @@ struct ReferenceContext
 
 struct ReferenceParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspPosition position;
 	ReferenceContext context;
 }
 
 struct PrepareRenameParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspPosition position;
 }
 
 struct RenameParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspPosition position;
 	String newName;
 }
 
 struct SemanticTokensParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 }
 
 struct CompletionTextDocument
@@ -186,7 +210,7 @@ struct CompletionTextDocument
 
 struct CompletionParams
 {
-	CompletionTextDocument text_document;
+	CompletionTextDocument text_document @Json("textDocument");
 	LspPosition position;
 	CompletionContext context;
 }
@@ -233,14 +257,14 @@ struct SetTraceParams
 struct TextDocumentContentChangeEvent
 {
 	LspRange range;
-	uint range_length;
+	uint range_length @Json("rangeLength");
 	String text;
 }
 
 struct DidChangeParams
 {
-	VersionedTextDocumentIdentifier document;
-	TextDocumentContentChangeEvent[] content_changes;
+	VersionedTextDocumentIdentifier document @Json("textDocument");
+	TextDocumentContentChangeEvent[] content_changes @Json("contentChanges");
 }
 
 struct LogMessageParams
@@ -251,7 +275,6 @@ struct LogMessageParams
 
 union MessageParams
 {
-	Object* unknown;
 	InitializeParams initialize;
 	DidOpenParams did_open;
 	DidChangeParams did_change;
@@ -286,22 +309,22 @@ union MessageParams
 
 struct FormattingOptions
 {
-	uint tab_size;
-	bool insert_spaces;
-	bool trim_trailing_whitespace;
-	bool insert_final_newline;
-	bool trim_final_newlines;
+	uint tab_size @Json("tabSize");
+	bool insert_spaces @Json("insertSpaces");
+	bool trim_trailing_whitespace @Json("trimTrailingWhitespace");
+	bool insert_final_newline @Json("insertFinalNewline");
+	bool trim_final_newlines @Json("trimFinalNewlines");
 }
 
 struct DocumentFormattingParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	FormattingOptions options;
 }
 
 struct DocumentRangeFormattingParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspRange range;
 	FormattingOptions options;
 }

@@ -25,113 +25,33 @@ struct LspMessage
 fn void LspMessage.free(&self)
 {
 	if (self.allocator == tmem) return;
-
 	self.rpc.free(self.allocator);
 	switch (self.method)
 	{
-		case INITIALIZE:
-			self.params.initialize.locale.free(self.allocator);
-			if (self.params.initialize.root_uri.has_value)
-			{
-				self.params.initialize.root_uri.value.free(self.allocator);
-			}
-			if (self.params.initialize.workspace_folders.has_value)
-			{
-				foreach (wf : self.params.initialize.workspace_folders.value)
-				{
-					wf.uri.free(self.allocator);
-					wf.name.free(self.allocator);
-				}
-				alloc::free(self.allocator, self.params.initialize.workspace_folders.value);
-			}
-			self.params.initialize.client_info.name.free(self.allocator);
-			self.params.initialize.client_info.version.free(self.allocator);
-			if (self.params.initialize.initialization_options.has_value)
-			{
-				self.params.initialize.initialization_options.value.compiler_path.free(self.allocator);
-				self.params.initialize.initialization_options.value.stdlib_path.free(self.allocator);
-			}
-		case DID_OPEN:
-			self.params.did_open.document.uri.free(self.allocator);
-			self.params.did_open.document.language_id.free(self.allocator);
-			self.params.did_open.document.text.free(self.allocator);
-		case DID_CLOSE:
-			self.params.did_close.document.uri.free(self.allocator);
-		case DID_SAVE:
-			self.params.did_save.document.uri.free(self.allocator);
-		case DID_CHANGE:
-			self.params.did_change.document.uri.free(self.allocator);
-			if (self.params.did_change.content_changes.len > 0)
-			{
-				foreach (c : self.params.did_change.content_changes)
-				{
-					c.text.free(self.allocator);
-				}
-				alloc::free(self.allocator, self.params.did_change.content_changes);
-			}
-		case HOVER:
-			self.params.hover.document.uri.free(self.allocator);
-		case DEFINITION:
-			self.params.definition.document.uri.free(self.allocator);
-		case COMPLETION:
-			self.params.completion.text_document.uri.free(self.allocator);
-		case COMPLETION_RESOLVE:
-			self.params.completion_resolve.item.label.free(self.allocator);
-			self.params.completion_resolve.item.detail.free(self.allocator);
-			self.params.completion_resolve.item.insertText.free(self.allocator);
-			self.params.completion_resolve.item.filterText.free(self.allocator);
-			self.params.completion_resolve.item.sortText.free(self.allocator);
-			self.params.completion_resolve.item.data.free(self.allocator);
-			if (self.params.completion_resolve.item.documentation.value.len > 0)
-			{
-				self.params.completion_resolve.item.documentation.value.free(self.allocator);
-			}
-		case HELP:
-			self.params.signature_help.text_document.uri.free(self.allocator);
-		case REFERENCES:
-			self.params.references.text_document.uri.free(self.allocator);
-		case PREPARE_RENAME:
-			self.params.prepare_rename.text_document.uri.free(self.allocator);
-		case RENAME:
-			self.params.rename.text_document.uri.free(self.allocator);
-			self.params.rename.newName.free(self.allocator);
-		case FULL:
-			self.params.semantic_tokens.text_document.uri.free(self.allocator);
-		case SYMBOL:
-			self.params.document_symbol.text_document.uri.free(self.allocator);
-		case WS_SYMBOL:
-			self.params.workspace_symbol.query.free(self.allocator);
-		case INLAY_HINT:
-			self.params.inlay_hint.text_document.uri.free(self.allocator);
-		case FOLDING_RANGE:
-			self.params.folding_range.text_document.uri.free(self.allocator);
-		case FORMATTING:
-			self.params.formatting.text_document.uri.free(self.allocator);
-		case RANGE_FORMATTING:
-			self.params.range_formatting.text_document.uri.free(self.allocator);
-		case CODE_ACTION:
-			self.params.code_action.text_document.uri.free(self.allocator);
-		case WS_EXECUTE_COMMAND:
-			self.params.execute_command.command.free(self.allocator);
-			if (self.params.execute_command.arguments.len > 0)
-			{
-				foreach (arg : self.params.execute_command.arguments)
-				{
-					arg.free(self.allocator);
-				}
-				alloc::free(self.allocator, self.params.execute_command.arguments);
-			}
-		case WS_CHANGE_WATCHED:
-			if (self.params.did_change_watched.changes.len > 0)
-			{
-				foreach (c : self.params.did_change_watched.changes)
-				{
-					c.uri.free(self.allocator);
-				}
-				alloc::free(self.allocator, self.params.did_change_watched.changes);
-			}
-		default:
-			break;
+		case INITIALIZE: object::recursively_free{InitializeParams}(self.allocator, &self.params.initialize);
+		case DID_OPEN: object::recursively_free{DidOpenParams}(self.allocator, &self.params.did_open);
+		case DID_CLOSE: object::recursively_free{DidCloseParams}(self.allocator, &self.params.did_close);
+		case DID_SAVE: object::recursively_free{DidSaveParams}(self.allocator, &self.params.did_save);
+		case DID_CHANGE: object::recursively_free{DidChangeParams}(self.allocator, &self.params.did_change);
+		case HOVER: object::recursively_free{HoverParams}(self.allocator, &self.params.hover);
+		case DEFINITION: object::recursively_free{GoToDefinitionParams}(self.allocator, &self.params.definition);
+		case COMPLETION: object::recursively_free{CompletionParams}(self.allocator, &self.params.completion);
+		case COMPLETION_RESOLVE: object::recursively_free{CompletionItem}(self.allocator, &self.params.completion_resolve.item);
+		case HELP: object::recursively_free{SignatureHelpParams}(self.allocator, &self.params.signature_help);
+		case REFERENCES: object::recursively_free{ReferenceParams}(self.allocator, &self.params.references);
+		case PREPARE_RENAME: object::recursively_free{PrepareRenameParams}(self.allocator, &self.params.prepare_rename);
+		case RENAME: object::recursively_free{RenameParams}(self.allocator, &self.params.rename);
+		case FULL: object::recursively_free{SemanticTokensParams}(self.allocator, &self.params.semantic_tokens);
+		case SYMBOL: object::recursively_free{DocumentSymbolParams}(self.allocator, &self.params.document_symbol);
+		case WS_SYMBOL: object::recursively_free{WorkspaceSymbolParams}(self.allocator, &self.params.workspace_symbol);
+		case INLAY_HINT: object::recursively_free{InlayHintParams}(self.allocator, &self.params.inlay_hint);
+		case FOLDING_RANGE: object::recursively_free{FoldingRangeParams}(self.allocator, &self.params.folding_range);
+		case FORMATTING: object::recursively_free{DocumentFormattingParams}(self.allocator, &self.params.formatting);
+		case RANGE_FORMATTING: object::recursively_free{DocumentRangeFormattingParams}(self.allocator, &self.params.range_formatting);
+		case CODE_ACTION: object::recursively_free{CodeActionParams}(self.allocator, &self.params.code_action);
+		case WS_EXECUTE_COMMAND: object::recursively_free{ExecuteCommandParams}(self.allocator, &self.params.execute_command);
+		case WS_CHANGE_WATCHED: object::recursively_free{DidChangeWatchedFilesParams}(self.allocator, &self.params.did_change_watched);
+		default: break;
 	}
 }
 
@@ -152,91 +72,29 @@ macro String encode(expr, Allocator allocator, int indent = 0)
 	);
 }
 
-<*
- Like `encode`, but leaves out absent optional properties: empty strings, null
- pointers, zero-valued constdefs, as LSP numbers its kinds from 1, and structs
- holding only absent properties. Other numbers, bools and slices are always written.
-*>
-macro String encode_omitting_absent(expr, Allocator allocator)
-{
-	DString json;
-	json.tinit();
-	write_omitting_absent{$Typeof(expr)}(&json, expr)!!;
-	return string::format(allocator, "Content-Length: %d\r\n\r\n%s", json.len(), json.str_view());
-}
-
-fn bool is_absent(Type value) <Type> @local
-{
-	$switch:
-		$case Type == String:
-			return value.len == 0;
-		$case Type::kind == POINTER:
-			return value == null;
-		$case Type::kind == CONSTDEF:
-			Type zero;
-			return value == zero;
-		$case Type::kind == STRUCT:
-			$foreach $member : Type::members:
-				if (!is_absent{$member.type}(value.$member)) return false;
-			$endforeach
-			return true;
-		$default:
-			return false;
-	$endswitch
-}
-
-fn void? write_omitting_absent(OutStream out, Type value) <Type> @local
-{
-	$switch:
-		$case Type == String:
-			json::marshal_to(out, value)!;
-		$case Type::kind == POINTER:
-			write_omitting_absent{Type::inner}(out, *value)!;
-		$case Type::kind == STRUCT:
-			out.write_byte('{')!;
-			bool first = true;
-			$foreach $member : Type::members:
-				if (!is_absent{$member.type}(value.$member))
-				{
-					if (!first) out.write_byte(',')!;
-					first = false;
-					io::fprintf(out, `"%s":`, $member.name)!;
-					write_omitting_absent{$member.type}(out, value.$member)!;
-				}
-			$endforeach
-			out.write_byte('}')!;
-		$case Type::kind == SLICE:
-			out.write_byte('[')!;
-			foreach (i, element : value)
-			{
-				if (i > 0) out.write_byte(',')!;
-				write_omitting_absent{Type::inner}(out, element)!;
-			}
-			out.write_byte(']')!;
-		$default:
-			json::marshal_to(out, value)!;
-	$endswitch
-}
-
-fn LspRange decode_range(Object* range) @local
-{
-	if (!range) return {};
-	return {
-		.start = decode_position(range.get("start") ?? null),
-		.end = decode_position(range.get("end") ?? null),
-	};
-}
-
-fn LspPosition decode_position(Object* pos) @local
-{
-	if (!pos) return {};
-	return { .line = (uint)(pos.get_int("line") ?? 0), .character = (uint)(pos.get_int("character") ?? 0) };
-}
-
 struct IoDecodeResult
 {
 	LspMessage message;
 	usz len;
+}
+
+struct Envelope @local
+{
+	String jsonrpc;
+	Object* id;
+	String method;
+}
+
+struct Request <Params> @local
+{
+	Params params;
+}
+
+macro @params(Allocator allocator, String message, $Params) @local
+{
+	Request{$Params}? request = json::unmarshal(allocator, message, Request{$Params});
+	if (catch request) return INVALID_MESSAGE~;
+	return request.params;
 }
 
 <*
@@ -249,544 +107,46 @@ struct IoDecodeResult
 fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 {
 	if (message.len == 0) return INVALID_MESSAGE~;
+	Envelope envelope = json::unmarshal(tmem, message, Envelope) ?? INVALID_MESSAGE~!;
 
-	Object*? parsed = json::tparse(message);
-	if (catch parsed)
+	LspMessage msg = {
+		.allocator = allocator,
+		.rpc = (envelope.jsonrpc.len > 0 ? envelope.jsonrpc : "2.0").copy(allocator),
+		.method = lsp::message_kind_from_string(envelope.method),
+		.id = -1,
+	};
+	if (envelope.id && envelope.id.is_int())
 	{
-		return INVALID_MESSAGE~;
-	}
-
-	Object* dom = parsed;
-	if (dom == null) return INVALID_MESSAGE~;
-
-	LspMessage msg;
-	msg.allocator = allocator;
-
-	String rpc = dom.get_string("jsonrpc") ?? "2.0";
-	msg.rpc = rpc.copy(allocator);
-
-	if (try id_val = dom.get_int("id"))
-	{
-		msg.id = (int)id_val;
+		msg.id = (int)envelope.id.i;
 		msg.has_id = true;
 	}
-	else
+
+	switch (msg.method)
 	{
-		msg.id = -1;
-		msg.has_id = false;
-	}
-
-	String method_str = dom.get_string("method") ?? "";
-	msg.method = lsp::message_kind_from_string(method_str);
-
-	if (try params_obj = dom.get("params"))
-	{
-		switch (msg.method)
-		{
-			case INITIALIZE:
-				{
-					InitializeParams init_params;
-					init_params.process_id = (int)(params_obj.get_int("processId") ?? 0);
-					String loc = params_obj.get_string("locale") ?? "";
-					init_params.locale = loc.copy(allocator);
-
-					if (try root_uri = params_obj.get_string("rootUri"))
-					{
-						init_params.root_uri = maybe::value((DocumentUri)root_uri.copy(allocator));
-					}
-					else if (try root_path = params_obj.get_string("rootPath"))
-					{
-						Uri u = uri::from_file_path(allocator, root_path);
-						init_params.root_uri = maybe::value((DocumentUri)u.to_raw_string(allocator));
-					}
-
-					if (try wf_obj = params_obj.get("workspaceFolders"))
-					{
-						if (wf_obj.is_array() && wf_obj.len() > 0)
-						{
-							sz count = wf_obj.len();
-							WorkspaceFolder[] wf_arr = alloc::alloc_array(allocator, WorkspaceFolder, count);
-							for (sz i = 0; i < count; i++)
-							{
-								if (Object* f = wf_obj.get_at(i))
-								{
-									String wuri = f.get_string("uri") ?? "";
-									String wname = f.get_string("name") ?? "";
-									wf_arr[i] = {
-										.uri = wuri.copy(allocator),
-										.name = wname.copy(allocator)
-									};
-								}
-							}
-							init_params.workspace_folders = maybe::value(wf_arr);
-						}
-					}
-
-					if (try client_info = params_obj.get("clientInfo"))
-					{
-						String cname = client_info.get_string("name") ?? "";
-						String cver = client_info.get_string("version") ?? "";
-						init_params.client_info.name = cname.copy(allocator);
-						init_params.client_info.version = cver.copy(allocator);
-					}
-
-					if (try init_opts = params_obj.get("initializationOptions"))
-					{
-						String c_path = init_opts.get_string("compiler-path") ?? init_opts.get_string("compilerPath") ?? init_opts.get_string("compiler_path") ?? "";
-						String s_path = init_opts.get_string("stdlib-path") ?? init_opts.get_string("stdlibPath") ?? init_opts.get_string("stdlib_path") ?? "";
-						if (c_path.len > 0 || s_path.len > 0)
-						{
-							init_params.initialization_options = maybe::value((InitializationOptions){
-								.compiler_path = c_path.copy(allocator),
-								.stdlib_path = s_path.copy(allocator),
-							});
-						}
-					}
-					msg.params.initialize = init_params;
-				}
-
-			case DID_OPEN:
-				{
-					DidOpenParams open_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						String lang_str = td.get_string("languageId") ?? "";
-						String text_str = td.get_string("text") ?? "";
-						open_params.document.uri = uri_str.copy(allocator);
-						open_params.document.language_id = lang_str.copy(allocator);
-						open_params.document.version = (int)(td.get_int("version") ?? 0);
-						open_params.document.text = text_str.copy(allocator);
-					}
-					msg.params.did_open = open_params;
-				}
-
-			case DID_CLOSE:
-				{
-					DidCloseParams close_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						close_params.document.uri = uri_str.copy(allocator);
-					}
-					msg.params.did_close = close_params;
-				}
-
-			case DID_SAVE:
-				{
-					DidSaveParams save_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						save_params.document.uri = uri_str.copy(allocator);
-					}
-					msg.params.did_save = save_params;
-				}
-
-			case DID_CHANGE:
-				{
-					DidChangeParams change_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						change_params.document.uri = uri_str.copy(allocator);
-						change_params.document.version = (int)(td.get_int("version") ?? 0);
-					}
-					if (try changes = params_obj.get("contentChanges"))
-					{
-						if (changes.is_array())
-						{
-							sz count = changes.len();
-							TextDocumentContentChangeEvent[] arr = alloc::alloc_array(allocator, TextDocumentContentChangeEvent, count);
-							for (sz i = 0; i < count; i++)
-							{
-								if (Object* c = changes.get_at(i))
-								{
-									String ctext = c.get_string("text") ?? "";
-									arr[i].text = ctext.copy(allocator);
-								}
-							}
-							change_params.content_changes = arr;
-						}
-					}
-					msg.params.did_change = change_params;
-				}
-
-			case HOVER:
-				{
-					HoverParams hover_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						hover_params.document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						hover_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						hover_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					msg.params.hover = hover_params;
-				}
-
-			case DEFINITION:
-				{
-					GoToDefinitionParams def_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						def_params.document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						def_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						def_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					msg.params.definition = def_params;
-				}
-
-			case COMPLETION:
-				{
-					CompletionParams comp_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						comp_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						comp_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						comp_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					msg.params.completion = comp_params;
-				}
-
-			case COMPLETION_RESOLVE:
-				{
-					CompletionItem item;
-					item.label = (params_obj.get_string("label") ?? "").copy(allocator);
-					item.kind = (CompletionItemKind)(params_obj.get_int("kind") ?? 0);
-					item.detail = (params_obj.get_string("detail") ?? "").copy(allocator);
-					item.insertText = (params_obj.get_string("insertText") ?? "").copy(allocator);
-					item.insertTextFormat = (InsertTextFormat)(params_obj.get_int("insertTextFormat") ?? 1);
-					item.filterText = (params_obj.get_string("filterText") ?? "").copy(allocator);
-					item.sortText = (params_obj.get_string("sortText") ?? "").copy(allocator);
-					item.data = (params_obj.get_string("data") ?? "").copy(allocator);
-					if (try edit_obj = params_obj.get("textEdit"))
-					{
-						item.textEdit = alloc::new(allocator, TextEdit, {
-							.range = decode_range(edit_obj.get("range") ?? null),
-							.newText = (edit_obj.get_string("newText") ?? "").copy(allocator),
-						});
-					}
-					String dval = params_obj.get_string("documentation") ?? "";
-					if (dval.len == 0)
-					{
-						if (try doc_obj = params_obj.get("documentation"))
-						{
-							dval = doc_obj.get_string("value") ?? "";
-						}
-					}
-					if (dval.len > 0)
-					{
-						item.documentation = {
-							.kind = MARKDOWN,
-							.value = dval.copy(allocator)
-						};
-					}
-					msg.params.completion_resolve.item = item;
-				}
-
-			case HELP:
-				{
-					SignatureHelpParams help_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						help_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						help_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						help_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					msg.params.signature_help = help_params;
-				}
-
-			case REFERENCES:
-				{
-					ReferenceParams ref_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						ref_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						ref_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						ref_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					if (try ctx_obj = params_obj.get("context"))
-					{
-						ref_params.context.includeDeclaration = ctx_obj.get_bool("includeDeclaration") ?? true;
-					}
-					msg.params.references = ref_params;
-				}
-
-			case PREPARE_RENAME:
-				{
-					PrepareRenameParams prep_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						prep_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						prep_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						prep_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					msg.params.prepare_rename = prep_params;
-				}
-
-			case RENAME:
-				{
-					RenameParams ren_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						ren_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try pos = params_obj.get("position"))
-					{
-						ren_params.position.line = (uint)(pos.get_int("line") ?? 0);
-						ren_params.position.character = (uint)(pos.get_int("character") ?? 0);
-					}
-					String new_name = params_obj.get_string("newName") ?? "";
-					ren_params.newName = new_name.copy(allocator);
-					msg.params.rename = ren_params;
-				}
-
-			case FULL:
-				{
-					SemanticTokensParams sem_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						sem_params.text_document.uri = uri_str.copy(allocator);
-					}
-					msg.params.semantic_tokens = sem_params;
-				}
-
-			case SYMBOL:
-				{
-					DocumentSymbolParams sym_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						sym_params.text_document.uri = uri_str.copy(allocator);
-					}
-					msg.params.document_symbol = sym_params;
-				}
-
-			case WS_SYMBOL:
-				{
-					WorkspaceSymbolParams ws_params;
-					String q = params_obj.get_string("query") ?? "";
-					ws_params.query = q.copy(allocator);
-					msg.params.workspace_symbol = ws_params;
-				}
-
-			case INLAY_HINT:
-				{
-					InlayHintParams hint_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						hint_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try r = params_obj.get("range"))
-					{
-						if (try start_pos = r.get("start"))
-						{
-							hint_params.range.start.line = (uint)(start_pos.get_int("line") ?? 0);
-							hint_params.range.start.character = (uint)(start_pos.get_int("character") ?? 0);
-						}
-						if (try end_pos = r.get("end"))
-						{
-							hint_params.range.end.line = (uint)(end_pos.get_int("line") ?? 0);
-							hint_params.range.end.character = (uint)(end_pos.get_int("character") ?? 0);
-						}
-					}
-					msg.params.inlay_hint = hint_params;
-				}
-
-			case FOLDING_RANGE:
-				{
-					FoldingRangeParams fold_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						fold_params.text_document.uri = uri_str.copy(allocator);
-					}
-					msg.params.folding_range = fold_params;
-				}
-
-			case FORMATTING:
-				{
-					DocumentFormattingParams fmt_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						fmt_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try opt = params_obj.get("options"))
-					{
-						fmt_params.options.tab_size = (uint)(opt.get_int("tabSize") ?? 4);
-						fmt_params.options.insert_spaces = opt.get_bool("insertSpaces") ?? false;
-						fmt_params.options.trim_trailing_whitespace = opt.get_bool("trimTrailingWhitespace") ?? true;
-						fmt_params.options.insert_final_newline = opt.get_bool("insertFinalNewline") ?? true;
-						fmt_params.options.trim_final_newlines = opt.get_bool("trimFinalNewlines") ?? true;
-					}
-					msg.params.formatting = fmt_params;
-				}
-
-			case RANGE_FORMATTING:
-				{
-					DocumentRangeFormattingParams rfmt_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						rfmt_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try r = params_obj.get("range"))
-					{
-						if (try start_pos = r.get("start"))
-						{
-							rfmt_params.range.start.line = (uint)(start_pos.get_int("line") ?? 0);
-							rfmt_params.range.start.character = (uint)(start_pos.get_int("character") ?? 0);
-						}
-						if (try end_pos = r.get("end"))
-						{
-							rfmt_params.range.end.line = (uint)(end_pos.get_int("line") ?? 0);
-							rfmt_params.range.end.character = (uint)(end_pos.get_int("character") ?? 0);
-						}
-					}
-					if (try opt = params_obj.get("options"))
-					{
-						rfmt_params.options.tab_size = (uint)(opt.get_int("tabSize") ?? 4);
-						rfmt_params.options.insert_spaces = opt.get_bool("insertSpaces") ?? false;
-						rfmt_params.options.trim_trailing_whitespace = opt.get_bool("trimTrailingWhitespace") ?? true;
-						rfmt_params.options.insert_final_newline = opt.get_bool("insertFinalNewline") ?? true;
-						rfmt_params.options.trim_final_newlines = opt.get_bool("trimFinalNewlines") ?? true;
-					}
-					msg.params.range_formatting = rfmt_params;
-				}
-
-			case CODE_ACTION:
-				{
-					CodeActionParams ca_params;
-					if (try td = params_obj.get("textDocument"))
-					{
-						String uri_str = td.get_string("uri") ?? "";
-						ca_params.text_document.uri = uri_str.copy(allocator);
-					}
-					if (try r = params_obj.get("range"))
-					{
-						if (try start_pos = r.get("start"))
-						{
-							ca_params.range.start.line = (uint)(start_pos.get_int("line") ?? 0);
-							ca_params.range.start.character = (uint)(start_pos.get_int("character") ?? 0);
-						}
-						if (try end_pos = r.get("end"))
-						{
-							ca_params.range.end.line = (uint)(end_pos.get_int("line") ?? 0);
-							ca_params.range.end.character = (uint)(end_pos.get_int("character") ?? 0);
-						}
-					}
-					if (try ctx_obj = params_obj.get("context"))
-					{
-						if (try diags_arr = ctx_obj.get("diagnostics"))
-						{
-							if (diags_arr.is_array() && diags_arr.len() > 0)
-							{
-								sz d_count = diags_arr.len();
-								LspDiagnostic[] d_list = alloc::alloc_array(allocator, LspDiagnostic, d_count);
-								for (sz i = 0; i < d_count; i++)
-								{
-									if (Object* d_item = diags_arr.get_at(i))
-									{
-										d_list[i].message = (d_item.get_string("message") ?? "").copy(allocator);
-										d_list[i].source = (d_item.get_string("source") ?? "").copy(allocator);
-										d_list[i].severity = (int)(d_item.get_int("severity") ?? 1);
-										if (try dr = d_item.get("range"))
-										{
-											if (try ds = dr.get("start"))
-											{
-												d_list[i].range.start.line = (uint)(ds.get_int("line") ?? 0);
-												d_list[i].range.start.character = (uint)(ds.get_int("character") ?? 0);
-											}
-											if (try de = dr.get("end"))
-											{
-												d_list[i].range.end.line = (uint)(de.get_int("line") ?? 0);
-												d_list[i].range.end.character = (uint)(de.get_int("character") ?? 0);
-											}
-										}
-									}
-								}
-								ca_params.context.diagnostics = d_list;
-							}
-						}
-					}
-					msg.params.code_action = ca_params;
-				}
-
-			case WS_EXECUTE_COMMAND:
-				{
-					ExecuteCommandParams exec_params;
-					exec_params.command = (params_obj.get_string("command") ?? "").copy(allocator);
-					if (try args_arr = params_obj.get("arguments"))
-					{
-						if (args_arr.is_array() && args_arr.len() > 0)
-						{
-							sz count = args_arr.len();
-							String[] args = alloc::alloc_array(allocator, String, count);
-							for (sz i = 0; i < count; i++)
-							{
-								args[i] = (args_arr.get_string_at(i) ?? "").copy(allocator);
-							}
-							exec_params.arguments = args;
-						}
-					}
-					msg.params.execute_command = exec_params;
-				}
-
-			case WS_CHANGE_WATCHED:
-				{
-					DidChangeWatchedFilesParams watched_params;
-					if (try changes = params_obj.get("changes"))
-					{
-						if (changes.is_array())
-						{
-							sz count = changes.len();
-							FileEvent[] arr = alloc::alloc_array(allocator, FileEvent, count);
-							for (sz i = 0; i < count; i++)
-							{
-								if (Object* c = changes.get_at(i))
-								{
-									String curi = c.get_string("uri") ?? "";
-									arr[i].uri = curi.copy(allocator);
-									arr[i].type = (int)(c.get_int("type") ?? 0);
-								}
-							}
-							watched_params.changes = arr;
-						}
-					}
-					msg.params.did_change_watched = watched_params;
-				}
-
-			default:
-				msg.params.unknown = params_obj;
-		}
+		case INITIALIZE: msg.params.initialize = @params(allocator, message, InitializeParams)!;
+		case DID_OPEN: msg.params.did_open = @params(allocator, message, DidOpenParams)!;
+		case DID_CLOSE: msg.params.did_close = @params(allocator, message, DidCloseParams)!;
+		case DID_SAVE: msg.params.did_save = @params(allocator, message, DidSaveParams)!;
+		case DID_CHANGE: msg.params.did_change = @params(allocator, message, DidChangeParams)!;
+		case HOVER: msg.params.hover = @params(allocator, message, HoverParams)!;
+		case DEFINITION: msg.params.definition = @params(allocator, message, GoToDefinitionParams)!;
+		case COMPLETION: msg.params.completion = @params(allocator, message, CompletionParams)!;
+		case COMPLETION_RESOLVE: msg.params.completion_resolve.item = @params(allocator, message, CompletionItem)!;
+		case HELP: msg.params.signature_help = @params(allocator, message, SignatureHelpParams)!;
+		case REFERENCES: msg.params.references = @params(allocator, message, ReferenceParams)!;
+		case PREPARE_RENAME: msg.params.prepare_rename = @params(allocator, message, PrepareRenameParams)!;
+		case RENAME: msg.params.rename = @params(allocator, message, RenameParams)!;
+		case FULL: msg.params.semantic_tokens = @params(allocator, message, SemanticTokensParams)!;
+		case SYMBOL: msg.params.document_symbol = @params(allocator, message, DocumentSymbolParams)!;
+		case WS_SYMBOL: msg.params.workspace_symbol = @params(allocator, message, WorkspaceSymbolParams)!;
+		case INLAY_HINT: msg.params.inlay_hint = @params(allocator, message, InlayHintParams)!;
+		case FOLDING_RANGE: msg.params.folding_range = @params(allocator, message, FoldingRangeParams)!;
+		case FORMATTING: msg.params.formatting = @params(allocator, message, DocumentFormattingParams)!;
+		case RANGE_FORMATTING: msg.params.range_formatting = @params(allocator, message, DocumentRangeFormattingParams)!;
+		case CODE_ACTION: msg.params.code_action = @params(allocator, message, CodeActionParams)!;
+		case WS_EXECUTE_COMMAND: msg.params.execute_command = @params(allocator, message, ExecuteCommandParams)!;
+		case WS_CHANGE_WATCHED: msg.params.did_change_watched = @params(allocator, message, DidChangeWatchedFilesParams)!;
+		default: break;
 	}
 
 	return {

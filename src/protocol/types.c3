@@ -1,7 +1,7 @@
 module lsp;
 
 import std::collections::object;
-import std::collections::maybe;
+import std::encoding::json;
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification
 alias LspUri = String;
 alias DocumentUri = String;
@@ -15,7 +15,7 @@ struct WorkspaceFolder
 struct TextDocumentItem
 {
 	DocumentUri uri;
-	String language_id;
+	String language_id @Json("languageId");
 	int version;
 	String text;
 }
@@ -74,21 +74,21 @@ struct TextDocumentSyncOptions
 struct CompletionContext
 {
 	CompletionTriggerKind triggerKind;
-	Maybe{String} triggerCharacter;
+	String triggerCharacter;
 }
 
 struct CompletionItem
 {
 	String label;
-	CompletionItemKind kind;
-	String detail;
-	MarkupContent documentation;
-	String insertText;
-	InsertTextFormat insertTextFormat;
-	String filterText;
-	String sortText;
-	String data;
-	TextEdit* textEdit; // Replaces the typed range; insertText is used when null.
+	CompletionItemKind kind @JsonOmitEmpty;
+	String detail @JsonOmitEmpty;
+	MarkupContent documentation @JsonOmitEmpty;
+	String insertText @JsonOmitEmpty;
+	InsertTextFormat insertTextFormat @JsonOmitEmpty;
+	String filterText @JsonOmitEmpty;
+	String sortText @JsonOmitEmpty;
+	String data @JsonOmitEmpty;
+	TextEdit* textEdit @JsonOmitEmpty; // Replaces the typed range; insertText is used when null.
 }
 
 struct VersionedTextDocumentIdentifier
@@ -159,7 +159,7 @@ struct SymbolInformation
 
 struct DocumentSymbolParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 }
 
 struct WorkspaceSymbolParams
@@ -178,7 +178,7 @@ struct InlayHint
 
 struct InlayHintParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspRange range;
 }
 
@@ -193,7 +193,7 @@ struct FoldingRange
 
 struct FoldingRangeParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 }
 
 struct Command
@@ -220,7 +220,7 @@ struct CodeActionContext
 
 struct CodeActionParams
 {
-	TextDocumentIdentifier text_document;
+	TextDocumentIdentifier text_document @Json("textDocument");
 	LspRange range;
 	CodeActionContext context;
 }
