@@ -420,16 +420,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 	{
 		if (node.params.len > 0)
 		{
-			Node* first_param = node.params[0];
-			if (first_param && first_param.kind == VAR_DECL)
-			{
-				VarDecl* vd = first_param.as(VarDecl);
-				if (vd.type == null)
-				{
-					vd.type = assoc;
-					vd.var_flags.is_self = true;
-				}
-			}
+			apply_implicit_self_type(ctx, node.params[0], assoc);
 		}
 	}
 

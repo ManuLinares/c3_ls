@@ -65,12 +65,12 @@ fn void main() {
 	// 1. Hover on `to_c` (line 41, col 6) -> returns NodeB.to_c
 	LspPosition hover_to_c = { .line = 41, .character = 6 };
 	String h_c = hover::hover(&proj, doc_uri, hover_to_c)!!;
-	assert(h_c.contains("NodeB.to_c"));
+	assert(h_c.contains("NodeB.to_c(NodeB self)"));
 
 	// 2. Hover on `get_e` (line 41, col 20) -> returns NodeD.get_e
 	LspPosition hover_get_e = { .line = 41, .character = 20 };
 	String h_e = hover::hover(&proj, doc_uri, hover_get_e)!!;
-	assert(h_e.contains("NodeD.get_e"));
+	assert(h_e.contains("NodeD.get_e(NodeD* self)"));
 
 	// 3. Hover on `to_double` (line 41, col 38) -> returns sz.to_double
 	LspPosition hover_to_d = { .line = 41, .character = 38 };

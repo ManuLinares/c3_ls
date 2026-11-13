@@ -3,6 +3,26 @@ module analyzer::parser;
 import analyzer::core;
 import analyzer::lexer;
 <*
+ Types an untyped first method parameter: `self` gets `Type`, `&self` gets `Type*`.
+*>
+fn void apply_implicit_self_type(ParseContext* ctx, Node* param, Node* assoc)
+{
+	if (!param || param.kind != VAR_DECL) return;
+	VarDecl* vd = param.as(VarDecl);
+	if (vd.type) return;
+	vd.var_flags.is_self = true;
+	if (!vd.var_flags.is_self_by_ref)
+	{
+		vd.type = assoc;
+		return;
+	}
+	TypeExpr* ptr = ctx.ast.alloc_node(TypeExpr, assoc.range);
+	ptr.type_kind = TYPE_POINTER;
+	ptr.modify.base = assoc;
+	vd.type = (Node*)ptr;
+}
+
+<*
  fn_decl ::= fn type_expr (type_expr '.')? ident '(' parameter_list? ')' attributes?
  fn_body ::= ('=>' short_body) | compound_stmt
  @require scope.ctx.current.kind == FN
@@ -44,16 +64,7 @@ fn Node* parse_fn_decl(ContextScope scope)
 	// C3 spec Section 5.3.2: First parameter of a method implicitly has the associated type if omitted
 	if (node.associated_type != null && node.params.len > 0)
 	{
-		Node* first_param = node.params[0];
-		if (first_param && first_param.kind == VAR_DECL)
-		{
-			VarDecl* vd = first_param.as(VarDecl);
-			if (vd.type == null)
-			{
-				vd.type = node.associated_type;
-				vd.var_flags.is_self = true;
-			}
-		}
+		apply_implicit_self_type(ctx, node.params[0], node.associated_type);
 	}
 
 	if (ctx.is(LESS))
