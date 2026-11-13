@@ -10,6 +10,7 @@ fn AnalyzerContext* create(Allocator alloc, Target target = {})
 
 	ctx.allocator = alloc;
 	ctx.files.init(alloc);
+	ctx.files_by_node_id.init(alloc);
 	ctx.modules.init(alloc);
 	ctx.target = target;
 
@@ -39,6 +40,7 @@ fn void free(AnalyzerContext* ctx)
 		source_file::free(ctx, sf);
 	}
 	ctx.files.free();
+	ctx.files_by_node_id.free();
 
 	foreach (m : ctx.modules.values(tmem))
 	{

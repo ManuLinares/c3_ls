@@ -53,6 +53,7 @@ struct Lookup
 struct AnalyzerContext
 {
 	HashMap{String, SourceFile*} files;
+	List{SourceFile*} files_by_node_id; // Ascending `min_node_id`.
 	HashMap{String, Module*} modules;
 	Lookup* lookup;
 	Registry* registry;

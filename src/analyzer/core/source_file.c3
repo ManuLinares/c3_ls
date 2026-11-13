@@ -7,6 +7,7 @@ import analyzer::parser;
 import analyzer::sema;
 
 import std::collections::list;
+import std::sort;
 import std::io;
 
 fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Allocator alloc = null)
@@ -34,6 +35,7 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.ast.statements.init(&source_file.arena);
 	source_file.path = path.copy(&source_file.arena);
 	source_file.min_node_id = ast::next_node_id;
+	context.files_by_node_id.push(source_file);
 
 	return source_file;
 }
@@ -43,13 +45,16 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 *>
 fn SourceFile* file_of(AnalyzerContext* context, Node* node)
 {
-	SourceFile* found = null;
-	context.files.@each(; path, sf)
-	{
-		if (!found && sf && sf.contains_node(node)) found = sf;
-	};
-	return found;
+	if (!node) return null;
+	SourceFile*[] files = context.files_by_node_id.array_view();
+	sz index = sort::binarysearch(files, null, &starts_after, &node.id) - 1;
+	return index >= 0 && files[index].contains_node(node) ? files[index] : null;
 }
+
+<*
+ Never equal, so a binary search ends past every file starting at or before `id`.
+*>
+fn int starts_after(SourceFile* file, SourceFile* unused, NodeID* id) @local => file.min_node_id <= *id ? -1 : 1;
 
 fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 {
@@ -285,6 +290,7 @@ fn void free(AnalyzerContext* context, SourceFile* sf)
 	unregister_source_file(context, sf);
 	if (sf.lexer) lexer::free(context, sf.lexer);
 	(void)context.files.remove(sf.path);
+	context.files_by_node_id.remove_first_item(sf);
 	sf.arena.free();
 	alloc::free(context.allocator, sf);
 }

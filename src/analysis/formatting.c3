@@ -47,6 +47,15 @@ struct FormatterContext
 	Token next_token;
 }
 
+<*
+ Line start offsets of the buffer, built on first use.
+*>
+fn sz[] FormatterContext.offsets(&self)
+{
+	if (!self.line_offsets.len) self.line_offsets = utils::build_line_offsets(tmem, self.buffer);
+	return self.line_offsets;
+}
+
 fn void push_brace(FormatterContext* ctx, BraceKind kind)
 {
 	if (ctx.brace_stack_len < 128)
@@ -803,631 +812,621 @@ FormattingOptions options,
 bool single_line = false
 )
 {
-	DString final_out;
-	final_out.init(output_allocator);
+	FormatterContext ctx = {
+		.buffer = full_buffer,
+		.options = options,
+		.tokens = tokens,
+		.token_idx = 0,
+		.indent_level = base_indent,
+		.paren_depth = 0,
+		.multiline_paren_depth = 0,
+		.bracket_depth = 0,
+		.for_paren_depth = 0,
+		.foreach_paren_depth = 0,
+		.generic_depth = 0,
+		.decl_generic_depth = 0,
+		.ternary_depth = 0,
+		.in_case_header = false,
+		.in_case_body = false,
+		.ct_foreach_colons = 0,
+		.last_rparen_was_cast = false,
+		.brace_stack_len = 0,
+		.at_line_start = true,
+		.single_line = single_line,
+		.is_decl_header = false,
+		.is_type_decl = false,
+		.is_switch_header = false,
+		.in_ct_header = false,
+		.consecutive_newlines = 0,
+		.prev_kind = ERROR,
+		.curr_kind = ERROR
+	};
+	ctx.out.init(output_allocator);
 
-	@pool()
+	for (sz i = start_idx; i <= end_idx && i < tokens.len; i++)
 	{
-		sz[] line_offsets = utils::build_line_offsets(tmem, full_buffer);
+		Token tok = tokens[i];
+		if (tok.kind == EOF) break;
 
-		FormatterContext ctx = {
-			.buffer = full_buffer,
-			.line_offsets = line_offsets,
-			.options = options,
-			.tokens = tokens,
-			.token_idx = 0,
-			.indent_level = base_indent,
-			.paren_depth = 0,
-			.multiline_paren_depth = 0,
-			.bracket_depth = 0,
-			.for_paren_depth = 0,
-			.foreach_paren_depth = 0,
-			.generic_depth = 0,
-			.decl_generic_depth = 0,
-			.ternary_depth = 0,
-			.in_case_header = false,
-			.in_case_body = false,
-			.ct_foreach_colons = 0,
-			.last_rparen_was_cast = false,
-			.brace_stack_len = 0,
-			.at_line_start = true,
-			.single_line = single_line,
-			.is_decl_header = false,
-			.is_type_decl = false,
-			.is_switch_header = false,
-			.in_ct_header = false,
-			.consecutive_newlines = 0,
-			.prev_kind = ERROR,
-			.curr_kind = ERROR
-		};
-		ctx.out.tinit();
+		Token next_tok = (i + 1 < tokens.len) ? tokens[i + 1] : (Token){.kind = EOF };
 
-		for (sz i = start_idx; i <= end_idx && i < tokens.len; i++)
+		ctx.curr_token = tok;
+		ctx.curr_kind = tok.kind;
+		ctx.next_token = next_tok;
+		ctx.token_idx = i;
+		// Top-level module declarations reset indent baseline to 0
+		if (tok.kind == MODULE && ctx.brace_stack_len == 0)
 		{
-			Token tok = tokens[i];
-			if (tok.kind == EOF) break;
+			ctx.indent_level = 0;
+		}
 
-			Token next_tok = (i + 1 < tokens.len) ? tokens[i + 1] : (Token){.kind = EOF };
+		if (tok.kind == DOCS_START)
+		{
+			int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+				? (tok.range.start.line - ctx.prev_token.range.end.line)
+				: 0;
 
-			ctx.curr_token = tok;
-			ctx.curr_kind = tok.kind;
-			ctx.next_token = next_tok;
-			ctx.token_idx = i;
-			// Top-level module declarations reset indent baseline to 0
-			if (tok.kind == MODULE && ctx.brace_stack_len == 0)
+			if (line_diff >= 2)
 			{
-				ctx.indent_level = 0;
-			}
-
-			if (tok.kind == DOCS_START)
-			{
-				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
-					? (tok.range.start.line - ctx.prev_token.range.end.line)
-					: 0;
-
-				if (line_diff >= 2)
-				{
-					if (ctx.at_line_start)
-					{
-						newline(&ctx, 1);
-					}
-					else
-					{
-						newline(&ctx, 2);
-					}
-				}
-				else if (line_diff == 1 && !ctx.at_line_start)
+				if (ctx.at_line_start)
 				{
 					newline(&ctx, 1);
 				}
-
-				if (ctx.at_line_start) indent(&ctx);
-
-				sz end_doc_idx = i;
-				while (end_doc_idx < tokens.len && tokens[end_doc_idx].kind != DOCS_END && tokens[end_doc_idx].kind != EOF)
-				{
-					end_doc_idx++;
-				}
-
-				sz start_off = utils::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tok.range.start.line, (uint)tok.range.start.column);
-				sz end_off = utils::offset_from_line_table(ctx.line_offsets, ctx.buffer, (uint)tokens[end_doc_idx].range.end.line, (uint)tokens[end_doc_idx].range.end.column);
-
-				if (start_off < end_off && end_off <= ctx.buffer.len)
-				{
-					ctx.out.append(ctx.buffer[start_off : end_off - start_off].trim());
-				}
 				else
 				{
-					ctx.out.append("<* ... *>");
+					newline(&ctx, 2);
 				}
-
-				ctx.consecutive_newlines = 0;
+			}
+			else if (line_diff == 1 && !ctx.at_line_start)
+			{
 				newline(&ctx, 1);
-				i = end_doc_idx;
-				ctx.prev_prev_token = ctx.prev_token;
-				ctx.prev_kind = DOCS_END;
-				ctx.prev_token = tokens[end_doc_idx];
-				continue;
 			}
 
-			if (tok.kind == STRUCT || tok.kind == ENUM || tok.kind == UNION ||
-			tok.kind == BITSTRUCT || tok.kind == INTERFACE || tok.kind == CONSTDEF)
+			if (ctx.at_line_start) indent(&ctx);
+
+			sz end_doc_idx = i;
+			while (end_doc_idx < tokens.len && tokens[end_doc_idx].kind != DOCS_END && tokens[end_doc_idx].kind != EOF)
 			{
-				ctx.is_decl_header = true;
-				ctx.is_type_decl = true;
-			}
-			else if (tok.kind == TYPEDEF || tok.kind == ALIAS ||
-			tok.kind == FN || tok.kind == MACRO || tok.kind == MODULE)
-			{
-				ctx.is_decl_header = true;
+				end_doc_idx++;
 			}
 
-			if (tok.kind == SWITCH || tok.kind == CT_SWITCH)
+			sz[] line_offsets = ctx.offsets();
+			sz start_off = utils::offset_from_line_table(line_offsets, ctx.buffer, (uint)tok.range.start.line, (uint)tok.range.start.column);
+			sz end_off = utils::offset_from_line_table(line_offsets, ctx.buffer, (uint)tokens[end_doc_idx].range.end.line, (uint)tokens[end_doc_idx].range.end.column);
+
+			if (start_off < end_off && end_off <= ctx.buffer.len)
 			{
-				ctx.is_switch_header = true;
+				ctx.out.append(ctx.buffer[start_off : end_off - start_off].trim());
+			}
+			else
+			{
+				ctx.out.append("<* ... *>");
 			}
 
-			if (tok.kind == IMPLIES || tok.kind == EQ)
+			ctx.consecutive_newlines = 0;
+			newline(&ctx, 1);
+			i = end_doc_idx;
+			ctx.prev_prev_token = ctx.prev_token;
+			ctx.prev_kind = DOCS_END;
+			ctx.prev_token = tokens[end_doc_idx];
+			continue;
+		}
+
+		if (tok.kind == STRUCT || tok.kind == ENUM || tok.kind == UNION ||
+		tok.kind == BITSTRUCT || tok.kind == INTERFACE || tok.kind == CONSTDEF)
+		{
+			ctx.is_decl_header = true;
+			ctx.is_type_decl = true;
+		}
+		else if (tok.kind == TYPEDEF || tok.kind == ALIAS ||
+		tok.kind == FN || tok.kind == MACRO || tok.kind == MODULE)
+		{
+			ctx.is_decl_header = true;
+		}
+
+		if (tok.kind == SWITCH || tok.kind == CT_SWITCH)
+		{
+			ctx.is_switch_header = true;
+		}
+
+		if (tok.kind == IMPLIES || tok.kind == EQ)
+		{
+			ctx.is_decl_header = false;
+			ctx.is_type_decl = false;
+		}
+
+		if (tok.kind == CT_IF || tok.kind == CT_FOR || tok.kind == CT_SWITCH)
+		{
+			ctx.in_ct_header = true;
+		}
+
+		if (tok.kind == CT_FOREACH)
+		{
+			ctx.ct_foreach_colons = 1;
+		}
+
+		if (tok.kind == LINE_COMMENT)
+		{
+			int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+				? (tok.range.start.line - ctx.prev_token.range.end.line)
+				: 0;
+
+			if (line_diff >= 2)
 			{
-				ctx.is_decl_header = false;
-				ctx.is_type_decl = false;
-			}
-
-			if (tok.kind == CT_IF || tok.kind == CT_FOR || tok.kind == CT_SWITCH)
-			{
-				ctx.in_ct_header = true;
-			}
-
-			if (tok.kind == CT_FOREACH)
-			{
-				ctx.ct_foreach_colons = 1;
-			}
-
-			if (tok.kind == LINE_COMMENT)
-			{
-				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
-					? (tok.range.start.line - ctx.prev_token.range.end.line)
-					: 0;
-
-				if (line_diff >= 2)
-				{
-					if (ctx.at_line_start)
-					{
-						newline(&ctx, 1);
-					}
-					else
-					{
-						newline(&ctx, 2);
-					}
-					indent(&ctx);
-				}
-				else if (line_diff == 1)
-				{
-					if (!ctx.at_line_start)
-					{
-						newline(&ctx, 1);
-					}
-					indent(&ctx);
-				}
-				else
-				{
-					if (ctx.at_line_start)
-					{
-						indent(&ctx);
-					}
-					else
-					{
-						ctx.out.append("  ");
-					}
-				}
-
-				ctx.out.append(tok.value.trim_right("\r\n"));
-				ctx.consecutive_newlines = 0;
-
-				int next_line_diff = (next_tok.kind != EOF)
-					? (next_tok.range.start.line - tok.range.end.line)
-					: 1;
-
-				newline(&ctx, next_line_diff >= 2 ? 2 : 1);
-
-				ctx.prev_prev_token = ctx.prev_token;
-				ctx.prev_kind = tok.kind;
-				ctx.prev_token = tok;
-				continue;
-			}
-
-			if (tok.kind == BLOCK_COMMENT)
-			{
-				int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
-					? (tok.range.start.line - ctx.prev_token.range.end.line)
-					: 0;
-
-				if (line_diff >= 2)
-				{
-					if (ctx.at_line_start)
-					{
-						newline(&ctx, 1);
-					}
-					else
-					{
-						newline(&ctx, 2);
-					}
-					indent(&ctx);
-				}
-				else if (line_diff == 1)
-				{
-					if (!ctx.at_line_start)
-					{
-						newline(&ctx, 1);
-					}
-					indent(&ctx);
-				}
-				else
-				{
-					if (ctx.at_line_start)
-					{
-						indent(&ctx);
-					}
-					else
-					{
-						ctx.out.append_char(' ');
-					}
-				}
-
-				ctx.out.append(tok.value);
-				ctx.consecutive_newlines = 0;
-
-				if (next_tok.kind != EOF && next_tok.range.start.line > tok.range.end.line)
-				{
-					int next_line_diff = next_tok.range.start.line - tok.range.end.line;
-					newline(&ctx, next_line_diff >= 2 ? 2 : 1);
-				}
-
-				ctx.prev_prev_token = ctx.prev_token;
-				ctx.prev_kind = tok.kind;
-				ctx.prev_token = tok;
-				continue;
-			}
-
-			if (tok.kind == CT_ELSE)
-			{
-				if (ctx.indent_level > 0) ctx.indent_level--;
-				if (!ctx.at_line_start) newline(&ctx);
-			}
-			if (tok.kind == CT_ENDIF || tok.kind == CT_ENDFOR || tok.kind == CT_ENDFOREACH)
-			{
-				if (ctx.indent_level > 0) ctx.indent_level--;
-				if (!ctx.at_line_start) newline(&ctx);
-			}
-			if (tok.kind == CT_ENDSWITCH)
-			{
-				if (ctx.in_case_body)
-				{
-					if (ctx.indent_level > 0) ctx.indent_level--;
-					ctx.in_case_body = false;
-				}
-				if (ctx.indent_level > 0) ctx.indent_level--;
-				if (!ctx.at_line_start) newline(&ctx);
-			}
-			if (tok.kind == LESS && ctx.is_decl_header)
-			{
-				ctx.decl_generic_depth++;
-			}
-			BraceKind closed_bk = INLINE_INIT;
-			bool just_closed_brace = false;
-
-			if (tok.kind == RBRACE)
-			{
-				ctx.ternary_depth = 0;
-				ctx.is_decl_header = false;
-				ctx.is_type_decl = false;
-				if (ctx.generic_depth == 0)
-				{
-					closed_bk = pop_brace(&ctx);
-					just_closed_brace = true;
-
-					if (closed_bk == SWITCH_BLOCK)
-					{
-						if (ctx.in_case_body)
-						{
-							if (ctx.indent_level > 0) ctx.indent_level--;
-							ctx.in_case_body = false;
-						}
-						if (ctx.indent_level > 0)
-						{
-							ctx.indent_level--;
-						}
-						if (!ctx.at_line_start)
-						{
-							newline(&ctx);
-						}
-					}
-					else if (closed_bk == BLOCK || closed_bk == MULTILINE_INIT)
-					{
-						if (ctx.indent_level > 0)
-						{
-							ctx.indent_level--;
-						}
-						if (!ctx.at_line_start)
-						{
-							newline(&ctx);
-						}
-					}
-				}
-			}
-
-			if (tok.kind == RPAREN)
-			{
-				if (ctx.multiline_paren_depth > 0)
-				{
-					ctx.multiline_paren_depth--;
-					if (ctx.indent_level > 0) ctx.indent_level--;
-				}
-				if (ctx.paren_depth > 0) ctx.paren_depth--;
-				if (ctx.for_paren_depth > 0 && ctx.paren_depth < ctx.for_paren_depth)
-				{
-					ctx.for_paren_depth = 0;
-				}
-				if (ctx.foreach_paren_depth > 0 && ctx.paren_depth < ctx.foreach_paren_depth)
-				{
-					ctx.foreach_paren_depth = 0;
-				}
-
-				bool was_cast = is_paren_cast(ctx.tokens, i);
-				ctx.last_rparen_was_cast = was_cast;
-			}
-
-			if (tok.kind == RBRACKET || tok.kind == RVEC)
-			{
-				if (ctx.bracket_depth > 0) ctx.bracket_depth--;
-			}
-
-			if (tok.kind == LBRACKET || tok.kind == LVEC)
-			{
-				ctx.bracket_depth++;
-			}
-
-			if ((tok.kind == QUESTION && !is_type_ending_token(ctx.prev_kind) && ctx.prev_kind != RBRACE && is_expr_operand_end(ctx.prev_kind)) ||
-			tok.kind == CT_TERNARY)
-			{
-				ctx.ternary_depth++;
-			}
-
-			if (tok.kind != RBRACE && i > start_idx && ctx.prev_kind != ERROR &&
-			ctx.prev_kind != LINE_COMMENT && ctx.prev_kind != BLOCK_COMMENT && ctx.prev_kind != DOCS_END)
-			{
-				int line_diff = tok.range.start.line - ctx.prev_token.range.end.line;
-				if (line_diff >= 2)
-				{
-					if (ctx.at_line_start || tok.kind == LBRACE)
-					{
-						newline(&ctx, 1);
-					}
-					else
-					{
-						newline(&ctx, 2);
-					}
-				}
-				else if (line_diff == 1 && !ctx.at_line_start)
+				if (ctx.at_line_start)
 				{
 					newline(&ctx, 1);
 				}
-			}
-
-			if (tok.kind == LBRACE)
-			{
-				ctx.ternary_depth = 0;
-				bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
-					(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
-					is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
-				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
-				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
-
-				bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
-				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
-
-				if (!is_generic && !is_init && next_tok.kind != RBRACE && !ctx.at_line_start)
+				else
 				{
-					newline(&ctx);
+					newline(&ctx, 2);
 				}
-			}
-
-			if (tok.kind == CASE || tok.kind == DEFAULT || tok.kind == CT_CASE || tok.kind == CT_DEFAULT)
-			{
-				if (ctx.in_case_body)
-				{
-					if (ctx.indent_level > 0) ctx.indent_level--;
-					ctx.in_case_body = false;
-				}
-				ctx.in_case_header = true;
-				if (!ctx.at_line_start) newline(&ctx);
-			}
-
-			if (ctx.at_line_start)
-			{
 				indent(&ctx);
 			}
-			else if (should_space_between(&ctx, ctx.prev_kind, tok.kind))
+			else if (line_diff == 1)
 			{
-				ctx.out.append_char(' ');
+				if (!ctx.at_line_start)
+				{
+					newline(&ctx, 1);
+				}
+				indent(&ctx);
+			}
+			else
+			{
+				if (ctx.at_line_start)
+				{
+					indent(&ctx);
+				}
+				else
+				{
+					ctx.out.append("  ");
+				}
+			}
+
+			ctx.out.append(tok.value.trim_right("\r\n"));
+			ctx.consecutive_newlines = 0;
+
+			int next_line_diff = (next_tok.kind != EOF)
+				? (next_tok.range.start.line - tok.range.end.line)
+				: 1;
+
+			newline(&ctx, next_line_diff >= 2 ? 2 : 1);
+
+			ctx.prev_prev_token = ctx.prev_token;
+			ctx.prev_kind = tok.kind;
+			ctx.prev_token = tok;
+			continue;
+		}
+
+		if (tok.kind == BLOCK_COMMENT)
+		{
+			int line_diff = (i > start_idx && ctx.prev_kind != ERROR)
+				? (tok.range.start.line - ctx.prev_token.range.end.line)
+				: 0;
+
+			if (line_diff >= 2)
+			{
+				if (ctx.at_line_start)
+				{
+					newline(&ctx, 1);
+				}
+				else
+				{
+					newline(&ctx, 2);
+				}
+				indent(&ctx);
+			}
+			else if (line_diff == 1)
+			{
+				if (!ctx.at_line_start)
+				{
+					newline(&ctx, 1);
+				}
+				indent(&ctx);
+			}
+			else
+			{
+				if (ctx.at_line_start)
+				{
+					indent(&ctx);
+				}
+				else
+				{
+					ctx.out.append_char(' ');
+				}
 			}
 
 			ctx.out.append(tok.value);
 			ctx.consecutive_newlines = 0;
 
-			if (just_closed_brace && (closed_bk == BLOCK || closed_bk == SWITCH_BLOCK))
+			if (next_tok.kind != EOF && next_tok.range.start.line > tok.range.end.line)
 			{
-				if (next_tok.kind != ELSE && next_tok.kind != WHILE && next_tok.kind != EOS && next_tok.kind != EOF)
-				{
-					if (ctx.brace_stack_len == 0)
-					{
-						ctx.is_decl_header = false;
-						ctx.is_type_decl = false;
-						newline(&ctx, 2);
-					}
-					else
-					{
-						newline(&ctx, 1);
-					}
-				}
-			}
-
-			if (tok.kind == COLON)
-			{
-				if (ctx.ternary_depth > 0 && ctx.bracket_depth == 0 && ctx.paren_depth == 0)
-				{
-					ctx.ternary_depth--;
-				}
-				if (ctx.in_ct_header)
-				{
-					ctx.in_ct_header = false;
-					ctx.indent_level++;
-					newline(&ctx, 1);
-				}
-				else if (ctx.ct_foreach_colons == 1)
-				{
-					ctx.ct_foreach_colons = 2;
-				}
-				else if (ctx.ct_foreach_colons == 2)
-				{
-					ctx.ct_foreach_colons = 0;
-					ctx.indent_level++;
-					newline(&ctx, 1);
-				}
-				else if (ctx.in_case_header)
-				{
-					ctx.in_case_header = false;
-					if (next_tok.kind != EOF && next_tok.kind != CASE && next_tok.kind != DEFAULT &&
-					next_tok.kind != CT_CASE && next_tok.kind != CT_DEFAULT &&
-					next_tok.range.start.line > tok.range.end.line)
-					{
-						ctx.indent_level++;
-						ctx.in_case_body = true;
-						newline(&ctx, 1);
-					}
-				}
-			}
-
-			if (tok.kind == CT_ELSE)
-			{
-				ctx.indent_level++;
-				newline(&ctx, 1);
-			}
-
-			if (tok.kind == CT_ENDIF || tok.kind == CT_ENDFOR || tok.kind == CT_ENDFOREACH || tok.kind == CT_ENDSWITCH)
-			{
-				newline(&ctx, 1);
-			}
-
-			if (tok.kind == LPAREN)
-			{
-				ctx.paren_depth++;
-				int p_depth = 1;
-				bool paren_multiline = false;
-				for (sz j = i + 1; j < tokens.len; j++)
-				{
-					if (tokens[j].kind == LPAREN)
-					{
-						p_depth++;
-					}
-					else if (tokens[j].kind == RPAREN)
-					{
-						p_depth--;
-						if (p_depth == 0)
-						{
-							paren_multiline = tokens[j].range.start.line > tok.range.start.line;
-							break;
-						}
-					}
-					else if (tokens[j].kind == EOF)
-					{
-						break;
-					}
-				}
-				if (paren_multiline)
-				{
-					ctx.multiline_paren_depth++;
-					ctx.indent_level++;
-				}
-				if (ctx.prev_kind == FOR || ctx.prev_kind == CT_FOR)
-				{
-					ctx.for_paren_depth = ctx.paren_depth;
-				}
-				if (ctx.prev_kind == FOREACH || ctx.prev_kind == FOREACH_R || ctx.prev_kind == CT_FOREACH)
-				{
-					ctx.foreach_paren_depth = ctx.paren_depth;
-				}
-			}
-
-			if (tok.kind == LBRACE)
-			{
-				ctx.ternary_depth = 0;
-				bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
-					(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
-					is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
-				bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
-				(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
-
-				bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
-				bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
-
-				if (is_generic)
-				{
-					ctx.generic_depth++;
-				}
-				else if (next_tok.kind == RBRACE)
-				{
-					push_brace(&ctx, INLINE_INIT);
-					ctx.is_decl_header = false;
-					ctx.is_type_decl = false;
-				}
-				else if (is_init)
-				{
-					if (next_tok.kind != EOF && next_tok.range.start.line > tok.range.end.line)
-					{
-						push_brace(&ctx, MULTILINE_INIT);
-						ctx.indent_level++;
-						newline(&ctx);
-					}
-					else
-					{
-						push_brace(&ctx, INLINE_INIT);
-					}
-					ctx.is_decl_header = false;
-					ctx.is_type_decl = false;
-				}
-				else if (ctx.is_switch_header)
-				{
-					push_brace(&ctx, SWITCH_BLOCK);
-					ctx.indent_level++;
-					newline(&ctx);
-					ctx.is_switch_header = false;
-					ctx.is_decl_header = false;
-					ctx.is_type_decl = false;
-				}
-				else
-				{
-					push_brace(&ctx, BLOCK);
-					ctx.indent_level++;
-					newline(&ctx);
-					ctx.is_decl_header = false;
-					ctx.is_type_decl = false;
-				}
-			}
-
-			if (tok.kind == RBRACE)
-			{
-				if (ctx.generic_depth > 0)
-				{
-					ctx.generic_depth--;
-				}
-			}
-
-			if (tok.kind == GREATER && ctx.decl_generic_depth > 0)
-			{
-				ctx.decl_generic_depth--;
-			}
-
-			if (tok.kind == EOS)
-			{
-				ctx.ternary_depth = 0;
-				ctx.is_decl_header = false;
-				ctx.is_type_decl = false;
-				if (ctx.for_paren_depth == 0 && ctx.paren_depth == 0)
-				{
-					if (next_tok.kind == LINE_COMMENT && next_tok.range.start.line == tok.range.end.line)
-					{
-						// Keep inline for trailing line comment
-					}
-					else if (next_tok.kind == BLOCK_COMMENT && next_tok.range.start.line == tok.range.end.line)
-					{
-						// Keep inline for trailing block comment
-					}
-					else if (ctx.brace_stack_len > 0 && next_tok.kind != EOF && next_tok.kind != RBRACE && next_tok.range.start.line == tok.range.end.line)
-					{
-						// Keep inline for compact same-line statements
-					}
-					else
-					{
-						newline(&ctx, 1);
-					}
-				}
+				int next_line_diff = next_tok.range.start.line - tok.range.end.line;
+				newline(&ctx, next_line_diff >= 2 ? 2 : 1);
 			}
 
 			ctx.prev_prev_token = ctx.prev_token;
 			ctx.prev_kind = tok.kind;
 			ctx.prev_token = tok;
+			continue;
 		}
 
-		if (options.insert_final_newline && !ctx.at_line_start)
+		if (tok.kind == CT_ELSE)
 		{
-			newline(&ctx);
+			if (ctx.indent_level > 0) ctx.indent_level--;
+			if (!ctx.at_line_start) newline(&ctx);
+		}
+		if (tok.kind == CT_ENDIF || tok.kind == CT_ENDFOR || tok.kind == CT_ENDFOREACH)
+		{
+			if (ctx.indent_level > 0) ctx.indent_level--;
+			if (!ctx.at_line_start) newline(&ctx);
+		}
+		if (tok.kind == CT_ENDSWITCH)
+		{
+			if (ctx.in_case_body)
+			{
+				if (ctx.indent_level > 0) ctx.indent_level--;
+				ctx.in_case_body = false;
+			}
+			if (ctx.indent_level > 0) ctx.indent_level--;
+			if (!ctx.at_line_start) newline(&ctx);
+		}
+		if (tok.kind == LESS && ctx.is_decl_header)
+		{
+			ctx.decl_generic_depth++;
+		}
+		BraceKind closed_bk = INLINE_INIT;
+		bool just_closed_brace = false;
+
+		if (tok.kind == RBRACE)
+		{
+			ctx.ternary_depth = 0;
+			ctx.is_decl_header = false;
+			ctx.is_type_decl = false;
+			if (ctx.generic_depth == 0)
+			{
+				closed_bk = pop_brace(&ctx);
+				just_closed_brace = true;
+
+				if (closed_bk == SWITCH_BLOCK)
+				{
+					if (ctx.in_case_body)
+					{
+						if (ctx.indent_level > 0) ctx.indent_level--;
+						ctx.in_case_body = false;
+					}
+					if (ctx.indent_level > 0)
+					{
+						ctx.indent_level--;
+					}
+					if (!ctx.at_line_start)
+					{
+						newline(&ctx);
+					}
+				}
+				else if (closed_bk == BLOCK || closed_bk == MULTILINE_INIT)
+				{
+					if (ctx.indent_level > 0)
+					{
+						ctx.indent_level--;
+					}
+					if (!ctx.at_line_start)
+					{
+						newline(&ctx);
+					}
+				}
+			}
 		}
 
-		final_out.append(ctx.out.str_view());
-	};
+		if (tok.kind == RPAREN)
+		{
+			if (ctx.multiline_paren_depth > 0)
+			{
+				ctx.multiline_paren_depth--;
+				if (ctx.indent_level > 0) ctx.indent_level--;
+			}
+			if (ctx.paren_depth > 0) ctx.paren_depth--;
+			if (ctx.for_paren_depth > 0 && ctx.paren_depth < ctx.for_paren_depth)
+			{
+				ctx.for_paren_depth = 0;
+			}
+			if (ctx.foreach_paren_depth > 0 && ctx.paren_depth < ctx.foreach_paren_depth)
+			{
+				ctx.foreach_paren_depth = 0;
+			}
 
-	return final_out.str_view();
+			bool was_cast = is_paren_cast(ctx.tokens, i);
+			ctx.last_rparen_was_cast = was_cast;
+		}
+
+		if (tok.kind == RBRACKET || tok.kind == RVEC)
+		{
+			if (ctx.bracket_depth > 0) ctx.bracket_depth--;
+		}
+
+		if (tok.kind == LBRACKET || tok.kind == LVEC)
+		{
+			ctx.bracket_depth++;
+		}
+
+		if ((tok.kind == QUESTION && !is_type_ending_token(ctx.prev_kind) && ctx.prev_kind != RBRACE && is_expr_operand_end(ctx.prev_kind)) ||
+		tok.kind == CT_TERNARY)
+		{
+			ctx.ternary_depth++;
+		}
+
+		if (tok.kind != RBRACE && i > start_idx && ctx.prev_kind != ERROR &&
+		ctx.prev_kind != LINE_COMMENT && ctx.prev_kind != BLOCK_COMMENT && ctx.prev_kind != DOCS_END)
+		{
+			int line_diff = tok.range.start.line - ctx.prev_token.range.end.line;
+			if (line_diff >= 2)
+			{
+				if (ctx.at_line_start || tok.kind == LBRACE)
+				{
+					newline(&ctx, 1);
+				}
+				else
+				{
+					newline(&ctx, 2);
+				}
+			}
+			else if (line_diff == 1 && !ctx.at_line_start)
+			{
+				newline(&ctx, 1);
+			}
+		}
+
+		if (tok.kind == LBRACE)
+		{
+			ctx.ternary_depth = 0;
+			bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
+				(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
+				is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+			bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
+			(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
+
+			bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
+			bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
+
+			if (!is_generic && !is_init && next_tok.kind != RBRACE && !ctx.at_line_start)
+			{
+				newline(&ctx);
+			}
+		}
+
+		if (tok.kind == CASE || tok.kind == DEFAULT || tok.kind == CT_CASE || tok.kind == CT_DEFAULT)
+		{
+			if (ctx.in_case_body)
+			{
+				if (ctx.indent_level > 0) ctx.indent_level--;
+				ctx.in_case_body = false;
+			}
+			ctx.in_case_header = true;
+			if (!ctx.at_line_start) newline(&ctx);
+		}
+
+		if (ctx.at_line_start)
+		{
+			indent(&ctx);
+		}
+		else if (should_space_between(&ctx, ctx.prev_kind, tok.kind))
+		{
+			ctx.out.append_char(' ');
+		}
+
+		ctx.out.append(tok.value);
+		ctx.consecutive_newlines = 0;
+
+		if (just_closed_brace && (closed_bk == BLOCK || closed_bk == SWITCH_BLOCK))
+		{
+			if (next_tok.kind != ELSE && next_tok.kind != WHILE && next_tok.kind != EOS && next_tok.kind != EOF)
+			{
+				if (ctx.brace_stack_len == 0)
+				{
+					ctx.is_decl_header = false;
+					ctx.is_type_decl = false;
+					newline(&ctx, 2);
+				}
+				else
+				{
+					newline(&ctx, 1);
+				}
+			}
+		}
+
+		if (tok.kind == COLON)
+		{
+			if (ctx.ternary_depth > 0 && ctx.bracket_depth == 0 && ctx.paren_depth == 0)
+			{
+				ctx.ternary_depth--;
+			}
+			if (ctx.in_ct_header)
+			{
+				ctx.in_ct_header = false;
+				ctx.indent_level++;
+				newline(&ctx, 1);
+			}
+			else if (ctx.ct_foreach_colons == 1)
+			{
+				ctx.ct_foreach_colons = 2;
+			}
+			else if (ctx.ct_foreach_colons == 2)
+			{
+				ctx.ct_foreach_colons = 0;
+				ctx.indent_level++;
+				newline(&ctx, 1);
+			}
+			else if (ctx.in_case_header)
+			{
+				ctx.in_case_header = false;
+				if (next_tok.kind != EOF && next_tok.kind != CASE && next_tok.kind != DEFAULT &&
+				next_tok.kind != CT_CASE && next_tok.kind != CT_DEFAULT &&
+				next_tok.range.start.line > tok.range.end.line)
+				{
+					ctx.indent_level++;
+					ctx.in_case_body = true;
+					newline(&ctx, 1);
+				}
+			}
+		}
+
+		if (tok.kind == CT_ELSE)
+		{
+			ctx.indent_level++;
+			newline(&ctx, 1);
+		}
+
+		if (tok.kind == CT_ENDIF || tok.kind == CT_ENDFOR || tok.kind == CT_ENDFOREACH || tok.kind == CT_ENDSWITCH)
+		{
+			newline(&ctx, 1);
+		}
+
+		if (tok.kind == LPAREN)
+		{
+			ctx.paren_depth++;
+			int p_depth = 1;
+			bool paren_multiline = false;
+			for (sz j = i + 1; j < tokens.len; j++)
+			{
+				if (tokens[j].kind == LPAREN)
+				{
+					p_depth++;
+				}
+				else if (tokens[j].kind == RPAREN)
+				{
+					p_depth--;
+					if (p_depth == 0)
+					{
+						paren_multiline = tokens[j].range.start.line > tok.range.start.line;
+						break;
+					}
+				}
+				else if (tokens[j].kind == EOF)
+				{
+					break;
+				}
+			}
+			if (paren_multiline)
+			{
+				ctx.multiline_paren_depth++;
+				ctx.indent_level++;
+			}
+			if (ctx.prev_kind == FOR || ctx.prev_kind == CT_FOR)
+			{
+				ctx.for_paren_depth = ctx.paren_depth;
+			}
+			if (ctx.prev_kind == FOREACH || ctx.prev_kind == FOREACH_R || ctx.prev_kind == CT_FOREACH)
+			{
+				ctx.foreach_paren_depth = ctx.paren_depth;
+			}
+		}
+
+		if (tok.kind == LBRACE)
+		{
+			ctx.ternary_depth = 0;
+			bool is_decl_block = is_enclosing_type_decl_header(ctx.tokens, i) ||
+				(ctx.is_type_decl && ctx.paren_depth == 0 && ctx.decl_generic_depth == 0 && ctx.bracket_depth == 0) ||
+				is_decl_block_start(ctx.prev_kind, ctx.prev_prev_token.kind);
+			bool is_generic = ((ctx.prev_kind == TYPE_IDENT || ctx.prev_kind == IDENT) && !is_decl_block) ||
+			(ctx.prev_kind == RBRACE && ctx.generic_depth > 0);
+
+			bool is_compound_literal = (ctx.prev_kind == RPAREN && (is_type_ending_token(ctx.prev_prev_token.kind) || ctx.prev_prev_token.kind == RBRACE));
+			bool is_init = (is_initializer_context(ctx.prev_kind) || is_compound_literal) && !ctx.is_switch_header && !is_decl_block;
+
+			if (is_generic)
+			{
+				ctx.generic_depth++;
+			}
+			else if (next_tok.kind == RBRACE)
+			{
+				push_brace(&ctx, INLINE_INIT);
+				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
+			}
+			else if (is_init)
+			{
+				if (next_tok.kind != EOF && next_tok.range.start.line > tok.range.end.line)
+				{
+					push_brace(&ctx, MULTILINE_INIT);
+					ctx.indent_level++;
+					newline(&ctx);
+				}
+				else
+				{
+					push_brace(&ctx, INLINE_INIT);
+				}
+				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
+			}
+			else if (ctx.is_switch_header)
+			{
+				push_brace(&ctx, SWITCH_BLOCK);
+				ctx.indent_level++;
+				newline(&ctx);
+				ctx.is_switch_header = false;
+				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
+			}
+			else
+			{
+				push_brace(&ctx, BLOCK);
+				ctx.indent_level++;
+				newline(&ctx);
+				ctx.is_decl_header = false;
+				ctx.is_type_decl = false;
+			}
+		}
+
+		if (tok.kind == RBRACE)
+		{
+			if (ctx.generic_depth > 0)
+			{
+				ctx.generic_depth--;
+			}
+		}
+
+		if (tok.kind == GREATER && ctx.decl_generic_depth > 0)
+		{
+			ctx.decl_generic_depth--;
+		}
+
+		if (tok.kind == EOS)
+		{
+			ctx.ternary_depth = 0;
+			ctx.is_decl_header = false;
+			ctx.is_type_decl = false;
+			if (ctx.for_paren_depth == 0 && ctx.paren_depth == 0)
+			{
+				if (next_tok.kind == LINE_COMMENT && next_tok.range.start.line == tok.range.end.line)
+				{
+					// Keep inline for trailing line comment
+				}
+				else if (next_tok.kind == BLOCK_COMMENT && next_tok.range.start.line == tok.range.end.line)
+				{
+					// Keep inline for trailing block comment
+				}
+				else if (ctx.brace_stack_len > 0 && next_tok.kind != EOF && next_tok.kind != RBRACE && next_tok.range.start.line == tok.range.end.line)
+				{
+					// Keep inline for compact same-line statements
+				}
+				else
+				{
+					newline(&ctx, 1);
+				}
+			}
+		}
+
+		ctx.prev_prev_token = ctx.prev_token;
+		ctx.prev_kind = tok.kind;
+		ctx.prev_token = tok;
+	}
+
+	if (options.insert_final_newline && !ctx.at_line_start)
+	{
+		newline(&ctx);
+	}
+
+	return ctx.out.str_view();
 }
 
 fn List{String} split_lines_with_newline(Allocator allocator, String s) @local

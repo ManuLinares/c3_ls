@@ -1,6 +1,6 @@
 module lsp::analysis_scaling_test;
 
-import lsp, uri, std::io, std::time;
+import lsp, lsp::analysis::completion, uri, std::io, std::time;
 
 <*
  Valid C3 with `n` declarations per kind: struct and function type
@@ -135,4 +135,41 @@ fn void references_time_ignores_unrelated_files() @test
 	NanoDuration large = time_references_with_unrelated_files(200);
 	double ratio = (double)large / (double)small;
 	assert(ratio < 2.5, "4x unrelated files took %.1fx time (%s -> %s)", ratio, small, large);
+}
+
+<* Best of 3 timings of a completion listing one function from each of `files` files of module `perf`. *>
+fn NanoDuration time_completion_across_files(int files)
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	for (int i = 0; i < files; i++)
+	{
+		DString src = dstring::temp();
+		src.append("module perf;\n");
+		src.appendf("fn int fn_%d(int a, String b) => a;\n", i);
+		proj.workspace.process_file(string::tformat("/virtual/perf%d.c3", i), src.str_view());
+	}
+	String path = "/virtual/main.c3";
+	proj.workspace.process_file(path, "module perf;\nfn void main()\n{\n\tfn_\n}\n");
+	Uri u = uri::from_file_path(tmem, path);
+
+	NanoDuration best = (NanoDuration)long::max;
+	for (int r = 0; r < 3; r++)
+	{
+		Clock start = clock::now();
+		CompletionItem[] items = completion::resolve(&proj, u, { .line = 3, .character = 4 })!!;
+		NanoDuration elapsed = start.mark();
+		assert(items.len >= files, "%d items", items.len);
+		if (elapsed < best) best = elapsed;
+	}
+	return best;
+}
+
+fn void completion_time_grows_linearly_with_files() @test
+{
+	NanoDuration small = time_completion_across_files(400);
+	NanoDuration large = time_completion_across_files(1600);
+	double ratio = (double)large / (double)small;
+	assert(ratio < 8.0, "4x files took %.1fx time (%s -> %s)", ratio, small, large);
 }

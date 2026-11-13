@@ -1,5 +1,5 @@
 module lsp::analysis::declaration;
-import analyzer, lsp;
+import analyzer, lsp, std::sort;
 
 <*
  Signature of `node` for hover, completion and signature help.
@@ -119,7 +119,7 @@ fn String text(AnalyzerContext* ctx, Node* decl, bool single_line = false)
 	Location start = decl.range.start;
 	Node* contract = cursor::contract(decl) ?? null;
 	if (contract && before(start, contract.range.end)) start = contract.range.end;
-	sz first = first_token_at(tokens, start);
+	sz first = sort::binarysearch(tokens, (Token){}, &starts_before, &start);
 	if (first >= tokens.len) return "";
 	sz last = last_header_token(tokens, first, decl);
 	while (last > first && (tokens[last].kind == EOS || tokens[last].kind == IMPLIES)) last--;
@@ -131,24 +131,10 @@ fn String text(AnalyzerContext* ctx, Node* decl, bool single_line = false)
 
 fn bool before(Location a, Location b) @local => a.line < b.line || (a.line == b.line && a.column < b.column);
 
-fn sz first_token_at(Token[] tokens, Location start) @local
-{
-	sz lo = 0;
-	sz hi = tokens.len;
-	while (lo < hi)
-	{
-		sz mid = lo + (hi - lo) / 2;
-		if (before(tokens[mid].range.start, start))
-		{
-			lo = mid + 1;
-		}
-		else
-		{
-			hi = mid;
-		}
-	}
-	return lo;
-}
+<*
+ Never equal, so a binary search ends at the first token starting at or after `start`.
+*>
+fn int starts_before(Token token, Token unused, Location* start) @local => before(token.range.start, *start) ? -1 : 1;
 
 <*
  Index of the last token before the body of `decl`, or of its last token when it has no body.

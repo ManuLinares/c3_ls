@@ -20,3 +20,17 @@ fn void tokens_point_into_source_file_content() @test
 	}
 	assert(sf.lexer.tokens[1].value == "app");
 }
+
+fn void file_of_skips_file_without_nodes() @test
+{
+	AnalyzerContext* context = context::create(mem);
+	defer context::free(context);
+	context::process(context, "module first;\n", "first.c3");
+	context::process(context, "", "empty.c3");
+	context::process(context, "module app;\nfn void run() {}\n", "app.c3");
+
+	SourceFile* empty = context.files.get("empty.c3")!!;
+	SourceFile* app = context.files.get("app.c3")!!;
+	assert(empty.min_node_id == empty.max_node_id && empty.max_node_id == app.min_node_id);
+	foreach (stmt : app.ast.statements) assert(source_file::file_of(context, stmt) == app);
+}
