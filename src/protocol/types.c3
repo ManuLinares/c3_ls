@@ -77,9 +77,19 @@ struct CompletionContext
 	String triggerCharacter;
 }
 
+<*
+ Shown on every row of the completion list: `detail` right after the label, `description` right-aligned.
+*>
+struct CompletionItemLabelDetails
+{
+	String detail @JsonOmitEmpty;
+	String description @JsonOmitEmpty;
+}
+
 struct CompletionItem
 {
 	String label;
+	CompletionItemLabelDetails labelDetails @JsonOmitEmpty;
 	CompletionItemKind kind @JsonOmitEmpty;
 	String detail @JsonOmitEmpty;
 	MarkupContent documentation @JsonOmitEmpty;

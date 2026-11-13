@@ -3486,7 +3486,17 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 // Entry Point
 // ---------------------------------------------------------------------------
 
+<*
+ Completion items at `pos`, each showing its `detail` on its row.
+*>
 fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos)
+{
+	CompletionItem[] items = collect(project, uri, pos)!;
+	foreach (&item : items) item.labelDetails.description = item.detail;
+	return items;
+}
+
+fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos) @local
 {
 	List{CompletionItem} items;
 	items.init(tmem);

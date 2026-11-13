@@ -118,7 +118,7 @@ fn void hover_struct_header_keeps_interfaces_and_attributes() @test
 	};
 }
 
-fn void completion_detail_is_one_line_signature() @test
+fn void completion_detail_is_one_line_signature_on_every_row() @test
 {
 	@with_project(; LspProject* proj)
 	{
@@ -129,6 +129,7 @@ fn void completion_detail_is_one_line_signature() @test
 			if (item.label != "sum") continue;
 			found_sum = true;
 			assert(item.detail == "fn int Point.sum(&self, int extra = 2) @inline", "%s", item.detail);
+			assert(item.labelDetails.description == item.detail, "%s", item.labelDetails.description);
 		}
 		assert(found_sum);
 		bool found_multi;
