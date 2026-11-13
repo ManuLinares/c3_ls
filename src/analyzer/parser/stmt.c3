@@ -64,25 +64,25 @@ fn Node* parse_stmt(ContextScope scope)
 			), null);
 		case CONST:
 			advance(ctx);
-			return parse_var_decl(scope.with_flags(
+			return starting_at(parse_var_decl(scope.with_flags(
 			{
 				.is_const = true,.is_local = true
 			}
-			), null);
+			), null), t.range.start);
 		case STATIC:
 			advance(ctx);
-			return parse_var_decl(scope.with_flags(
+			return starting_at(parse_var_decl(scope.with_flags(
 			{
 				.is_static = true,.is_local = true
 			}
-			), null);
+			), null), t.range.start);
 		case TLOCAL:
 			advance(ctx);
-			return parse_var_decl(scope.with_flags(
+			return starting_at(parse_var_decl(scope.with_flags(
 			{
 				.is_tlocal = true,.is_local = true
 			}
-			), null);
+			), null), t.range.start);
 		case ASSERT:
 			return parse_assert_stmt(scope);
 		case CT_EXPAND:

@@ -253,7 +253,6 @@ enum TokenKind : char (TokenTraits traits)
 	EXTERN                { { .is_keyword } },
 	FALSE                 { { .is_keyword } },
 	FAULTDEF              { { .is_keyword } },
-	FAULTSET              { { .is_keyword } },
 	FOR                   { { .is_keyword } },
 	FOREACH               { { .is_keyword } },
 	FOREACH_R             { { .is_keyword } },

@@ -28,83 +28,40 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 		symbol_name = symbol_name[sc_idx + 2..];
 	}
 
-	String sig_label = hover::format_node_signature(callee_node, symbol_name);
-	String doc_comment = cursor::docs(callee_node) ?? "";
-
-	List{ParameterInformation} params;
-	params.tinit();
+	AnalyzerContext* actx = project.workspace.ctx;
+	String sig_label = declaration::signature(actx, callee_node, symbol_name, true);
 
 	// `obj.m(...)` passes `obj` as the first parameter; `Type.m(&obj, ...)` does not.
 	bool is_method_call = false;
 	if (try dot_idx = target_info.callee_name.rindex_of_char('.'))
 	{
 		String receiver = target_info.callee_name[:dot_idx];
-		is_method_call = !query::find_type_node_in_context(project.workspace.ctx, sf, receiver, loc);
-	}
-	bool is_method_decl = false;
-	if (callee_node.kind == FN_DECL && callee_node.as(FnDecl).associated_type != null)
-	{
-		is_method_decl = true;
-	}
-	else if (callee_node.kind == MACRO_DECL && @ok(callee_node.as(MacroDecl).associated_type.get()))
-	{
-		is_method_decl = true;
+		is_method_call = !query::find_type_node_in_context(actx, sf, receiver, loc);
 	}
 
-	sz start_param_idx = (is_method_call && is_method_decl) ? 1 : 0;
-
+	Node*[] decl_params;
+	bool is_method_decl;
 	switch (callee_node.kind)
 	{
 		case FN_DECL:
-			{
-				FnDecl* fn_decl = callee_node.as(FnDecl);
-				for (sz i = start_param_idx; i < fn_decl.params.len; i++)
-				{
-					Node* p = fn_decl.params[i];
-					if (!p || p.kind != VAR_DECL) continue;
-					VarDecl* vd = p.as(VarDecl);
-					String pname = vd.name ? vd.name.text : "";
-					String ptype = cursor::spelling(vd.type, tmem);
-					String plabel = "";
-					if (ptype.len > 0 && pname.len > 0)
-					{
-						plabel = string::tformat("%s %s", ptype, pname);
-					}
-					else if (pname.len > 0)
-					{
-						plabel = pname;
-					}
-					else
-					{
-						plabel = ptype;
-					}
-					params.push(
-					{
-						.label = plabel,
-						.documentation = ""
-					}
-					);
-				}
-			}
+			FnDecl* fn_decl = callee_node.as(FnDecl);
+			decl_params = fn_decl.params;
+			is_method_decl = fn_decl.associated_type != null;
 		case MACRO_DECL:
-			{
-				MacroDecl* mac_decl = callee_node.as(MacroDecl);
-				for (sz i = start_param_idx; i < mac_decl.params.len; i++)
-				{
-					Node* p = mac_decl.params[i];
-					if (!p || p.kind != VAR_DECL) continue;
-					VarDecl* vd = p.as(VarDecl);
-					String pname = vd.name ? vd.name.text : "";
-					params.push(
-					{
-						.label = pname,
-						.documentation = ""
-					}
-					);
-				}
-			}
+			MacroDecl* mac_decl = callee_node.as(MacroDecl);
+			decl_params = mac_decl.params;
+			is_method_decl = @ok(mac_decl.associated_type.get());
 		default:
 			break;
+	}
+
+	List{ParameterInformation} params;
+	params.tinit();
+	foreach (i, p : decl_params)
+	{
+		if (i == 0 && is_method_call && is_method_decl) continue;
+		if (!p || p.kind != VAR_DECL) continue;
+		params.push({ .label = declaration::text(actx, p, true) });
 	}
 
 	SignatureInformation[] sig_list = alloc::alloc_array(tmem, SignatureInformation, 1);
@@ -112,7 +69,7 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 		.label = sig_label,
 		.documentation = {
 			.kind = MARKDOWN,
-			.value = doc_comment.len > 0 ? doc_comment.trim().treplace("\"", "") : ""
+			.value = declaration::docs(callee_node)
 		},
 		.parameters = params.array_view(),
 		.activeParameter = target_info.active_param

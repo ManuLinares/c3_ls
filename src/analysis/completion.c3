@@ -201,7 +201,6 @@ fn void add_symbol_completion(
 	if (!node) return;
 
 	CompletionItemKind item_kind = analysis::to_completion_kind(node);
-	String type_desc = "Symbol";
 	String insert_text = symbol_name;
 	String node_type = "";
 
@@ -222,7 +221,6 @@ fn void add_symbol_completion(
 		case FN_DECL:
 			{
 				FnDecl* fd = node.as(FnDecl);
-				type_desc = "fn";
 				bool is_void = false;
 				if (fd.ret_type)
 				{
@@ -240,7 +238,6 @@ fn void add_symbol_completion(
 		case MACRO_DECL:
 			{
 				MacroDecl* md = node.as(MacroDecl);
-				type_desc = "macro";
 				bool is_void = false;
 				if (try rt = md.ret_type.get())
 				{
@@ -256,21 +253,14 @@ fn void add_symbol_completion(
 				insert_text = call_insert_text(ctx, insert_text, md.params, @ok(md.associated_type.get()), md.body_params, is_void, &format);
 			}
 		case INTERFACE_DECL:
-			type_desc = "interface";
-			node_type = symbol_name;
 		case STRUCT_DECL:
-			type_desc = "struct";
-			node_type = symbol_name;
 		case ENUM_DECL:
-			type_desc = "enum";
 			node_type = symbol_name;
 		case FAULT_DECL:
-			type_desc = "fault";
 			node_type = "fault";
 		case VAR_DECL:
 			{
 				VarDecl* decl = node.as(VarDecl);
-				type_desc = decl.var_flags.is_const ? "constant" : (decl.var_kind == VAR_FIELD ? "field" : "global var");
 				if (decl.type) node_type = cursor::raw_type_identifier(decl.type) ?? "";
 			}
 		default:
@@ -282,7 +272,6 @@ fn void add_symbol_completion(
 		insert_text = string::tformat(":%s", insert_text);
 	}
 
-	String detail_string = string::tformat("%s via %s", type_desc, base_identifier);
 	String filter_text = symbol_name.strip_prefix("@");
 	TextEdit* text_edit = null;
 	if (replaces_typed_at)
@@ -321,7 +310,7 @@ fn void add_symbol_completion(
 	{
 		.label = symbol_name,
 		.kind = item_kind,
-		.detail = detail_string,
+		.detail = declaration::signature(ctx.ws.ctx, node, symbol_name, true),
 		.insertText = insert_text,
 		.insertTextFormat = format,
 		.filterText = filter_text,
@@ -593,15 +582,14 @@ fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
 			{
 				String bare = aname.strip_prefix("@");
 				String ins = ctx.prefix.starts_with("@") ? bare : aname;
-				String doc_comment = cursor::docs(attr_info.node) ?? "";
 				items.push(
 				{
 					.label = aname,
 					.kind = KEYWORD,
-					.detail = string::tformat("attrmacro via %s", attr_info.mod),
+					.detail = declaration::signature(ctx.ws.ctx, attr_info.node, aname, true),
 					.documentation = {
 						.kind = MARKDOWN,
-						.value = doc_comment.len > 0 ? doc_comment.trim().treplace("\"", "") : ""
+						.value = declaration::docs(attr_info.node)
 					},
 					.insertText = ins,
 					.filterText = bare,
@@ -2655,7 +2643,6 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 			return true;
 		case "attrmacro":
 		case "attrdef":
-		case "attrgroup":
 			*out_target = ATTRDEF;
 			return true;
 		case "switch":
@@ -2668,7 +2655,6 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 		case "enum":
 		case "constdef":
 		case "constset":
-		case "cenum":
 			*out_target = ENUM;
 			return true;
 		default:
@@ -3320,21 +3306,14 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 				Module* mod = analysis::find_module_by_identifier(&project.workspace, "", mod_name);
 				if (mod && mod.module_decls.len() > 0)
 				{
-					doc_comment = cursor::docs((Node*)mod.module_decls.get(0)) ?? "";
+					doc_comment = declaration::docs((Node*)mod.module_decls.get(0));
 				}
 			}
 
 			DString md_buf;
 			md_buf.tinit();
-			md_buf.appendf("```c3\nmodule %s;\n```", mod_name);
-			if (doc_comment.len > 0)
-			{
-				String clean_doc = doc_comment.trim().treplace("\"", "");
-				if (clean_doc.len > 0)
-				{
-					md_buf.appendf("\n\n%s", clean_doc);
-				}
-			}
+			md_buf.appendf("```c3\nmodule %s\n```", mod_name);
+			if (doc_comment.len > 0) md_buf.appendf("\n\n%s", doc_comment);
 
 			item.documentation = {
 				.kind = MARKDOWN,
@@ -3351,41 +3330,18 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 				String enum_name = payload[:colon_idx];
 				String variant_name = payload[colon_idx + 1..];
 
-				String doc_comment = "";
-				if (project.workspace.ctx)
+				List{SymbolEntry} syms = project.workspace.find_symbol_by_name(enum_name);
+				if (syms.len() > 0 && syms.get(0).node && syms.get(0).node.kind == ENUM_DECL)
 				{
-					List{SymbolEntry} syms = project.workspace.find_symbol_by_name(enum_name);
-					if (syms.len() > 0 && syms.get(0).node && syms.get(0).node.kind == ENUM_DECL)
+					foreach (v : syms.get(0).node.as(EnumDecl).variants)
 					{
-						EnumDecl* ed = syms.get(0).node.as(EnumDecl);
-						foreach (v : ed.variants)
+						if (v && v.kind == VAR_DECL && v.as(VarDecl).name && v.as(VarDecl).name.text == variant_name)
 						{
-							if (v && v.kind == VAR_DECL && v.as(VarDecl).name && v.as(VarDecl).name.text == variant_name)
-							{
-								doc_comment = cursor::docs(v) ?? "";
-								break;
-							}
+							target_node = v;
+							break;
 						}
 					}
 				}
-
-				DString md_buf;
-				md_buf.tinit();
-				md_buf.appendf("```c3\n%s.%s\n```", enum_name, variant_name);
-				if (doc_comment.len > 0)
-				{
-					String clean_doc = doc_comment.trim().treplace("\"", "");
-					if (clean_doc.len > 0)
-					{
-						md_buf.appendf("\n\n%s", clean_doc);
-					}
-				}
-
-				item.documentation = {
-					.kind = MARKDOWN,
-					.value = md_buf.str_view()
-				};
-				return;
 			}
 		}
 		else if (item.data.starts_with("method:"))
@@ -3417,11 +3373,6 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 			{
 				base = payload[:colon_idx];
 				sym = payload[colon_idx + 1..];
-			}
-			else if (item.detail.contains(" via "))
-			{
-				sz via_idx = item.detail.index_of(" via ") ?? 0;
-				base = item.detail[via_idx + 5..].trim();
 			}
 
 			if (base.len > 0 && project.workspace.ctx)
@@ -3492,7 +3443,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	{
 		DString md_buf;
 		md_buf.tinit();
-		md_buf.appendf("```c3\nmodule %s;\n```", item.label);
+		md_buf.appendf("```c3\nmodule %s\n```", item.label);
 		item.documentation = {
 			.kind = MARKDOWN,
 			.value = md_buf.str_view()
@@ -3503,44 +3454,6 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 	if (item.documentation.value.len > 0) return;
 
 	String sym_name = item.label;
-
-	if (!target_node && item.detail.contains(" via "))
-	{
-		sz via_idx = item.detail.index_of(" via ") ?? 0;
-		String base = item.detail[via_idx + 5..].trim();
-		if (base.len > 0 && project.workspace.ctx)
-		{
-			AnalyzerContext* actx = project.workspace.ctx;
-			Module* mod = analysis::find_module_by_identifier(&project.workspace, "", base);
-			if (mod)
-			{
-				String qname = string::tformat("%s::%s", mod.name, sym_name);
-				if (actx.registry)
-				{
-					if (try fn_info = actx.registry.functions.get(qname))
-					{
-						target_node = fn_info.node;
-					}
-					else if (try mac_info = actx.registry.macros.get(qname))
-					{
-						target_node = mac_info.node;
-					}
-					else if (try ty_info = actx.registry.types.get(qname))
-					{
-						target_node = ty_info.node;
-					}
-				}
-			}
-			if (!target_node)
-			{
-				target_node = query::find_method_in_type(actx, base, sym_name);
-			}
-			if (!target_node)
-			{
-				target_node = query::find_member_in_type(actx, base, sym_name);
-			}
-		}
-	}
 
 	if (!target_node)
 	{
@@ -3557,21 +3470,11 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 
 	if (!target_node) return;
 
-	String sig = hover::format_node_signature(target_node, sym_name);
-	String doc_comment = cursor::docs(target_node) ?? "";
-
 	DString md_buf;
 	md_buf.tinit();
-	md_buf.appendf("```c3\n%s\n```", sig);
-
-	if (doc_comment.len > 0)
-	{
-		String clean_doc = doc_comment.trim().treplace("\"", "");
-		if (clean_doc.len > 0)
-		{
-			md_buf.appendf("\n\n%s", clean_doc);
-		}
-	}
+	md_buf.append(declaration::header(project.workspace.ctx, target_node, sym_name));
+	String doc_comment = declaration::docs(target_node);
+	if (doc_comment.len > 0) md_buf.appendf("\n\n%s", doc_comment);
 
 	item.documentation = {
 		.kind = MARKDOWN,

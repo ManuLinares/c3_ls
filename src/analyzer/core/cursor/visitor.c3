@@ -42,6 +42,7 @@ fn bool visit_var_decl_parts(VarDecl* vardecl, bool with_type, Node* parent, Vis
 {
 	if (with_type && vardecl.type && !visit(vardecl.type, parent, hooks, data)) return false;
 	if (vardecl.init_expr && !visit(vardecl.init_expr, parent, hooks, data)) return false;
+	if (vardecl.assoc_values && !visit(vardecl.assoc_values, parent, hooks, data)) return false;
 	foreach (attr : vardecl.attributes)
 	{
 		if (!visit(attr, parent, hooks, data)) return false;

@@ -386,7 +386,7 @@ fn void test_scoped_module_completion_resolve_disambiguation() @test
 		}
 	}
 	assert(found_log);
-	assert(log_item.detail == "fn via sdl3");
+	assert(log_item.detail == "fn void log(char* fmt, ...)");
 
 	completion::resolve_item(&proj, &log_item);
 	assert(log_item.documentation.value.contains("char* fmt"));

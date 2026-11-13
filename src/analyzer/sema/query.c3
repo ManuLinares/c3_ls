@@ -1925,6 +1925,34 @@ fn String generic_param_name(Node* param)
 }
 
 <*
+ Value `name` of the enum typing the argument of an `ed` value at `loc`,
+ or null when `loc` is in no such argument.
+*>
+fn Node* find_enum_argument_value(AnalyzerContext* context, SourceFile* sf, EnumDecl* ed, String name, Location loc) @local
+{
+	foreach (variant : ed.variants)
+	{
+		Node* values = variant.as(VarDecl).assoc_values;
+		if (!values || values.kind != INITIALIZER_LIST_EXPR || !values.range.contains(loc)) continue;
+		foreach (i, arg : values.as(InitializerListExpr).exprs)
+		{
+			if (!arg || !arg.range.contains(loc)) continue;
+			if (i >= ed.assoc_params.len) return null;
+			String type_name = cursor::raw_type_identifier(ed.assoc_params[i].as(VarDecl).type) ?? "";
+			Node* type_node = find_type_node_in_context(context, sf, type_name, loc);
+			if (!type_node || type_node.kind != ENUM_DECL) return null;
+			foreach (value : type_node.as(EnumDecl).variants)
+			{
+				Ident* value_name = value.as(VarDecl).name;
+				if (value_name && value_name.text == name) return value;
+			}
+			return null;
+		}
+	}
+	return null;
+}
+
+<*
  Top-level statement containing `loc`. A declaration's range covers its doc
  contract.
 *>
@@ -2193,15 +2221,19 @@ fn Node* resolve_symbol_at(AnalyzerContext* context, SourceFile* sf, Location lo
 		return null;
 	}
 
+	Node* enclosing_decl = enclosing_top_level(sf, loc);
+	if (enclosing_decl && enclosing_decl.kind == ENUM_DECL)
+	{
+		if (Node* value = find_enum_argument_value(context, sf, enclosing_decl.as(EnumDecl), symbol_name, loc)) return value;
+	}
+
 	if (!symbol_name.starts_with("@"))
 	{
-		Node* enclosing_func = enclosing_top_level(sf, loc);
-
 		Node* local_decl = null;
-		if (enclosing_func)
+		if (enclosing_decl)
 		{
 			LocalSearchContext loc_search = {.context = context,.sf = sf,.name = symbol_name,.found_decl = null,.found_type = "" };
-			cursor::visit(enclosing_func, null, {.on_enter = &find_local_decl_callback }, &loc_search);
+			cursor::visit(enclosing_decl, null, {.on_enter = &find_local_decl_callback }, &loc_search);
 			local_decl = loc_search.found_decl;
 		}
 		else

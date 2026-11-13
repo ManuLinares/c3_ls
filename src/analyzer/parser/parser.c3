@@ -38,7 +38,6 @@ fn bool is_token_start_of_decl(TokenKind kind)
 		case MODULE:
 		case IMPORT:
 		case FAULTDEF:
-		case FAULTSET:
 		case FN:
 		case MACRO:
 		case ALIAS:
@@ -388,12 +387,22 @@ fn void apply_section_visibility_default(ParseContext* ctx, Node* node)
 	}
 }
 
+<*
+ Moves the start of `node` back to `start`, the first of the modifiers parsed before it.
+*>
+fn Node* starting_at(Node* node, Location start) @inline
+{
+	if (node) node.range.start = start;
+	return node;
+}
+
 fn Node* parse_top_level_statement(ParseContext* ctx)
 {
 	Node* node = null;
 	ContextScope scope = {
 		.ctx = ctx
 	};
+	Location decl_start = ctx.current.range.start;
 
 	while (true)
 	{
@@ -425,7 +434,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 
 	if (is_type(ctx))
 	{
-		node = parse_var_decl(scope, null);
+		node = starting_at(parse_var_decl(scope, null), decl_start);
 		apply_section_visibility_default(ctx, node);
 		return node;
 	}
@@ -455,7 +464,6 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 		case IMPORT:
 			node = parse_import_decl(scope);
 		case FAULTDEF:
-		case FAULTSET:
 			node = parse_faultdef_decl(scope);
 		case FN:
 			node = parse_fn_decl(scope);
@@ -507,6 +515,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 			break;
 	}
 
+	starting_at(node, decl_start);
 	apply_section_visibility_default(ctx, node);
 	return node;
 }

@@ -82,7 +82,7 @@ fn void test_module_scoped_call_hover_and_definition()
 
 	LspPosition gfx_pos = {.line = 3,.character = 4 };
 	String gfx_hover = hover::hover(&proj, app_uri, gfx_pos)!!;
-	assert(gfx_hover.contains("module gfx;"));
+	assert(gfx_hover.contains("module gfx\n"));
 
 	LspPosition init_pos = {.line = 3,.character = 10 };
 	String init_hover = hover::hover(&proj, app_uri, init_pos)!!;

@@ -52,7 +52,7 @@ fn void main() {
 	LspPosition pos = {.line = 9,.character = 4 };
 	String h = hover::hover(&proj, doc_uri, pos)!!;
 
-	assert(h.contains("macro @swap(#a, #b)"));
+	assert(h.contains("macro void @swap(#a, #b)"));
 	assert(h.contains("Macro Expansion"));
 	assert(h.contains("var temp = x;"));
 	assert(h.contains("x = y;"));

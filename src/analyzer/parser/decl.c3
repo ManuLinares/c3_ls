@@ -1005,6 +1005,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 			member_contract = parse_contract_decl(scope);
 		}
 
+		Location member_start = ctx.current.range.start;
 		ParseFlags struct_flags;
 		struct_flags.is_struct = true;
 		struct_flags.is_inline = consume(ctx, INLINE);
@@ -1024,6 +1025,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 
 			if (sub_decl && sub_decl.kind != ERROR)
 			{
+				starting_at(sub_decl, member_start);
 				if (member_contract)
 				{
 					sub_decl.as(StructDecl).contract.set(member_contract);
@@ -1033,7 +1035,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 		}
 		else
 		{
-			Node* field = parse_var_decl(scope.with_only_flags(struct_flags), null);
+			Node* field = starting_at(parse_var_decl(scope.with_only_flags(struct_flags), null), member_start);
 			if (field)
 			{
 				if (member_contract && field.kind == VAR_DECL)
@@ -1188,13 +1190,13 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 <*
  faultdef_decl ::= (FAULTDEF CONST_IDENT (',' CONST_IDENT)* ','? ';')
                  | (FAULTDEF '{' CONST_IDENT (',' CONST_IDENT)* ','? '}')
- @require scope.ctx.current.kind == FAULTDEF || scope.ctx.current.kind == FAULTSET
+ @require scope.ctx.current.kind == FAULTDEF
 *>
 fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
 	Range start = ctx.current.range;
-	advance(ctx); // Consumes faultdef, excuse, faultset, or faultconst
+	advance(ctx); // Consumes faultdef or excuse
 
 	FaultdefDecl* node = ctx.ast.alloc_node(FaultdefDecl, start);
 	defer node.range.end = ctx.peek(-1).range.end;
@@ -1230,7 +1232,6 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 			}
 
 			FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-			defer fault_node.range.end = ctx.peek(-1).range.end;
 			fault_node.name = ctx.ident(ctx.current);
 			fault_node.contract.set(contract);
 			advance(ctx);
@@ -1239,6 +1240,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 			{
 				fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
 			}
+			fault_node.range.end = ctx.peek(-1).range.end;
 
 			faults.push((Node*)fault_node);
 			if (!consume(ctx, COMMA))
@@ -1285,14 +1287,13 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 		}
 
 		FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-		defer fault_node.range.end = ctx.peek(-1).range.end;
-
 		fault_node.contract.set(contract);
 		fault_node.name = ctx.ident(ctx.current);
 
 		advance(ctx);
 
 		fault_node.attributes = parse_attributes(scope, node);
+		fault_node.range.end = ctx.peek(-1).range.end;
 
 		faults.push((Node*)fault_node);
 
@@ -1517,7 +1518,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 					parse_attributes(scope, param);
 				}
 
-				param.range.end = ctx.current.range.end;
+				param.range.end = ctx.peek(-1).range.end;
 
 				assoc.push((Node*)param);
 				if (!consume(ctx, COMMA)) break;
@@ -1583,6 +1584,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 		{
 			variant.assoc_values = parse_expr(scope);
 		}
+		variant.range.end = ctx.peek(-1).range.end;
 
 		variants.push(variant);
 

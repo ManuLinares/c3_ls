@@ -64,7 +64,7 @@ fn void test_macro_method_with_trailing_block()
 	// 1. Hover on macro method `c.each` (line 9, col 4)
 	LspPosition each_pos = {.line = 9,.character = 4 };
 	String hover_macro = hover::hover(&proj, doc_uri, each_pos)!!;
-	assert(hover_macro.contains("macro Container.each"));
+	assert(hover_macro.contains("macro void Container.each(&self; @body(idx, elem))"));
 	// 2. Goto definition on macro invocation
 	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, each_pos)!!;
 	assert(locs.len > 0);

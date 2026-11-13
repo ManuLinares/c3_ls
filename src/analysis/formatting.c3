@@ -33,6 +33,7 @@ struct FormatterContext
 	BraceKind[128] brace_stack;
 	int brace_stack_len;
 	bool at_line_start;
+	bool single_line;
 	bool is_decl_header;
 	bool is_type_decl;
 	bool is_switch_header;
@@ -313,6 +314,7 @@ fn void indent(FormatterContext* ctx)
 
 fn void newline(FormatterContext* ctx, int count = 1)
 {
+	if (ctx.single_line) return;
 	int to_emit = count;
 	if (ctx.consecutive_newlines + count > 2)
 	{
@@ -409,6 +411,7 @@ fn bool is_paren_cast(Token[] tokens, sz rparen_idx)
 		}
 	}
 	if (depth != 0 || idx + 1 >= rparen_idx) return false;
+	if (idx > 0 && is_type_name_token(tokens[idx - 1].kind)) return false;  // `struct Foo (Iface)`, `enum Foo : int (Type field)`
 
 	TokenKind first = tokens[idx + 1].kind;
 	bool first_is_type = is_type_name_token(first) || first == TYPE_IDENT;
@@ -696,7 +699,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 			return true;  // binary +, -, *, &, ^
 		}
 	}
-	if (prev == TYPE_IDENT && curr == LPAREN && ctx.is_type_decl)
+	if ((prev == TYPE_IDENT || prev.is_base_type()) && curr == LPAREN && ctx.is_type_decl)
 	{
 		return true;
 	}
@@ -796,7 +799,8 @@ Token[] tokens,
 sz start_idx,
 sz end_idx,
 int base_indent,
-FormattingOptions options
+FormattingOptions options,
+bool single_line = false
 )
 {
 	DString final_out;
@@ -827,6 +831,7 @@ FormattingOptions options
 			.last_rparen_was_cast = false,
 			.brace_stack_len = 0,
 			.at_line_start = true,
+			.single_line = single_line,
 			.is_decl_header = false,
 			.is_type_decl = false,
 			.is_switch_header = false,
