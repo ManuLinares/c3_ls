@@ -1,10 +1,5 @@
 module analyzer::sema::registry;
-
-import analyzer::core;
-import analyzer::sema::lookup;
-import analyzer::sema::query;
-import std::collections;
-import std::io;
+import analyzer, std::collections, std::io;
 
 fn Registry* create(Allocator alloc)
 {
@@ -16,6 +11,7 @@ fn Registry* create(Allocator alloc)
 	registry.types.init(&registry.arena);
 	registry.macros.init(&registry.arena);
 	registry.attrmacros.init(&registry.arena);
+	registry.methods_by_type.init(&registry.arena);
 
 	return registry;
 }
@@ -167,6 +163,7 @@ fn void register_function(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered fn: %s", qname);
 
 	context.registry.functions.set(qname, function_info);
+	register_method(context, mod, node, decl.associated_type);
 }
 
 fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
@@ -190,6 +187,26 @@ fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered macro: %s", qname);
 
 	context.registry.macros.set(qname, macros_info);
+	register_method(context, mod, node, decl.associated_type.get() ?? null);
+}
+
+<*
+ Indexes the method `node` under the name of its receiver type, and a
+ method of vectors also under ANY_VECTOR.
+*>
+fn void register_method(AnalyzerContext* context, Module* mod, Node* node, Node* receiver) @local
+{
+	String type_name = receiver ? cursor::raw_type_identifier(receiver) ?? "" : "";
+	if (!type_name.len) return;
+	index_method(context, mod, node, type_name);
+	if (receiver.kind == TYPE_EXPR && receiver.as(TypeExpr).type_kind == TYPE_VECTOR) index_method(context, mod, node, query::ANY_VECTOR);
+}
+
+fn void index_method(AnalyzerContext* context, Module* mod, Node* node, String key) @local
+{
+	MethodInfo* info = alloc::new(&context.registry.arena, MethodInfo);
+	*info = { .next = context.registry.methods_by_type.get(key) ?? null, .mod = mod.name, .node = node };
+	context.registry.methods_by_type.set(key.copy(&context.registry.arena), info);
 }
 
 fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)

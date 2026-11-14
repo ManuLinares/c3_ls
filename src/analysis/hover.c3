@@ -1,5 +1,5 @@
 module lsp::analysis::hover;
-import analyzer, lsp, uri;
+import analyzer, lsp, uri, std::collections::list;
 
 struct CallFinderContext
 {
@@ -91,18 +91,11 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 			{
 				if (acc.member && acc.member.range.contains(loc))
 				{
-					String recv_type = query::type_of(project.workspace.ctx, sf, acc.left, loc);
-					String clean_type = recv_type.trim_right("*&? \t");
-
-					if (mem_name == "len" && (clean_type == "String" || clean_type.ends_with("[]") || clean_type.contains("[")))
+					if (try property = ValueProperty::lookup_field(name, mem_name))
 					{
-						return "```c3\nsz len\n```\n\nNumber of elements in the array, slice, vector, or string.";
-					}
-
-					if (mem_name == "ptr" && (clean_type == "String" || clean_type.ends_with("[]")))
-					{
-						String ptr_type = clean_type == "String" ? "char*" : string::tformat("%s*", clean_type.strip_suffix("[]"));
-						return string::tformat("```c3\n%s ptr\n```\n\nPointer to the underlying elements of the array, slice, or string.", ptr_type);
+						String recv_type = query::type_of(project.workspace.ctx, sf, acc.left, loc);
+						String type = query::value_property_type(project.workspace.ctx, sf, recv_type, property);
+						if (type.len) return string::tformat("```c3\n%s %s\n```\n\n%s", type, property.name, property.doc);
 					}
 				}
 
@@ -141,7 +134,9 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 		}
 	}
 
-	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
+	List{Node*} overloads;
+	overloads.tinit();
+	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
 	if (!decl_node) return "";
 
 	if (decl_node.kind == TYPE_EXPR)
@@ -164,9 +159,18 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	DString md_buf;
 	md_buf.tinit();
 	md_buf.append(declaration::header(project.workspace.ctx, decl_node, symbol_name));
+	if (overloads.len() > 1)
+	{
+		md_buf.append("\n\nDeclared for ");
+		foreach (i, o : overloads)
+		{
+			if (i > 0) md_buf.append(", ");
+			md_buf.appendf("`%s`", cursor::spelling(query::receiver_type_expr(o), tmem));
+		}
+	}
 	if (doc_comment.len > 0) md_buf.appendf("\n\n%s", doc_comment);
 
-	if (decl_node.kind == MACRO_DECL)
+	if (decl_node.kind == MACRO_DECL && overloads.len() <= 1)
 	{
 		CallFinderContext call_ctx = {.target_range = target_range,.found_call = null };
 		foreach (stmt : sf.ast.statements)

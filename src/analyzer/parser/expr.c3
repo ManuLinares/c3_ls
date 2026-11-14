@@ -209,7 +209,7 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 				gen_node.type_kind = TYPE_GENERIC;
 				gen_node.generic.base = current_type;
 				gen_node.generic.params = parse_generics_list(scope);
-				gen_node.range.end = ctx.current.range.end;
+				gen_node.range.end = ctx.peek(-1).range.end;
 
 				current_type = gen_node;
 				continue;
@@ -804,13 +804,13 @@ fn Node* parse_call_expr(ContextScope scope, Node* callee)
 
 	if (body || body_args)
 	{
-		MacroBodyExpr* body_node = ctx.ast.alloc_node(MacroBodyExpr, body ? body.range : start);
+		Range range = {
+			.start = body_args.len ? body_args[0].range.start : body.range.start,
+			.end = body ? body.range.end : body_args[^1].range.end
+		};
+		MacroBodyExpr* body_node = ctx.ast.alloc_node(MacroBodyExpr, range);
 		body_node.args = body_args;
 		body_node.body = body;
-		if (body)
-		{
-			body_node.range.end = body.range.end;
-		}
 		node.macro_body_expr = body_node;
 	}
 
@@ -822,7 +822,7 @@ fn Node* parse_catch_expr(ContextScope scope) => @pool()
 	ParseContext* ctx = scope.ctx;
 	CatchExpr* node = ctx.ast.alloc_node(CatchExpr, ctx.current.range);
 	advance(ctx);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	Node* sub_expr = parse_try_chain_expr(scope);
 
@@ -874,7 +874,7 @@ fn Node* parse_catch_expr(ContextScope scope) => @pool()
 			node.flags.has_error = true;
 		}
 
-		exprs.push(node.variable);
+		node.exprs = alloc::clone_slice(ctx.allocator, (Node*[]){ node.variable });
 		node.variable = null;
 		return node;
 	}
@@ -1318,7 +1318,7 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 						val = parse_expr(scope);
 					}
 					DesignatedInitializerExpr* des_init_node = ctx.ast.alloc_node(DesignatedInitializerExpr, path_token.range);
-					des_init_node.range.end = ctx.current.range.end;
+					des_init_node.range.end = ctx.peek(-1).range.end;
 
 					des_init_node.path = des_expr;
 					des_init_node.value = val;

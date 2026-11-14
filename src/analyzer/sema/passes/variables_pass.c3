@@ -172,22 +172,20 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 
 fn Type* resolve_ast_type(SemaContext* ctx, Node* type_node)
 {
-	if (!type_node || !ctx.context.lookup) return null;
+	if (!type_node) return null;
+	return type_named(ctx, cursor::instance_name(type_node));
+}
 
-	String tname = cursor::raw_type_identifier(type_node) ?? cursor::spelling(type_node, tmem);
-	tname = tname.trim_right("*& \t");
-	if (try idx = tname.index_of_char('{'))
-	{
-		tname = tname[:idx].trim();
-	}
-	if (tname.len == 0) return null;
-
-	Type* ty = lookup::get_type_by_name(ctx.context.lookup, tname);
-	if (ty) return ty;
-
-	Node* decl_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, tname);
-	lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname, decl_node);
-	return lookup::get_type_by_name(ctx.context.lookup, tname);
+<*
+ Type registered as `name`, such as `List{int}`, registering it on first use.
+*>
+fn Type* type_named(SemaContext* ctx, String name) @local
+{
+	if (!ctx.context.lookup || name.len == 0) return null;
+	if (Type* ty = lookup::get_type_by_name(ctx.context.lookup, name)) return ty;
+	Node* decl_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, name);
+	lookup::register_type(ctx.context.lookup, ctx.context.allocator, name, decl_node);
+	return lookup::get_type_by_name(ctx.context.lookup, name);
 }
 
 fn void push_scope(SemaContext* ctx, Node* node)
@@ -359,13 +357,7 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 				else if (te.init)
 				{
 					String itype = query::type_of(ctx.context, ctx.context.current_source_file, te.init);
-					itype = itype.trim_right("?*& \t");
-					if (itype.len > 0)
-					{
-						Node* ty_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, itype);
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, itype, ty_node);
-						node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, itype);
-					}
+					node.resolved_type = type_named(ctx, itype.trim_right("?*& \t"));
 				}
 				scope::add_variable(ctx.scope, ctx.allocator, ie.ident.text, node);
 			}

@@ -213,3 +213,28 @@ fn void main()
 	assert(instance.str_view() == "x:y:", "%s", instance);
 	assert(through_type.str_view() == "self:x:y:", "%s", through_type);
 }
+
+fn void test_inlay_hints_function_pointer_call()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = `module app;
+alias Callback = fn void(int count);
+fn void tick(int count) {}
+fn void main()
+{
+	Callback cb = &tick;
+	cb(3);
+}
+`;
+	proj.workspace.process_file("/virtual/fn_ptr_hint.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/fn_ptr_hint.c3");
+	defer doc_uri.free();
+
+	InlayHint[] hints = inlay_hints::get_inlay_hints(&proj, doc_uri, { .end = { .line = 8 } })!!;
+	assert(hints.len == 1);
+	assert(hints[0].label == "count:");
+	assert(hints[0].position.line == 6 && hints[0].position.character == 4);
+}

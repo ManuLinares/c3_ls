@@ -174,6 +174,15 @@ enum TypeProperty : int (String name, String type_desc, String doc)
 	PARAM_STRUCT  { "param_struct",  "typeid",              "Struct type mirroring the parameter list." },
 }
 
+<* Properties the language gives values of some types, such as `len` of a slice. *>
+enum ValueProperty : int (String name, String doc)
+{
+	LEN     { "len",     "Number of elements in the array, slice, vector or string." },
+	PTR     { "ptr",     "Pointer to the elements of the slice or string, or to the value of the `any` or interface." },
+	TYPE    { "type",    "Type of the value held by the `any` or interface." },
+	ORDINAL { "ordinal", "Position of the value in its enum." },
+}
+
 <* Reflection Property Metadata *>
 enum ReflectProperty : int (String name, String type_desc, String doc)
 {

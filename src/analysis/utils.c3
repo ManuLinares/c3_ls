@@ -5,6 +5,7 @@ import analyzer::cursor;
 import lsp::core;
 import lsp;
 
+import analyzer::sema;
 import std::collections::list;
 
 <*
@@ -25,6 +26,8 @@ fn String get_node_symbol_name(Node* node)
 			{
 				return cursor::raw_type_identifier(node) ?? "";
 			}
+		case symbol_name.len == 0 && query::label_of(node) != null:
+			return query::label_of(node).text;
 		default:
 			return symbol_name;
 	}
@@ -265,4 +268,24 @@ fn void collect_file_symbols(
 				break;
 		}
 	}
+}
+<*
+ Range in `content` of `text`, a view into it.
+
+ @require text.ptr >= content.ptr && text.ptr + text.len <= content.ptr + content.len
+*>
+fn Range range_of(String content, String text)
+{
+	sz start = (sz)(text.ptr - content.ptr);
+	return { core::location_at(content, start), core::location_at(content, start + text.len) };
+}
+
+<*
+ Target of the call `info` describes, resolved through the last character of its callee name.
+*>
+fn CallTarget call_target_of(AnalyzerContext* context, SourceFile* sf, CallTargetInfo info)
+{
+	if (!info.is_valid || !info.callee_name.len) return {};
+	Location end = range_of(sf.content, info.callee_name).end;
+	return query::call_target_at(context, sf, { end.line, end.column - 1 });
 }

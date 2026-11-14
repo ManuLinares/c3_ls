@@ -47,7 +47,7 @@ fn bool is_local_decl(Node* node)
 		case CONTRACT_PARAM:
 			return true;
 		default:
-			return false;
+			return query::label_of(node) != null;
 	}
 }
 
@@ -69,7 +69,7 @@ fn Ident* decl_name(Node* node)
 		case FAULT_DECL: return node.as(FaultDecl).name;
 		case INTERFACE_DECL: return node.as(InterfaceDecl).name;
 		case ATTRDEF_DECL: return node.as(AttrdefDecl).name;
-		default: return null;
+		default: return query::label_of(node);
 	}
 }
 
@@ -91,7 +91,7 @@ fn Ident* ref_name(Node* node)
 		case CONTRACT_PARAM:
 			return node.as(ContractParam).ident;
 		default:
-			return null;
+			return query::jump_label(node);
 	}
 }
 

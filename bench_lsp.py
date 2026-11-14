@@ -25,6 +25,7 @@ DEFAULT_SERVER_BIN = os.path.join(os.path.dirname(__file__), "build", "c3_ls")
 DEFAULT_PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 
 
+
 # ============================================================================
 # Protocol & Server Session
 # ============================================================================
@@ -228,6 +229,19 @@ class EndpointDef:
     name: str
     method: str
     make_params: Callable[[SourceTarget], dict[str, Any]]
+
+
+EXPR_MEMBER = re.compile(r"[\)\]]\.([A-Za-z_])")
+
+
+def expr_member_positions(content: str) -> list[tuple[int, int]]:
+    """Members accessed on a call, index or parenthesized expression, as in `(a - b).x` or `v[i].x`."""
+    return [
+        (idx, m.start(1))
+        for idx, line in enumerate(content.splitlines())
+        if not line.strip().startswith(("//", "*", "<*"))
+        for m in EXPR_MEMBER.finditer(line)
+    ]
 
 
 def scan_source_positions(content: str) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
@@ -440,6 +454,20 @@ def load_project_files(root: str) -> list[SourceTarget]:
     return targets
 
 
+def load_stdlib_sources() -> list[tuple[str, str]]:
+    """The stdlib files c3c reports, by resolved path as the server loads them."""
+    try:
+        env = subprocess.run(["c3c", "compile", "--build-env"], capture_output=True, text=True, check=True).stdout
+    except Exception:
+        print("c3c not found; skipping stdlib expression hovers")
+        return []
+    m = re.search(r"^Stdlib\s*:\s*(.*)$", env, re.M)
+    if not m:
+        return []
+    root = Path(m.group(1).strip()).resolve()
+    return [(p.as_uri(), p.read_text(encoding="utf-8", errors="ignore")) for p in sorted(root.rglob("*.c3"))]
+
+
 def compute_distribution(samples: list[float]) -> dict[str, float]:
     if not samples:
         return {"min": 0, "mean": 0, "p50": 0, "p90": 0, "p95": 0, "p99": 0, "max": 0, "count": 0}
@@ -534,6 +562,7 @@ def main():
 
     measurements: dict[str, list[float]] = {ep.name: [] for ep in endpoints}
     measurements["completionItem/resolve"] = []
+    expr_resolution: dict[str, tuple[int, int]] = {}
     measurements["didChange (reparse)"] = []
     if args.bench_save:
         measurements["didSave (c3c roundtrip)"] = []
@@ -581,6 +610,28 @@ def main():
                 if save_ok:
                     measurements["didSave (c3c roundtrip)"].append(save_lat)
 
+    # Members of call, index, cast and operator results, as in `(a ^ b).rotr`
+    # or `v[i].x`, at every such site of the project and the stdlib.
+    for group, targets in (("project", [(f.uri, f.content) for f in files]), ("stdlib", load_stdlib_sources())):
+        name = f"hover (expr, {group})"
+        measurements[name] = []
+        resolved = 0
+        for uri, content in targets:
+            for line, character in expr_member_positions(content):
+                resp, lat_ms, ok = session.request("textDocument/hover", {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": character},
+                }, timeout=args.timeout)
+                total_ops_counter += 1
+                if not ok:
+                    hang_counter += 1
+                    anomalies.append(f"HANG: {name} at {uri}:{line + 1}:{character + 1}")
+                    continue
+                measurements[name].append(lat_ms)
+                if (((resp or {}).get("result") or {}).get("contents") or {}).get("value"):
+                    resolved += 1
+        expr_resolution[group] = (resolved, len(measurements[name]))
+
     # Output Results Table
     print("\n" + "-" * 105)
     print(f"{'Endpoint':<26} {'Calls':>6} {'Min':>9} {'Mean':>9} {'p50':>9} {'p90':>9} {'p95':>9} {'p99':>9} {'Max':>9}  {'SLA':>4}")
@@ -608,6 +659,9 @@ def main():
             f"{sla_mark}"
         )
     print("-" * 105)
+
+    for group, (resolved, total) in expr_resolution.items():
+        print(f"Expression members resolved ({group}): {resolved}/{total}")
 
     if anomalies:
         print("\n[!] Latency Anomalies Detected:")

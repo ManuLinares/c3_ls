@@ -150,6 +150,7 @@ struct EnumDecl
 	NullableNode contract;
 	Ident* name;
 	NodeArray interfaces;  // optional implemented interfaces: "(" type ("," type)* ")"
+	bool is_constdef;
 	bool is_inline_backing;
 	Node* backing_type;  // optional: ":" type
 	NodeArray assoc_params;  // optional enum_param_list inside ":"

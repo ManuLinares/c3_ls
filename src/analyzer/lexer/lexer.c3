@@ -4,6 +4,7 @@ import analyzer::core;
 
 import std::io;
 import std::collections::list;
+import std::sort;
 
 fn Lexer* create(AnalyzerContext* ctx, String buffer, bool emit_comments = false)
 {
@@ -11,6 +12,7 @@ fn Lexer* create(AnalyzerContext* ctx, String buffer, bool emit_comments = false
 
 	lexer.ctx = ctx;
 	lexer.tokens.init(ctx.allocator);
+	lexer.comments.init(ctx.allocator);
 	lexer.buffer = buffer;
 	lexer.current = buffer.len > 0 ? buffer[0] : 0;
 	lexer.emit_comments = emit_comments;
@@ -21,6 +23,7 @@ fn Lexer* create(AnalyzerContext* ctx, String buffer, bool emit_comments = false
 fn void free(AnalyzerContext* ctx, Lexer* lexer)
 {
 	lexer.tokens.free();
+	lexer.comments.free();
 	alloc::free(ctx.allocator, lexer);
 }
 
@@ -31,15 +34,59 @@ struct Token
 	Range range;
 }
 
+struct Comment
+{
+	Range range;
+	bool is_line;
+}
+
 struct Lexer
 {
 	AnalyzerContext* ctx;
 	String buffer;
 	List{Token} tokens;
+	List{Comment} comments;
 	Location location;
 	char current;
 	int index;
 	bool emit_comments;
+}
+
+<*
+ Whether `loc` is in the comment. The end of a line comment is too, as
+ typing there continues the comment.
+*>
+fn bool Comment.contains(&self, Location loc) => self.range.contains(loc) || (self.is_line && loc == self.range.end);
+
+<*
+ Index of the first token starting at or after `loc`.
+*>
+fn sz Lexer.first_token_at(&self, Location loc)
+{
+	return sort::binarysearch(self.tokens.array_view(), (Token){}, &token_starts_before, &loc);
+}
+
+<*
+ Never equal, so a binary search ends at the first token starting at or after `loc`.
+*>
+fn int token_starts_before(Token token, Token unused, Location* loc) @local => token.range.start.before(*loc) ? -1 : 1;
+
+<*
+ Whether `loc` is inside a comment or doc block of the lexed text.
+*>
+fn bool Lexer.in_comment(&self, Location loc)
+{
+	sz index = sort::binarysearch(self.comments.array_view(), (Comment){}, &comment_starts_after, &loc) - 1;
+	return index >= 0 && self.comments[index].contains(loc);
+}
+
+<*
+ Never equal, so a binary search ends past every comment starting at or before `loc`.
+*>
+fn int comment_starts_after(Comment comment, Comment unused, Location* loc) @local
+{
+	Location start = comment.range.start;
+	return start.line < loc.line || (start.line == loc.line && start.column <= loc.column) ? -1 : 1;
 }
 
 fn bool Token.is_eof(&self) @inline => self.kind == EOF;
@@ -560,15 +607,17 @@ fn void tokenize(Lexer* lexer)
 	while (true)
 	{
 		Token t = next(lexer);
-		if (!lexer.emit_comments && (t.kind == LINE_COMMENT || t.kind == BLOCK_COMMENT))
+		if (t.kind == LINE_COMMENT || t.kind == BLOCK_COMMENT)
 		{
-			continue;
+			lexer.comments.push({ t.range, t.kind == LINE_COMMENT });
+			if (!lexer.emit_comments) continue;
 		}
 		lexer.tokens.push(t);
 		if (t.kind == EOF) break;
 		if (t.kind == DOCS_START)
 		{
 			lex_contract(lexer);
+			lexer.comments.push({ { t.range.start, lexer.tokens.last()!!.range.end }, false });
 		}
 	}
 }

@@ -53,7 +53,7 @@ struct Lookup
 struct AnalyzerContext
 {
 	HashMap{String, SourceFile*} files;
-	List{SourceFile*} files_by_node_id; // Ascending `min_node_id`.
+	List{SourceFile*} files_by_node_id;
 	HashMap{String, Module*} modules;
 	Lookup* lookup;
 	Registry* registry;
@@ -126,6 +126,13 @@ struct VariableInfo
 	Node* node;
 }
 
+struct MethodInfo
+{
+	MethodInfo* next;
+	String mod;
+	Node* node;
+}
+
 struct AttrdefInfo
 {
 	AttrdefInfo* next;
@@ -140,6 +147,7 @@ struct Registry
 	HashMap{String, FunctionInfo*} functions;
 	HashMap{String, MacroInfo*} macros;
 	HashMap{String, AttrdefInfo*} attrmacros;
+	HashMap{String, MethodInfo*} methods_by_type;
 }
 
 struct Scope

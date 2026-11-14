@@ -276,6 +276,60 @@ fn bool has_attribute(Node* node, AttributeKind kind, Node**out_attribute)
 }
 
 <*
+ Type `node` names, with generic arguments, pointers and array, slice and
+ vector suffixes, without optional: `List{Timer}[]*?` is `List{Timer}[]*`.
+ Types that are not named, such as `$Typeof(x)`, are spelled as written.
+*>
+fn String instance_name(Node* node)
+{
+	DString out;
+	out.tinit();
+	append_type(&out, node);
+	return out.str_view();
+}
+
+fn void append_type(DString* out, Node* node) @local
+{
+	if (!node) return;
+	if (node.kind != TYPE_EXPR)
+	{
+		out.append(spelling(node, tmem));
+		return;
+	}
+	TypeExpr* te = node.as(TypeExpr);
+	switch (te.type_kind)
+	{
+		case TYPE_IDENTIFIER:
+			if (te.unresolved.name) out.append(te.unresolved.name.text);
+		case TYPE_POINTER:
+			append_type(out, te.modify.base);
+			out.append('*');
+		case TYPE_SLICE:
+			append_type(out, te.modify.base);
+			out.append("[]");
+		case TYPE_ARRAY:
+			append_type(out, te.array.base);
+			out.appendf("[%s]", te.array.len_expr ? spelling(te.array.len_expr, tmem) : "*");
+		case TYPE_VECTOR:
+			append_type(out, te.array.base);
+			out.appendf("[<%s>]", te.array.len_expr ? spelling(te.array.len_expr, tmem) : "*");
+		case TYPE_GENERIC:
+			append_type(out, te.generic.base);
+			out.append('{');
+			foreach (i, arg : te.generic.params)
+			{
+				if (i > 0) out.append(", ");
+				out.append(spelling(arg, tmem));
+			}
+			out.append('}');
+		case TYPE_TYPEOF:
+		case TYPE_TYPEFROM:
+		case TYPE_FUNCTION:
+			out.append(spelling(node, tmem));
+	}
+}
+
+<*
  Extracts the raw, un-prefixed identifier string from a TYPE_EXPR node.
  Example: 'List*' -> 'List'
 *>

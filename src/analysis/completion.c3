@@ -1,5 +1,5 @@
 module lsp::analysis::completion;
-import analyzer::core, analyzer::cursor, analyzer::sema, std::collections, lsp, uri;
+import analyzer::core, analyzer::cursor, analyzer::lexer, analyzer::parser, analyzer::sema, std::collections, lsp, uri;
 
 enum ScopeKind
 {
@@ -486,6 +486,41 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 	}
 }
 
+<*
+ Labels of the statements enclosing `loc` that `jump` can name.
+*>
+fn void provide_labels(Context* ctx, List{CompletionItem}* items, Location loc, TokenKind jump) @local
+{
+	foreach (i, stmt : query::enclosing_labeled(ctx.sf, loc))
+	{
+		String name = query::label_of(stmt).text;
+		if (!fuzzy_match(name, ctx.prefix)) continue;
+		switch (jump)
+		{
+			case CONTINUE:
+				if (stmt.kind != FOR_STMT && stmt.kind != FOREACH_STMT && stmt.kind != WHILE_STMT && stmt.kind != DO_WHILE_STMT) continue;
+			case NEXTCASE:
+				if (stmt.kind == SWITCH_STMT) break;
+				Node* cond = stmt.kind == IF_STMT ? stmt.as(IfStmt).condition : null;
+				if (!cond || cond.kind != COND_EXPR) continue;
+				NodeArray exprs = cond.as(CondExpr).exprs;
+				if (!exprs.len || exprs[^1].kind != CATCH_EXPR) continue;
+			default:
+				break;
+		}
+		items.push(
+		{
+			.label = name,
+			.kind = REFERENCE,
+			.detail = declaration::text(ctx.ws.ctx, stmt, true),
+			.insertText = jump == NEXTCASE ? string::tformat("%s: ", name) : name,
+			.filterText = name,
+			.sortText = string::tformat("0000_%04d", i)
+		}
+		);
+	}
+}
+
 fn void provide_builtin_types(Context* ctx, List{CompletionItem}* items)
 {
 	if (ctx.access != NONE) return;
@@ -947,38 +982,11 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 	CallTargetInfo target_info = utils::parse_call_context(ctx.sf.content, ctx.offset);
 	if (!target_info.is_valid || target_info.callee_name.len == 0) return;
 
-	Location loc = {
-		.line = (int)ctx.position.line,
-		.column = (int)ctx.position.character
-	};
-
-	Node* callee_node = query::resolve_callee_by_name(ctx.ws.ctx, ctx.sf, target_info.callee_name, loc);
-	if (!callee_node) return;
-
-	NodeArray params = {};
-	bool is_method = false;
-
-	switch (callee_node.kind)
-	{
-		case FN_DECL:
-			{
-				FnDecl* fd = callee_node.as(FnDecl);
-				params = fd.params;
-				is_method = (fd.associated_type != null);
-			}
-		case MACRO_DECL:
-			{
-				MacroDecl* md = callee_node.as(MacroDecl);
-				params = md.params;
-				is_method = @ok(md.associated_type.get());
-			}
-		default:
-			break;
-	}
-
+	CallTarget target = analysis::call_target_of(ctx.ws.ctx, ctx.sf, target_info);
+	NodeArray params = target.params;
 	if (params.len == 0) return;
 
-	sz start_idx = (is_method && target_info.callee_name.contains(".")) ? 1 : 0;
+	sz start_idx = target.first_param;
 
 	String args_text = "";
 	if (ctx.offset > target_info.open_paren_idx + 1)
@@ -1405,48 +1413,8 @@ fn String resolve_root_initializer_type(Context* ctx, SourceFile* sf, sz pos)
 	CallTargetInfo target_info = utils::parse_call_context(sf.content, pos);
 	if (target_info.is_valid)
 	{
-		Location loc = { .line = (int)ctx.position.line, .column = (int)ctx.position.character };
-		Node* callee_node = (ctx.ws && ctx.ws.ctx) ? query::resolve_callee_by_name(ctx.ws.ctx, sf, target_info.callee_name, loc) : null;
-		if (callee_node)
-		{
-			NodeArray params = {};
-			bool is_method = false;
-
-			switch (callee_node.kind)
-			{
-				case FN_DECL:
-					{
-						FnDecl* fd = callee_node.as(FnDecl);
-						params = fd.params;
-						is_method = (fd.associated_type != null);
-					}
-				case MACRO_DECL:
-					{
-						MacroDecl* md = callee_node.as(MacroDecl);
-						params = md.params;
-						is_method = @ok(md.associated_type.get());
-					}
-				default:
-					break;
-			}
-
-			sz param_offset = (target_info.callee_name.contains(".") && is_method) ? 1 : 0;
-			sz param_idx = (sz)target_info.active_param + param_offset;
-			if (param_idx < params.len)
-			{
-				Node* p = params[param_idx];
-				if (p && p.kind == VAR_DECL)
-				{
-					VarDecl* vd = p.as(VarDecl);
-					if (vd.type)
-					{
-						String type_str = cursor::raw_type_identifier(vd.type) ?? cursor::spelling(vd.type, tmem);
-						type_str = type_str.trim_right("*& \t");
-						if (type_str.len > 0) return type_str;
-					}
-				}
-			}
-		}
+		String param_type = active_param_type(ctx, sf, target_info);
+		if (param_type.len > 0) return param_type;
 
 		if (pos > target_info.open_paren_idx + 1)
 		{
@@ -1481,17 +1449,7 @@ fn String resolve_root_initializer_type(Context* ctx, SourceFile* sf, sz pos)
 		}
 		if (words.len >= 1)
 		{
-			String var_expr = words[^1].trim();
-			Location loc = { .line = (int)ctx.position.line, .column = (int)ctx.position.character };
-			String res_type = "";
-			if (ctx.ws && ctx.ws.ctx)
-			{
-				res_type = query::resolve_type_of_chain(ctx.ws.ctx, sf, var_expr, loc);
-			}
-			if (res_type.len == 0)
-			{
-				(void)query::find_local_decl_in_file(sf, var_expr, &res_type, ctx.ws ? ctx.ws.ctx : null, loc);
-			}
+			String res_type = type_of_text(ctx, sf, words[^1].trim());
 			if (res_type.len > 0) return res_type;
 		}
 	}
@@ -1512,58 +1470,32 @@ fn String resolve_root_initializer_type(Context* ctx, SourceFile* sf, sz pos)
 	return "";
 }
 
-fn String apply_field_path(Context* ctx, SourceFile* sf, String root_type, List{String} field_path)
+<*
+ Type of the expression `text` of `sf`, a view into its content, as the
+ analyzer types the expression written there.
+*>
+fn String type_of_text(Context* ctx, SourceFile* sf, String text) @local
 {
-	String curr_type = root_type.trim_right("*& \t");
-	if (try br_idx = curr_type.index_of_char('['))
-	{
-		curr_type = curr_type[:br_idx].trim();
-	}
-	if (try br_idx = curr_type.index_of_char('{'))
-	{
-		curr_type = curr_type[:br_idx].trim();
-	}
+	if (!ctx.ws || !ctx.ws.ctx || !text.len) return "";
+	Range range = analysis::range_of(sf.content, text);
+	Node* expr = parser::parse_expression(ctx.ws.ctx, sf, range);
+	return expr ? query::type_of(ctx.ws.ctx, sf, expr, range.start) : "";
+}
 
-	for (sz i = field_path.len(); i > 0; i--)
-	{
-		String field_name = field_path.get(i - 1);
-		Node* member = null;
-		if (ctx.ws && ctx.ws.ctx)
-		{
-			member = query::find_member_in_type(ctx.ws.ctx, curr_type, field_name, sf);
-		}
-		if (member && member.kind == VAR_DECL)
-		{
-			VarDecl* vd = member.as(VarDecl);
-			if (vd.type)
-			{
-				curr_type = cursor::raw_type_identifier(vd.type) ?? cursor::spelling(vd.type, tmem);
-				curr_type = curr_type.trim_right("*& \t");
-				if (try br_idx = curr_type.index_of_char('['))
-				{
-					curr_type = curr_type[:br_idx].trim();
-				}
-				if (try br_idx = curr_type.index_of_char('{'))
-				{
-					curr_type = curr_type[:br_idx].trim();
-				}
-			}
-			else
-			{
-				return "";
-			}
-		}
-		else if (member && member.kind == STRUCT_DECL)
-		{
-			curr_type = string::tformat("%s.%s", curr_type, field_name);
-		}
-		else
-		{
-			return "";
-		}
-	}
-
-	return curr_type;
+<*
+ Declared type of the parameter taking the argument at the cursor of the
+ call `info` describes, or empty.
+*>
+fn String active_param_type(Context* ctx, SourceFile* sf, CallTargetInfo info) @local
+{
+	if (!ctx.ws || !ctx.ws.ctx) return "";
+	CallTarget target = analysis::call_target_of(ctx.ws.ctx, sf, info);
+	sz index = info.active_param + target.first_param;
+	if (index >= target.params.len) return "";
+	Node* param = target.params[index];
+	if (!param || param.kind != VAR_DECL || !param.as(VarDecl).type) return "";
+	Node* type = param.as(VarDecl).type;
+	return (cursor::raw_type_identifier(type) ?? cursor::spelling(type, tmem)).trim_right("*& \t");
 }
 
 fn sz skip_brackets_backward(String text, sz p) @local
@@ -1631,7 +1563,13 @@ fn String resolve_enclosing_field_type(Context* ctx, SourceFile* sf, String text
 		String root_type = resolve_root_initializer_type(ctx, sf, open_brace_idx);
 		if (root_type.len > 0)
 		{
-			return apply_field_path(ctx, sf, root_type, *field_path);
+			if (!ctx.ws || !ctx.ws.ctx) return "";
+			String field_type = root_type[:root_type.index_of_char('[') ?? root_type.len];
+			for (sz i = field_path.len(); i > 0 && field_type.len; i--)
+			{
+				field_type = query::member_type(ctx.ws.ctx, sf, field_type, field_path.get(i - 1));
+			}
+			return field_type;
 		}
 
 		if (bp > 0 && (text[bp - 1] == '{' || text[bp - 1] == ',' || text[bp - 1] == '('))
@@ -2060,6 +1998,30 @@ fn void provide_enum_variants(List{CompletionItem}* items, Node* enum_node, Stri
 	}
 }
 
+<*
+ Built-in properties of values of type `type_name`, such as `len` of a slice.
+*>
+fn void provide_value_properties(Context* ctx, List{CompletionItem}* items, String type_name) @local
+{
+	foreach (property : ValueProperty::values)
+	{
+		if (ctx.prefix.len && !property.name.starts_with(ctx.prefix)) continue;
+		String type = query::value_property_type(ctx.ws.ctx, ctx.sf, type_name, property);
+		if (!type.len) continue;
+		items.push({
+			.label = property.name,
+			.kind = PROPERTY,
+			.detail = type,
+			.documentation = { .kind = MARKDOWN, .value = property.doc },
+			.insertText = property.name,
+			.insertTextFormat = PLAIN_TEXT,
+			.filterText = property.name,
+			.sortText = string::tformat("0001_%s", property.name),
+			.data = "property"
+		});
+	}
+}
+
 fn void provide_enum_associated_params(List{CompletionItem}* items, Node* enum_node, String type_name, String prefix)
 {
 	if (!enum_node || enum_node.kind != ENUM_DECL) return;
@@ -2085,21 +2047,6 @@ fn void provide_enum_associated_params(List{CompletionItem}* items, Node* enum_n
 			}
 			);
 		}
-	}
-
-	if (prefix.len == 0 || ((String)"ordinal").starts_with(prefix))
-	{
-		items.push(
-		{
-			.label = "ordinal",
-			.kind = PROPERTY,
-			.detail = "sz",
-			.insertText = "ordinal",
-			.filterText = "ordinal",
-			.sortText = "0002_ordinal",
-			.data = "property"
-		}
-		);
 	}
 }
 
@@ -2445,7 +2392,8 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 					}
 				}
 
-				String type_name = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, base_id, loc);
+				// The base of `::` names a type, which need not be an expression.
+				String type_name = type_of_text(ctx, ctx.sf, base_id) ?: base_id;
 				String clean_type = type_name;
 				if (try brace_idx = type_name.index_of_char('{'))
 				{
@@ -2472,7 +2420,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 		case INSTANCE:
 			{
 				Location loc = { .line = (int)ctx.position.line, .column = (int)ctx.position.character };
-				String type_name = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, base_id, loc);
+				String type_name = ctx.is_designated_initializer ? base_id : type_of_text(ctx, ctx.sf, base_id);
 				String clean_type = type_name;
 				if (try brace_idx = type_name.index_of_char('{'))
 				{
@@ -2480,6 +2428,8 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 				}
 
 				if (clean_type.len == 0) return false;
+
+				provide_value_properties(ctx, items, type_name);
 
 				HashSet{String} seen_methods;
 				seen_methods.tinit();
@@ -2521,52 +2471,6 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 				if (query::is_vector_type(clean_type))
 				{
 					inject_vector_swizzles(items, ctx.prefix);
-				}
-
-				if (clean_type == "String" || clean_type.ends_with("[]") || clean_type.contains("["))
-				{
-					if (ctx.prefix.len == 0 || ((String)"len").starts_with(ctx.prefix))
-					{
-						items.push(
-						{
-							.label = "len",
-							.kind = PROPERTY,
-							.detail = "sz",
-							.documentation = {
-								.kind = MARKDOWN,
-								.value = "Number of elements in the array, slice, vector, or string."
-							},
-							.insertText = "len",
-							.insertTextFormat = PLAIN_TEXT,
-							.filterText = "len",
-							.sortText = "0001_len",
-							.data = "property"
-						}
-						);
-					}
-					if (clean_type == "String" || clean_type.ends_with("[]"))
-					{
-						if (ctx.prefix.len == 0 || ((String)"ptr").starts_with(ctx.prefix))
-						{
-							String ptr_type = clean_type == "String" ? "char*" : string::tformat("%s*", clean_type.strip_suffix("[]"));
-							items.push(
-							{
-								.label = "ptr",
-								.kind = PROPERTY,
-								.detail = ptr_type,
-								.documentation = {
-									.kind = MARKDOWN,
-									.value = "Pointer to the underlying elements of the array, slice, or string."
-								},
-								.insertText = "ptr",
-								.insertTextFormat = PLAIN_TEXT,
-								.filterText = "ptr",
-								.sortText = "0001_ptr",
-								.data = "property"
-							}
-							);
-						}
-					}
 				}
 
 				if (type_node && type_node.kind == STRUCT_DECL)
@@ -2938,15 +2842,7 @@ fn String find_enclosing_switch_type(Context* ctx, SourceFile* sf, Location loc,
 						{
 							cond_str = cond_str[comma_idx + 1..].trim();
 						}
-						String resolved = "";
-						if (ctx.ws && ctx.ws.ctx)
-						{
-							resolved = query::resolve_type_of_chain(ctx.ws.ctx, sf, cond_str, loc);
-						}
-						if (resolved.len == 0)
-						{
-							query::find_local_decl_in_file(sf, cond_str, &resolved, ctx.ws ? ctx.ws.ctx : null, loc);
-						}
+						String resolved = type_of_text(ctx, sf, cond_str);
 						if (resolved.len > 0)
 						{
 							if (out_open_brace) *out_open_brace = open_brace;
@@ -3043,15 +2939,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 			String lhs_expr = lhs_part[expr_start..].trim();
 			if (lhs_expr.len > 0)
 			{
-				String resolved_type = "";
-				if (ctx.ws && ctx.ws.ctx)
-				{
-					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, lhs_expr, loc);
-				}
-				if (resolved_type.len == 0)
-				{
-					query::find_local_decl_in_file(ctx.sf, lhs_expr, &resolved_type, ctx.ws ? ctx.ws.ctx : null, loc);
-				}
+				String resolved_type = type_of_text(ctx, ctx.sf, lhs_expr);
 				if (resolved_type.len > 0)
 				{
 					if (out_expected_type) *out_expected_type = resolved_type;
@@ -3114,16 +3002,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 			}
 			if (words.len >= 1)
 			{
-				String var_expr = words[^1].trim();
-				String resolved_type = "";
-				if (ctx.ws && ctx.ws.ctx)
-				{
-					resolved_type = query::resolve_type_of_chain(ctx.ws.ctx, ctx.sf, var_expr, loc);
-				}
-				if (resolved_type.len == 0)
-				{
-					(void)query::find_local_decl_in_file(ctx.sf, var_expr, &resolved_type, ctx.ws ? ctx.ws.ctx : null, loc);
-				}
+				String resolved_type = type_of_text(ctx, ctx.sf, words[^1].trim());
 				if (resolved_type.len > 0)
 				{
 					if (out_expected_type) *out_expected_type = resolved_type;
@@ -3138,50 +3017,8 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 		CallTargetInfo target_info = utils::parse_call_context(ctx.sf.content, ctx.offset);
 		if (target_info.is_valid && target_info.callee_name.len > 0)
 		{
-			Node* callee_node = (ctx.ws && ctx.ws.ctx) ? query::resolve_callee_by_name(ctx.ws.ctx, ctx.sf, target_info.callee_name, loc) : null;
-			if (callee_node)
-			{
-				NodeArray params = {};
-				bool is_method = false;
-
-				switch (callee_node.kind)
-				{
-					case FN_DECL:
-						{
-							FnDecl* fd = callee_node.as(FnDecl);
-							params = fd.params;
-							is_method = (fd.associated_type != null);
-						}
-					case MACRO_DECL:
-						{
-							MacroDecl* md = callee_node.as(MacroDecl);
-							params = md.params;
-							is_method = @ok(md.associated_type.get());
-						}
-					default:
-						break;
-				}
-
-				sz param_offset = (target_info.callee_name.contains(".") && is_method) ? 1 : 0;
-				sz param_idx = (sz)target_info.active_param + param_offset;
-				if (param_idx < params.len)
-				{
-					Node* p = params[param_idx];
-					if (p && p.kind == VAR_DECL)
-					{
-						VarDecl* vd = p.as(VarDecl);
-						if (vd.type)
-						{
-							String ptype = cursor::raw_type_identifier(vd.type) ?? cursor::spelling(vd.type, tmem);
-							ptype = ptype.trim_right("*& \t");
-							if (ptype.len > 0 && out_expected_type)
-							{
-								*out_expected_type = ptype;
-							}
-						}
-					}
-				}
-			}
+			String param_type = active_param_type(ctx, ctx.sf, target_info);
+			if (param_type.len > 0 && out_expected_type) *out_expected_type = param_type;
 		}
 	}
 
@@ -3506,15 +3343,11 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos) @loc
 
 	sz offset = utils::compute_byte_offset(sf.content, pos.line, pos.character);
 
-	if (utils::is_inside_comment(sf.content, offset))
-	{
-		return items.array_view();
-	}
-
 	Location loc = {
 		.line = (int)pos.line,
 		.column = (int)pos.character
 	};
+	if (sf.lexer && sf.lexer.in_comment(loc)) return items.array_view();
 
 	String caller_mod = query::get_module_name_at_location(sf, loc);
 
@@ -3559,9 +3392,17 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos) @loc
 
 	detect_access_context(&ctx, sf);
 
+	sz word_start = sf.lexer ? sf.lexer.first_token_at({ loc.line, loc.column - (int)ctx.prefix.len }) : 0;
+	TokenKind jump = word_start ? sf.lexer.tokens[word_start - 1].kind : EOF;
+	if (jump == NEXTCASE) provide_labels(&ctx, &items, loc, jump);
+
 	if (ctx.scope == NONE)
 	{
 		return items.array_view();
+	}
+	else if (jump == BREAK || jump == CONTINUE)
+	{
+		provide_labels(&ctx, &items, loc, jump);
 	}
 	else if (ctx.scope == ATTRIBUTE)
 	{

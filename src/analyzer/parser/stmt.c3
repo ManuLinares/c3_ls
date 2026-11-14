@@ -215,7 +215,7 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
 	CompoundStmt* node = ctx.ast.alloc_node(CompoundStmt, ctx.current.range);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 	advance(ctx);
 
 	List{Node*} temp_stmts;
@@ -305,7 +305,7 @@ fn Node* parse_case_stmts(ContextScope scope, int row) => @pool()
 	ParseContext* ctx = scope.ctx;
 	ParseFlags flags = scope.flags;
 	CompoundStmt* compound_node = ctx.ast.alloc_node(CompoundStmt, ctx.current.range);
-	defer compound_node.range.end = ctx.current.range.end;
+	defer compound_node.range.end = ctx.peek(-1).range.end;
 
 	if (!flags.is_comptime && token_type_ends_case(ctx.current.kind))
 	{
@@ -350,7 +350,6 @@ fn Node* parse_case_stmts(ContextScope scope, int row) => @pool()
 	}
 
 	compound_node.statements = alloc::clone_slice(ctx.allocator, stmts.array_view());
-	compound_node.range.end = ctx.current.range.end;
 
 	return (Node*)compound_node;
 }
@@ -369,7 +368,7 @@ fn Node* parse_case_stmt(ContextScope scope) => @pool()
 	advance(ctx);
 
 	CaseStmt* node = ctx.ast.alloc_node(CaseStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	node.expr = parse_expr(scope);
 	if (consume(ctx, DOTDOT))
@@ -433,7 +432,7 @@ fn Node* parse_nextcase_stmt(ContextScope scope)
 	advance(ctx);
 
 	NextcaseStmt* node = ctx.ast.alloc_node(NextcaseStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (consume(ctx, EOS))
 	{
@@ -466,7 +465,7 @@ fn Node* parse_continue_break_stmt(ContextScope scope)
 	if (!is_continue) consume(ctx, BREAK);
 
 	ContinueBreakStmt* node = ctx.ast.alloc_node(ContinueBreakStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	node.is_continue = is_continue;
 
@@ -576,7 +575,7 @@ fn Node* parse_ct_switch_stmt(ContextScope scope) => @pool()
 	advance(ctx);
 
 	CtSwitchStmt* node = ctx.ast.alloc_node(CtSwitchStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (!ctx.is(COLON))
 	{
@@ -662,7 +661,7 @@ fn Node* parse_if_stmt(ContextScope scope)
 	Range start = ctx.current.range;
 	advance(ctx);
 	IfStmt* node = ctx.ast.alloc_node(IfStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (ctx.is(CONST_IDENT))
 	{
@@ -720,7 +719,7 @@ fn Node* parse_ct_if_stmt(ContextScope scope) => @pool()
 	advance(ctx);
 
 	CtIfStmt* node = ctx.ast.alloc_node(CtIfStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	node.expr = parse_expr(scope);
 	if (node.expr && node.expr.flags.has_error)
@@ -802,7 +801,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 	advance(ctx);
 
 	ForStmt* node = ctx.ast.alloc_node(ForStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (ctx.is(CONST_IDENT))
 	{
@@ -876,7 +875,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	advance(ctx);
 
 	CtForStmt* node = ctx.ast.alloc_node(CtForStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (!ctx.is(EOS))
 	{
@@ -1013,7 +1012,7 @@ fn Node* parse_do_while_stmt(ContextScope scope)
 	advance(ctx);
 
 	DoWhileStmt* node = ctx.ast.alloc_node(DoWhileStmt, start);
-	defer node.range.end = ctx.current.range.end;
+	defer node.range.end = ctx.peek(-1).range.end;
 
 	if (ctx.is(CONST_IDENT))
 	{
@@ -1059,7 +1058,7 @@ fn Node* parse_foreach_var(ContextScope scope)
 	ParseContext* ctx = scope.ctx;
 	Range start  = ctx.current.range;
 	VarDecl* var_node = ctx.ast.alloc_node(VarDecl, start);
-	defer var_node.range.end = ctx.current.range.end;
+	defer var_node.range.end = ctx.peek(-1).range.end;
 	var_node.var_kind = VAR_LOCAL;
 
 	if (!ctx.is(IDENT) && !ctx.is(AMP))

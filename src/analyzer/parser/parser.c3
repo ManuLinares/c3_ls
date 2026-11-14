@@ -1,11 +1,6 @@
 module analyzer::parser;
-
-import std::io;
-import std::io::path;
-import std::collections::list;
-import std::collections::maybe;
-import analyzer::core;
-import analyzer::lexer;
+import std::io, std::io::path, std::collections::list;
+import analyzer::core, analyzer::lexer;
 
 struct ContextScope
 {
@@ -206,6 +201,35 @@ fn void synchronize(ParseContext* ctx, SyncTarget target)
 	}
 }
 
+<*
+ Expression the tokens of `sf` within `range` form, parsed on their own so
+ that the code around them, complete or not, does not change how they
+ parse. Null unless they form exactly one expression.
+*>
+fn Node* parse_expression(AnalyzerContext* context, SourceFile* sf, Range range)
+{
+	if (!sf.lexer) return null;
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz first = sf.lexer.first_token_at(range.start);
+	sz end = first;
+	while (end < tokens.len && tokens[end].range.start.before(range.end)) end++;
+	if (end == first) return null;
+
+	Lexer fragment = { .ctx = context, .buffer = sf.content };
+	fragment.tokens.init(tmem, end - first + 1);
+	fragment.tokens.push_all(tokens[first:end - first]);
+	fragment.tokens.push({ .kind = EOF, .range = { range.end, range.end } });
+	Ast ast = { .allocator = tmem };
+	ast.nodes.init(tmem);
+	ast.statements.init(tmem);
+	ParseContext ctx = { .context = context, .sf = sf, .ast = &ast, .lexer = &fragment, .allocator = tmem, .current = fragment.tokens[0] };
+
+	Node* expr = parse_expr({ .ctx = &ctx });
+	if (!expr || expr.kind == ERROR || !ctx.current.is_eof()) return null;
+	return expr;
+}
+
+
 fn bool ParseContext.eof(&self) @inline => self.pos >= self.lexer.tokens.len() || self.current.is_eof();
 
 fn bool ParseContext.is(&self, TokenKind kind)
@@ -325,6 +349,10 @@ fn bool parse(ParseContext* ctx, SourceFile* source_file) => @pool()
 			}
 			ctx.contract = null;
 		}
+	}
+	foreach (i, stmt : ctx.ast.statements)
+	{
+		if (stmt.kind == MODULE_DECL) ctx.ast.module_decls.push(i);
 	}
 
 	return ctx.error_count == 0;

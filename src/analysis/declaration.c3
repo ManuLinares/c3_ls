@@ -1,5 +1,5 @@
 module lsp::analysis::declaration;
-import analyzer, lsp, std::sort;
+import analyzer, lsp, std::collections::list;
 
 <*
  Signature of `node` for hover, completion and signature help.
@@ -36,6 +36,18 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 		case VAR_DECL:
 			VarDecl* vd = node.as(VarDecl);
 			if (vd.var_flags.is_self) return string::tformat("%s %s", cursor::spelling(vd.type, tmem), name);
+			SourceFile* sf = source_file::file_of(ctx, node);
+			if (sf && vd.var_kind == VAR_LOCAL)
+			{
+				List{Node*} stack = query::ancestors_of(sf, node);
+				sz n = stack.len();
+				ForeachStmt* fst = n >= 2 && stack[n - 2].kind == FOREACH_STMT ? stack[n - 2].as(ForeachStmt) : null;
+				if (fst && (fst.index == node || fst.variable == node))
+				{
+					String type = query::foreach_binding_type(ctx, sf, fst, node);
+					if (type.len) return string::tformat("%s %s", type, vd.name ? vd.name.text : name);
+				}
+			}
 			if (EnumDecl* owner = owner_enum(ctx, node)) return string::tformat("%s.%s", owner.name.text, text(ctx, node, single_line) ?: name);
 		case FAULT_DECL:
 			return string::tformat("fault %s", text(ctx, node, single_line) ?: name);
@@ -51,6 +63,7 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 fn String header(AnalyzerContext* ctx, Node* node, String name)
 {
 	String sig = signature(ctx, node, name);
+	if (query::label_of(node)) return string::tformat("```c3\n%s\n```\nline %d", sig, node.range.start.line + 1);
 	String mod = module_name(ctx, node);
 	if (!mod.len) return string::tformat("```c3\n%s\n```", sig);
 	return string::tformat("```c3\n%s\n```\nmodule `%s`", sig, mod);
@@ -118,8 +131,8 @@ fn String text(AnalyzerContext* ctx, Node* decl, bool single_line = false)
 
 	Location start = decl.range.start;
 	Node* contract = cursor::contract(decl) ?? null;
-	if (contract && before(start, contract.range.end)) start = contract.range.end;
-	sz first = sort::binarysearch(tokens, (Token){}, &starts_before, &start);
+	if (contract && start.before(contract.range.end)) start = contract.range.end;
+	sz first = sf.lexer.first_token_at(start);
 	if (first >= tokens.len) return "";
 	sz last = last_header_token(tokens, first, decl);
 	while (last > first && (tokens[last].kind == EOS || tokens[last].kind == IMPLIES)) last--;
@@ -128,13 +141,6 @@ fn String text(AnalyzerContext* ctx, Node* decl, bool single_line = false)
 	FormattingOptions options = { .tab_size = 4, .insert_spaces = true };
 	return formatting::format_tokens_range(tmem, sf.content, tokens, first, last, 0, options, single_line).trim();
 }
-
-fn bool before(Location a, Location b) @local => a.line < b.line || (a.line == b.line && a.column < b.column);
-
-<*
- Never equal, so a binary search ends at the first token starting at or after `start`.
-*>
-fn int starts_before(Token token, Token unused, Location* start) @local => before(token.range.start, *start) ? -1 : 1;
 
 <*
  Index of the last token before the body of `decl`, or of its last token when it has no body.
@@ -148,11 +154,22 @@ fn sz last_header_token(Token[] tokens, sz first, Node* decl) @local
 			if (Node* body = decl.as(FnDecl).body) end = body.range.start;
 		case MACRO_DECL:
 			if (Node* body = decl.as(MacroDecl).body) end = body.range.start;
+		case IF_STMT:
+			if (Node* body = decl.as(IfStmt).then_body) end = body.range.start;
+		case FOR_STMT:
+			if (Node* body = decl.as(ForStmt).body) end = body.range.start;
+		case WHILE_STMT:
+			if (Node* body = decl.as(WhileStmt).body) end = body.range.start;
+		case DO_WHILE_STMT:
+			if (Node* body = decl.as(DoWhileStmt).body) end = body.range.start;
+		case FOREACH_STMT:
+			if (Node* body = decl.as(ForeachStmt).body) end = body.range.start;
+		case SWITCH_STMT:
 		case STRUCT_DECL:
 		case ENUM_DECL:
 		case INTERFACE_DECL:
 			int depth = 0;
-			for (sz i = first; i < tokens.len && before(tokens[i].range.start, end); i++)
+			for (sz i = first; i < tokens.len && tokens[i].range.start.before(end); i++)
 			{
 				switch (tokens[i].kind)
 				{
@@ -168,6 +185,6 @@ fn sz last_header_token(Token[] tokens, sz first, Node* decl) @local
 			break;
 	}
 	sz i = first;
-	while (i + 1 < tokens.len && before(tokens[i + 1].range.start, end)) i++;
+	while (i + 1 < tokens.len && tokens[i + 1].range.start.before(end)) i++;
 	return i;
 }

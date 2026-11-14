@@ -1196,7 +1196,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
 	Range start = ctx.current.range;
-	advance(ctx); // Consumes faultdef or excuse
+	advance(ctx);
 
 	FaultdefDecl* node = ctx.ast.alloc_node(FaultdefDecl, start);
 	defer node.range.end = ctx.peek(-1).range.end;
@@ -1463,11 +1463,13 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 	ParseContext* ctx = scope.ctx;
 	ParseFlags flags = scope.flags;
 	Range start = ctx.current.range;
+	bool is_constdef = ctx.is(CONSTDEF);
 
 	advance(ctx);
 
 	EnumDecl* node = ctx.ast.alloc_node(EnumDecl, start);
 	defer node.range.end = ctx.peek(-1).range.end;
+	node.is_constdef = is_constdef;
 
 	if (ctx.is(TYPE_IDENT))
 	{

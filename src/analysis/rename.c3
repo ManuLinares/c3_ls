@@ -2,14 +2,6 @@ module lsp::analysis::rename;
 import analyzer, lsp, uri, std;
 import lsp::analysis::references;
 
-fn bool touches(Range r, Location loc)
-{
-	if (loc.line < r.start.line || loc.line > r.end.line) return false;
-	if (loc.line == r.start.line && loc.column < r.start.column) return false;
-	if (loc.line == r.end.line && loc.column > r.end.column) return false;
-	return true;
-}
-
 <*
  Range of the renameable name token under the cursor. Fails when the
  cursor is not on a name, or the name does not resolve to a declaration
@@ -29,7 +21,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 	if (!target || target.kind == ERROR) return NOT_FOUND~;
 
 	Ident* name = references::decl_name(target) ?: references::ref_name(target);
-	if (!name || !touches(name.range, loc)) return NOT_FOUND~;
+	if (!name || !name.range.touches(loc)) return NOT_FOUND~;
 
 	Node* decl = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
 	if (!decl || decl.kind == MODULE_DECL) return NOT_FOUND~;

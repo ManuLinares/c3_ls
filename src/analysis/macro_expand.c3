@@ -1,12 +1,6 @@
 module lsp::analysis::macro_expand;
 import analyzer, lsp, std::collections::list, std::collections::map, std::io;
 
-struct MacroSubstitutions
-{
-	HashMap{String, String} params;
-	String body_block;
-}
-
 <*
  Extracts the exact source text of a node from the SourceFile buffer.
 *>
@@ -14,602 +8,157 @@ fn String get_node_source_text(SourceFile* sf, Node* node)
 {
 	if (!sf || !node) return "";
 	if (node.range.start.line < 0 || node.range.end.line < 0) return cursor::spelling(node, tmem);
-
-	sz start_off = utils::compute_byte_offset(sf.content, (uint)node.range.start.line, (uint)node.range.start.column);
-	sz end_off = utils::compute_byte_offset(sf.content, (uint)node.range.end.line, (uint)node.range.end.column);
-
-	if (start_off < end_off && end_off <= sf.content.len)
-	{
-		return sf.content[start_off : end_off - start_off].trim();
-	}
-	return cursor::spelling(node, tmem);
-}
-
-fn String binary_op_to_string(OperatorKind op)
-{
-	switch (op)
-	{
-		case OP_ADD: return "+";
-		case OP_SUB: return "-";
-		case OP_MULT: return "*";
-		case OP_DIV: return "/";
-		case OP_MOD: return "%";
-		case OP_SHL: return "<<";
-		case OP_SHR: return ">>";
-		case OP_BIT_AND: return "&";
-		case OP_BIT_OR: return "|";
-		case OP_BIT_XOR: return "^";
-		case OP_AND: return "&&";
-		case OP_OR: return "||";
-		case OP_ASSIGN: return "=";
-		case OP_ADD_ASSIGN: return "+=";
-		case OP_SUB_ASSIGN: return "-=";
-		case OP_MULT_ASSIGN: return "*=";
-		case OP_DIV_ASSIGN: return "/=";
-		case OP_MOD_ASSIGN: return "%=";
-		case OP_BIT_AND_ASSIGN: return "&=";
-		case OP_BIT_OR_ASSIGN: return "|=";
-		case OP_BIT_XOR_ASSIGN: return "^=";
-		case OP_SHL_ASSIGN: return "<<=";
-		case OP_SHR_ASSIGN: return ">>=";
-		case OP_EQ: return "==";
-		case OP_NE: return "!=";
-		case OP_LT: return "<";
-		case OP_LE: return "<=";
-		case OP_GT: return ">";
-		case OP_GE: return ">=";
-		case OP_ELSE: return "??";
-		case OP_ELVIS: return "?:";
-		case OP_CT_CONCAT: return "+++";
-		case OP_CT_CONCAT_ASSIGN: return "+++=";
-		case OP_CT_AND: return "&&&";
-		case OP_CT_OR: return "|||";
-		default: return "";
-	}
-}
-
-fn String unary_op_to_string(UnaryOpKind op)
-{
-	switch (op)
-	{
-		case UNARYOP_NOT: return "!";
-		case UNARYOP_BITNEG: return "~";
-		case UNARYOP_NEG: return "-";
-		case UNARYOP_PLUS: return "+";
-		case UNARYOP_ADDR: return "&";
-		case UNARYOP_TADDR: return "&&";
-		case UNARYOP_DEREF: return "*";
-		case UNARYOP_INC: return "++";
-		case UNARYOP_DEC: return "--";
-		default: return "";
-	}
-}
-
-fn void append_indent(DString* out, int indent)
-{
-	for (int i = 0; i < indent; i++)
-	{
-		out.append("  ");
-	}
+	return source_text(sf, node.range).trim();
 }
 
 <*
- Recursively formats an AST node with macro parameter substitutions.
-*>
-fn void format_node_with_substitutions(DString* out, Node* node, MacroSubstitutions* subs, int indent = 0)
-{
-	if (!node || node.kind == ERROR) return;
-
-	switch (node.kind)
-	{
-		case COMPOUND_STMT:
-			{
-				CompoundStmt* comp = node.as(CompoundStmt);
-				out.append("{\n");
-				foreach (stmt : comp.statements)
-				{
-					append_indent(out, indent + 1);
-					format_node_with_substitutions(out, stmt, subs, indent + 1);
-					out.append("\n");
-				}
-				append_indent(out, indent);
-				out.append("}");
-			}
-
-		case EXPR_STMT:
-			{
-				ExprStmt* ex = node.as(ExprStmt);
-				format_node_with_substitutions(out, ex.expr_stmt, subs, indent);
-				out.append(";");
-			}
-
-		case RETURN_STMT:
-			{
-				ReturnStmt* ret = node.as(ReturnStmt);
-				if (ret.expr)
-				{
-					out.append("return ");
-					format_node_with_substitutions(out, ret.expr, subs, indent);
-					out.append(";");
-				}
-				else
-				{
-					out.append("return;");
-				}
-			}
-
-		case IF_STMT:
-			{
-				IfStmt* if_st = node.as(IfStmt);
-				out.append("if (");
-				format_node_with_substitutions(out, if_st.condition, subs, indent);
-				out.append(") ");
-				format_node_with_substitutions(out, if_st.then_body, subs, indent);
-				if (if_st.else_body)
-				{
-					out.append(" else ");
-					format_node_with_substitutions(out, if_st.else_body, subs, indent);
-				}
-			}
-
-		case CT_IF_STMT:
-			{
-				CtIfStmt* ct_if = node.as(CtIfStmt);
-				out.append("$if ");
-				format_node_with_substitutions(out, ct_if.expr, subs, indent);
-				out.append(":\n");
-				foreach (stmt : ct_if.then_stmts)
-				{
-					append_indent(out, indent + 1);
-					format_node_with_substitutions(out, stmt, subs, indent + 1);
-					out.append("\n");
-				}
-				if (ct_if.else_stmts.len > 0)
-				{
-					append_indent(out, indent);
-					out.append("$else\n");
-					foreach (stmt : ct_if.else_stmts)
-					{
-						append_indent(out, indent + 1);
-						format_node_with_substitutions(out, stmt, subs, indent + 1);
-						out.append("\n");
-					}
-				}
-				append_indent(out, indent);
-				out.append("$endif");
-			}
-
-		case FOR_STMT:
-			{
-				ForStmt* fs = node.as(ForStmt);
-				out.append("for (");
-				if (try init_node = fs.init.get())
-				{
-					DString init_str;
-					init_str.tinit();
-					format_node_with_substitutions(&init_str, init_node, subs, indent);
-					out.append(init_str.str_view().strip_suffix(";"));
-				}
-				out.append("; ");
-				if (try cond_node = fs.cond.get())
-				{
-					DString cond_str;
-					cond_str.tinit();
-					format_node_with_substitutions(&cond_str, cond_node, subs, indent);
-					out.append(cond_str.str_view().strip_suffix(";"));
-				}
-				out.append("; ");
-				if (try incr_node = fs.incr.get())
-				{
-					DString incr_str;
-					incr_str.tinit();
-					format_node_with_substitutions(&incr_str, incr_node, subs, indent);
-					out.append(incr_str.str_view().strip_suffix(";"));
-				}
-				out.append(") ");
-				if (fs.body)
-				{
-					format_node_with_substitutions(out, fs.body, subs, indent);
-				}
-			}
-
-		case CT_FOR_STMT:
-			{
-				CtForStmt* ct_for = node.as(CtForStmt);
-				out.append("$for ");
-				if (try init_node = ct_for.init.get())
-				{
-					DString s; s.tinit();
-					format_node_with_substitutions(&s, init_node, subs, indent);
-					out.append(s.str_view().strip_suffix(";"));
-				}
-				out.append("; ");
-				if (ct_for.cond)
-				{
-					DString s; s.tinit();
-					format_node_with_substitutions(&s, ct_for.cond, subs, indent);
-					out.append(s.str_view().strip_suffix(";"));
-				}
-				out.append("; ");
-				if (try incr_node = ct_for.incr.get())
-				{
-					DString s; s.tinit();
-					format_node_with_substitutions(&s, incr_node, subs, indent);
-					out.append(s.str_view().strip_suffix(";"));
-				}
-				out.append(":\n");
-				if (ct_for.body)
-				{
-					format_node_with_substitutions(out, ct_for.body, subs, indent + 1);
-					out.append("\n");
-				}
-				append_indent(out, indent);
-				out.append("$endfor");
-			}
-
-		case CT_FOREACH_STMT:
-			{
-				CtForeachStmt* ct_fe = node.as(CtForeachStmt);
-				out.append("$foreach ");
-				if (ct_fe.index)
-				{
-					format_node_with_substitutions(out, ct_fe.index, subs, indent);
-					out.append(", ");
-				}
-				if (ct_fe.value)
-				{
-					format_node_with_substitutions(out, ct_fe.value, subs, indent);
-				}
-				out.append(" : ");
-				format_node_with_substitutions(out, ct_fe.expr, subs, indent);
-				out.append(":\n");
-				if (ct_fe.body)
-				{
-					format_node_with_substitutions(out, ct_fe.body, subs, indent + 1);
-					out.append("\n");
-				}
-				append_indent(out, indent);
-				out.append("$endforeach");
-			}
-
-		case WHILE_STMT:
-			{
-				WhileStmt* ws = node.as(WhileStmt);
-				out.append("while (");
-				if (ws.cond)
-				{
-					format_node_with_substitutions(out, ws.cond, subs, indent);
-				}
-				out.append(") ");
-				if (ws.body)
-				{
-					format_node_with_substitutions(out, ws.body, subs, indent);
-				}
-			}
-
-		case SWITCH_STMT:
-			{
-				SwitchStmt* sw = node.as(SwitchStmt);
-				out.append("switch (");
-				if (sw.cond) format_node_with_substitutions(out, sw.cond, subs, indent);
-				out.append(") {\n");
-				foreach (c : sw.cases)
-				{
-					append_indent(out, indent + 1);
-					format_node_with_substitutions(out, c, subs, indent + 1);
-					out.append("\n");
-				}
-				append_indent(out, indent);
-				out.append("}");
-			}
-
-		case CT_SWITCH_STMT:
-			{
-				CtSwitchStmt* sw = node.as(CtSwitchStmt);
-				out.append("$switch");
-				if (sw.cond)
-				{
-					out.append(" ");
-					format_node_with_substitutions(out, sw.cond, subs, indent);
-				}
-				out.append(":\n");
-				foreach (c : sw.cases)
-				{
-					append_indent(out, indent + 1);
-					format_node_with_substitutions(out, c, subs, indent + 1);
-					out.append("\n");
-				}
-				append_indent(out, indent);
-				out.append("$endswitch");
-			}
-
-		case CASE_STMT:
-			{
-				CaseStmt* cs = node.as(CaseStmt);
-				out.append("case ");
-				format_node_with_substitutions(out, cs.expr, subs, indent);
-				if (cs.to_expr)
-				{
-					out.append(" .. ");
-					format_node_with_substitutions(out, cs.to_expr, subs, indent);
-				}
-				out.append(":\n");
-				if (cs.body)
-				{
-					format_node_with_substitutions(out, cs.body, subs, indent + 1);
-				}
-			}
-
-		case DEFAULT_STMT:
-			{
-				DefaultStmt* ds = node.as(DefaultStmt);
-				out.append("default:\n");
-				if (ds.body)
-				{
-					format_node_with_substitutions(out, ds.body, subs, indent + 1);
-				}
-			}
-
-		case DEFER_STMT:
-			{
-				DeferStmt* ds = node.as(DeferStmt);
-				out.append("defer ");
-				if (ds.body) format_node_with_substitutions(out, ds.body, subs, indent);
-			}
-
-		case EXPR_LIST:
-			{
-				ExprList* el = node.as(ExprList);
-				foreach (i, e : el.exprs)
-				{
-					if (i > 0) out.append(", ");
-					format_node_with_substitutions(out, e, subs, indent);
-				}
-			}
-
-		case COND_EXPR:
-			{
-				CondExpr* ce = node.as(CondExpr);
-				foreach (i, e : ce.exprs)
-				{
-					if (i > 0) out.append(", ");
-					format_node_with_substitutions(out, e, subs, indent);
-				}
-			}
-
-		case VAR_DECL:
-			{
-				VarDecl* vd = node.as(VarDecl);
-				String vtype = vd.type ? cursor::spelling(vd.type, tmem) : (vd.var_flags.is_const ? "const" : "var");
-				if (vd.var_flags.is_const && vd.type) out.append("const ");
-				if (vtype.len > 0)
-				{
-					out.append(vtype);
-					out.append(" ");
-				}
-				String vname = vd.name ? vd.name.text : "";
-				if (try rep = subs.params.get(vname))
-				{
-					out.append(rep);
-				}
-				else
-				{
-					out.append(vname);
-				}
-				if (vd.init_expr)
-				{
-					out.append(" = ");
-					format_node_with_substitutions(out, vd.init_expr, subs, indent);
-				}
-				out.append(";");
-			}
-
-		case BINARY_EXPR:
-			{
-				BinaryExpr* bin = node.as(BinaryExpr);
-				format_node_with_substitutions(out, bin.left, subs, indent);
-				out.appendf(" %s ", binary_op_to_string(bin.op));
-				format_node_with_substitutions(out, bin.right, subs, indent);
-			}
-
-		case UNARY_EXPR:
-			{
-				UnaryExpr* un = node.as(UnaryExpr);
-				out.append(unary_op_to_string(un.operator));
-				format_node_with_substitutions(out, un.expr, subs, indent);
-			}
-
-		case POST_UNARY_EXPR:
-			{
-				PostUnaryExpr* post = node.as(PostUnaryExpr);
-				format_node_with_substitutions(out, post.unary.expr, subs, indent);
-				out.append(unary_op_to_string(post.unary.operator));
-			}
-
-		case IDENT_EXPR:
-			{
-				IdentExpr* ie = node.as(IdentExpr);
-				String name = ie.ident ? ie.ident.text : "";
-				String stripped = (name.starts_with("#") || name.starts_with("$")) ? name[1..] : name;
-
-				if (try rep = subs.params.get(name))
-				{
-					out.append(rep);
-				}
-				else if (try rep = subs.params.get(stripped))
-				{
-					out.append(rep);
-				}
-				else
-				{
-					out.append(name);
-				}
-			}
-
-		case BUILTIN_EXPR:
-			{
-				BuiltinExpr* be = node.as(BuiltinExpr);
-				out.appendf("$$%s", be.name ? be.name.text : "");
-			}
-
-		case COMPILER_CONST_EXPR:
-			{
-				CompilerConstExpr* cce = node.as(CompilerConstExpr);
-				out.appendf("$$%s", cce.expr.name ? cce.expr.name.text : "");
-			}
-
-		case CALL_EXPR:
-			{
-				CallExpr* call = node.as(CallExpr);
-				String callee_name = call.callee ? cursor::spelling(call.callee, tmem) : "";
-				if ((callee_name == "@body" || callee_name == "body") && subs.body_block.len > 0)
-				{
-					out.append(subs.body_block);
-					return;
-				}
-
-				format_node_with_substitutions(out, call.callee, subs, indent);
-				out.append("(");
-				foreach (i, arg : call.args)
-				{
-					if (i > 0) out.append(", ");
-					format_node_with_substitutions(out, arg, subs, indent);
-				}
-				out.append(")");
-			}
-
-		case ACCESS_EXPR:
-			{
-				AccessExpr* acc = node.as(AccessExpr);
-				format_node_with_substitutions(out, acc.left, subs, indent);
-				out.append(acc.access_kind == STATIC ? "::" : ".");
-				format_node_with_substitutions(out, acc.member, subs, indent);
-			}
-
-		case LITERAL_EXPR:
-			{
-				LiteralExpr* lit = node.as(LiteralExpr);
-				switch (lit.literal_kind)
-				{
-				case INT_LITERAL:
-					out.appendf("%d", lit.integer);
-				case REAL_LITERAL:
-					out.appendf("%f", lit.real);
-				case STRING_LITERAL:
-					out.appendf("\"%s\"", lit.string);
-				case BOOL_LITERAL:
-					out.append(lit.boolean ? "true" : "false");
-				case NULL_LITERAL:
-					out.append("null");
-				case BYTES_LITERAL:
-					out.append("<bytes>");
-			}
-		}
-
-		case GROUP_EXPR:
-			{
-				GroupExpr* grp = node.as(GroupExpr);
-				out.append("(");
-				format_node_with_substitutions(out, grp.inner, subs, indent);
-				out.append(")");
-			}
-
-		case CAST_EXPR:
-			{
-				CastExpr* cst = node.as(CastExpr);
-				out.append("(");
-				format_node_with_substitutions(out, cst.inner, subs, indent);
-				out.append(")");
-				format_node_with_substitutions(out, cst.operand, subs, indent);
-			}
-
-		case TERNARY_EXPR:
-			{
-				TernaryExpr* ter = node.as(TernaryExpr);
-				format_node_with_substitutions(out, ter.cond, subs, indent);
-				out.append(" ? ");
-				format_node_with_substitutions(out, ter.then_expr, subs, indent);
-				out.append(" : ");
-				format_node_with_substitutions(out, ter.else_expr, subs, indent);
-			}
-
-		case INITIALIZER_LIST_EXPR:
-			{
-				InitializerListExpr* init = node.as(InitializerListExpr);
-				out.append("{ ");
-				foreach (i, expr : init.exprs)
-				{
-					if (i > 0) out.append(", ");
-					format_node_with_substitutions(out, expr, subs, indent);
-				}
-				out.append(" }");
-			}
-
-		case TYPE_EXPR:
-			{
-				out.append(cursor::spelling(node, tmem));
-			}
-
-		default:
-			{
-				out.append(cursor::spelling(node, tmem));
-			}
-	}
-}
-
-<*
- Expands a macro invocation given its call site and declaration node.
+ Body of the macro `mac` as `call` invokes it: its source with each
+ parameter replaced by the argument bound to it and the body parameter's
+ calls by the trailing block, formatted. Empty when there is no body.
 *>
 fn String expand_macro(AnalyzerContext* ctx, SourceFile* sf, CallExpr* call, MacroDecl* mac)
 {
-	if (!call || !mac || !mac.body) return "";
+	SourceFile* mf = source_file::file_of(ctx, (Node*)mac);
+	if (!call || !mac.body || !mf || !mf.lexer) return "";
 
-	MacroSubstitutions subs;
-	subs.params.tinit();
+	HashMap{String, String} args;
+	args.tinit();
+	bind_arguments(ctx, sf, mf, call, mac, &args);
 
-	for (sz i = 0; i < mac.params.len; i++)
+	String body_name = mac.body_params ? source_text(mf, mac.body_params.range) : "";
+	MacroBodyExpr* trailing = call.macro_body_expr ? call.macro_body_expr.as(MacroBodyExpr) : null;
+	String block = trailing && trailing.body ? source_text(sf, trailing.body.range) : "";
+
+	Token[] tokens = mf.lexer.tokens.array_view();
+	OffsetCursor offsets = { .text = mf.content };
+	DString out;
+	out.tinit();
+	sz previous_end = offsets.at(mac.body.range.start);
+	for (sz i = mf.lexer.first_token_at(mac.body.range.start); i < tokens.len && tokens[i].range.start.before(mac.body.range.end); i++)
 	{
-		Node* p = mac.params[i];
-		if (!p || p.kind != VAR_DECL) continue;
-		VarDecl* vd = p.as(VarDecl);
-		String pname = vd.name ? vd.name.text : "";
-		if (pname.len == 0) continue;
-
-		String arg_text = "";
-		if (i < call.args.len)
+		Token token = tokens[i];
+		sz start = offsets.at(token.range.start);
+		out.append(mf.content[previous_end:start - previous_end]);
+		previous_end = offsets.at(token.range.end);
+		String text = mf.content[start:previous_end - start];
+		if (body_name.len && text == body_name && i + 1 < tokens.len && tokens[i + 1].kind == LPAREN)
 		{
-			arg_text = get_node_source_text(sf, call.args[i]);
+			int depth = 0;
+			for (i++; i < tokens.len - 1; i++)
+			{
+				if (tokens[i].kind == LPAREN) depth++;
+				if (tokens[i].kind == RPAREN && --depth == 0) break;
+			}
+			if (i + 1 < tokens.len && tokens[i + 1].kind == EOS) i++;
+			previous_end = offsets.at(tokens[i].range.end);
+			out.append(block);
+			continue;
 		}
-		else if (vd.init_expr)
-		{
-			arg_text = get_node_source_text(sf, vd.init_expr);
-		}
-
-		subs.params.set(pname, arg_text);
-		if (pname.starts_with("#") || pname.starts_with("$"))
-		{
-			subs.params.set(pname[1..], arg_text);
-		}
+		out.append(args.get(text) ?? text);
 	}
 
-	if (call.macro_body_expr && call.macro_body_expr.as(MacroBodyExpr).body)
+	String expanded = out.str_view();
+	Lexer* lexer = lexer::create(ctx, expanded);
+	defer lexer::free(ctx, lexer);
+	lexer::tokenize(lexer);
+	sz count = lexer.tokens.len();
+	if (count < 2) return "";
+	FormattingOptions options = { .tab_size = 4, .insert_spaces = true };
+	String formatted = formatting::format_tokens_range(tmem, expanded, lexer.tokens.array_view(), 0, count - 2, 0, options).trim();
+	return formatted == "{}" ? "" : formatted;
+}
+
+<*
+ Fills `args` with the text each parameter of `mac` takes in `call`: the
+ receiver of a method call, positional and named arguments, then defaults.
+ Arguments that are not a single operand are parenthesized, as macro
+ arguments are evaluated as a whole.
+*>
+fn void bind_arguments(AnalyzerContext* ctx, SourceFile* sf, SourceFile* mf, CallExpr* call, MacroDecl* mac, HashMap{String, String}* args) @local
+{
+	CallTarget target = query::call_target(ctx, sf, call);
+	NodeArray params = mac.params;
+	if (target.first_param && params.len)
 	{
-		DString body_str;
-		body_str.tinit();
-		MacroSubstitutions empty_subs;
-		empty_subs.params.tinit();
-		format_node_with_substitutions(&body_str, call.macro_body_expr.as(MacroBodyExpr).body, &empty_subs, 1);
-		subs.body_block = body_str.str_view();
+		args.set(param_name(params[0]), operand_text(sf, call.callee.as(AccessExpr).left));
 	}
+	foreach (i, arg : call.args)
+	{
+		if (!arg) continue;
+		if (arg.kind == NAMED_ARG_EXPR)
+		{
+			NamedArgExpr* named = arg.as(NamedArgExpr);
+			if (named.name && named.value) args.set(named.name.text, operand_text(sf, named.value));
+			continue;
+		}
+		sz index = i + target.first_param;
+		if (index < params.len) args.set(param_name(params[index]), operand_text(sf, arg));
+	}
+	foreach (p : params)
+	{
+		String name = param_name(p);
+		if (!name.len || args.has_key(name) || !p.as(VarDecl).init_expr) continue;
+		args.set(name, operand_text(mf, p.as(VarDecl).init_expr));
+	}
+}
 
-	DString result;
-	result.tinit();
-	format_node_with_substitutions(&result, mac.body, &subs, 0);
+fn String param_name(Node* param) @local
+{
+	return param && param.kind == VAR_DECL && param.as(VarDecl).name ? param.as(VarDecl).name.text : "";
+}
 
-	String res_str = result.str_view().trim();
-	if (res_str == "{}" || res_str == "{\n}") return "";
+<*
+ Source of `expr` in `sf`, in parentheses unless it is a single operand.
+*>
+fn String operand_text(SourceFile* sf, Node* expr) @local
+{
+	String text = source_text(sf, expr.range);
+	switch (expr.kind)
+	{
+		case IDENT_EXPR:
+		case LITERAL_EXPR:
+		case CALL_EXPR:
+		case ACCESS_EXPR:
+		case DESIGNATOR_EXPR:
+		case MAYBE_DEREF_EXPR:
+		case GROUP_EXPR:
+		case TYPE_EXPR:
+		case INITIALIZER_LIST_EXPR:
+		case COMPOUND_LITERAL_EXPR:
+		case BUILTIN_EXPR:
+		case COMPILER_CONST_EXPR:
+			return text;
+		default:
+			return string::tformat("(%s)", text);
+	}
+}
 
-	return result.str_view();
+fn String source_text(SourceFile* sf, Range range) @local
+{
+	OffsetCursor offsets = { .text = sf.content };
+	sz start = offsets.at(range.start);
+	return sf.content[start:offsets.at(range.end) - start];
+}
+
+<*
+ Byte offsets of locations in `text`, for locations given in order.
+*>
+struct OffsetCursor
+{
+	String text;
+	int line;
+	sz line_start;
+}
+
+fn sz OffsetCursor.at(&self, Location loc)
+{
+	while (self.line < loc.line)
+	{
+		sz rest = self.text.len - self.line_start;
+		self.line_start += (self.text[self.line_start..].index_of_char('\n') ?? (rest - 1)) + 1;
+		self.line++;
+	}
+	return min(self.line_start + loc.column, self.text.len);
 }
 
 <*

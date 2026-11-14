@@ -33,6 +33,7 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.ast.allocator = &source_file.arena;
 	source_file.ast.nodes.init(&source_file.arena);
 	source_file.ast.statements.init(&source_file.arena);
+	source_file.ast.module_decls.init(&source_file.arena);
 	source_file.path = path.copy(&source_file.arena);
 	source_file.min_node_id = ast::next_node_id;
 	context.files_by_node_id.push(source_file);
@@ -56,6 +57,40 @@ fn SourceFile* file_of(AnalyzerContext* context, Node* node)
 *>
 fn int starts_after(SourceFile* file, SourceFile* unused, NodeID* id) @local => file.min_node_id <= *id ? -1 : 1;
 
+<*
+ Removes from the registry map `#map` the entries declared in `sf`, and the
+ names left without entries.
+*>
+macro void @drop_entries_of(#map, SourceFile* sf)
+{
+	List{String} emptied;
+	emptied.tinit();
+	#map.@each(; name, head)
+	{
+		$Typeof(head) prev = null;
+		$Typeof(head) curr = head;
+		while (curr)
+		{
+			$Typeof(head) next = curr.next;
+			if (!sf.contains_node(curr.node))
+			{
+				prev = curr;
+			}
+			else if (prev)
+			{
+				prev.next = next;
+			}
+			else
+			{
+				*#map.get_ref(name)!! = next;
+			}
+			curr = next;
+		}
+		if (!(#map.get(name) ?? null)) emptied.push(name);
+	};
+	foreach (name : emptied) (void)#map.remove(name);
+}
+
 fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 {
 	if (!context || !sf) return;
@@ -63,158 +98,11 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 	if (context.registry)
 	{
 		Registry* reg = context.registry;
-
-		List{String} empty_functions;
-		empty_functions.tinit();
-		reg.functions.@each(; qname, head)
-		{
-			FunctionInfo* prev = null;
-			FunctionInfo* curr = head;
-			while (curr != null)
-			{
-				switch (sf.contains_node(curr.node))
-				{
-					case true:
-						curr = curr.next;
-						switch (prev != null)
-						{
-							case true:
-								prev.next = curr;
-							case false:
-								if (try head_ptr = reg.functions.get_ref(qname))
-								{
-									*head_ptr = curr;
-								}
-						}
-					case false:
-						prev = curr;
-						curr = curr.next;
-				}
-			}
-			FunctionInfo* final_head = reg.functions.get(qname) ?? null;
-			if (!final_head)
-			{
-				empty_functions.push(qname);
-			}
-		};
-		foreach (k : empty_functions)
-		{
-			(void)reg.functions.remove(k);
-		}
-
-		List{String} empty_types;
-		empty_types.tinit();
-		reg.types.@each(; qname, head)
-		{
-			TypeInfo* prev = null;
-			TypeInfo* curr = head;
-			while (curr != null)
-			{
-				switch (sf.contains_node(curr.node))
-				{
-					case true:
-						curr = curr.next;
-						switch (prev != null)
-						{
-							case true:
-								prev.next = curr;
-							case false:
-								if (try head_ptr = reg.types.get_ref(qname))
-								{
-									*head_ptr = curr;
-								}
-						}
-					case false:
-						prev = curr;
-						curr = curr.next;
-				}
-			}
-			TypeInfo* final_head = reg.types.get(qname) ?? null;
-			if (!final_head)
-			{
-				empty_types.push(qname);
-			}
-		};
-		foreach (k : empty_types)
-		{
-			(void)reg.types.remove(k);
-		}
-
-		List{String} empty_macros;
-		empty_macros.tinit();
-		reg.macros.@each(; qname, head)
-		{
-			MacroInfo* prev = null;
-			MacroInfo* curr = head;
-			while (curr != null)
-			{
-				switch (sf.contains_node(curr.node))
-				{
-					case true:
-						curr = curr.next;
-						switch (prev != null)
-						{
-							case true:
-								prev.next = curr;
-							case false:
-								if (try head_ptr = reg.macros.get_ref(qname))
-								{
-									*head_ptr = curr;
-								}
-						}
-					case false:
-						prev = curr;
-						curr = curr.next;
-				}
-			}
-			MacroInfo* final_head = reg.macros.get(qname) ?? null;
-			if (!final_head)
-			{
-				empty_macros.push(qname);
-			}
-		};
-		foreach (k : empty_macros)
-		{
-			(void)reg.macros.remove(k);
-		}
-
-		List{String} empty_attrmacros;
-		empty_attrmacros.tinit();
-		reg.attrmacros.@each(; qname, head)
-		{
-			AttrdefInfo* prev = null;
-			AttrdefInfo* curr = head;
-			while (curr != null)
-			{
-				switch (sf.contains_node(curr.node))
-				{
-					case true:
-						curr = curr.next;
-						switch (prev != null)
-						{
-							case true:
-								prev.next = curr;
-							case false:
-								if (try head_ptr = reg.attrmacros.get_ref(qname))
-								{
-									*head_ptr = curr;
-								}
-						}
-					case false:
-						prev = curr;
-						curr = curr.next;
-				}
-			}
-			AttrdefInfo* final_head = reg.attrmacros.get(qname) ?? null;
-			if (!final_head)
-			{
-				empty_attrmacros.push(qname);
-			}
-		};
-		foreach (k : empty_attrmacros)
-		{
-			(void)reg.attrmacros.remove(k);
-		}
+		@drop_entries_of(reg.functions, sf);
+		@drop_entries_of(reg.types, sf);
+		@drop_entries_of(reg.macros, sf);
+		@drop_entries_of(reg.attrmacros, sf);
+		@drop_entries_of(reg.methods_by_type, sf);
 	}
 
 	context.modules.@each(; mod_name, mod)

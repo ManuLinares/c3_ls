@@ -23,7 +23,7 @@ fn void main() {
 
 	assert(h.contains("macro int square(x)"));
 	assert(h.contains("Macro Expansion"));
-	assert(h.contains("5 + 2 * 5 + 2"));
+	assert(h.contains("(5 + 2) * (5 + 2)"));
 }
 
 fn void test_statement_macro_expansion_with_hash_params()

@@ -61,7 +61,7 @@ fn bool node_to_location(LspProject* project, Uri fallback_uri, Node* node, LspL
 		case MODULE_DECL:
 			if (node.as(ModuleDecl).path) target_range = node.as(ModuleDecl).path.range;
 		default:
-			break;
+			if (Ident* label = query::label_of(node)) target_range = label.range;
 	}
 
 	*out_loc = {
@@ -90,8 +90,22 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf || !project.workspace.ctx) return {};
 
-	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
+	List{Node*} overloads;
+	overloads.tinit();
+	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
 	if (!decl_node) return {};
+
+	if (overloads.len() > 1)
+	{
+		List{LspLocation} results;
+		results.tinit();
+		foreach (o : overloads)
+		{
+			LspLocation l;
+			if (node_to_location(project, uri, o, &l)) results.push(l);
+		}
+		return results.array_view();
+	}
 
 	if (decl_node.kind == MODULE_DECL)
 	{

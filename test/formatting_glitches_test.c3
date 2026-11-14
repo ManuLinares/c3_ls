@@ -599,3 +599,48 @@ fn void test_binary_ops_chained_subscripts_and_reverse_index() @test
 	assert(!formatted.contains("^ 8"));
 	assert(!formatted.contains("^ 16"));
 }
+fn void test_ternary_argument_and_ct_switch_are_stable()
+{
+	String code = `module app;
+
+fn void put(DString* out, bool keep, char c)
+{
+	out.append_char(keep ? (char)c : '_');
+}
+
+macro void DString.append(&self, value)
+{
+	var $Type = $Typeof(value);
+	$switch $Type:
+		$case char:
+		$case ichar:
+			self.append_char(value);
+		$case DString:
+			self.append_dstring(value);
+		$default:
+			$switch:
+				$case $defined((Char32)value):
+					self.append_char32((Char32)value);
+				$default:
+					$error "Unsupported type for append – use appendf instead.";
+			$endswitch
+	$endswitch
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted == code, "%s", formatted);
+}
+
+fn void test_labeled_loop_headers()
+{
+	String code = `module app;
+fn void run(String[] lines) {
+	foreach LINE: (i, s : lines) {
+		for INNER: (int j = 0; j < 2; j++) break LINE;
+	}
+}
+`;
+	String formatted = format_code(code);
+	assert(formatted.contains("foreach LINE: (i, s : lines)"), "%s", formatted);
+	assert(formatted.contains("for INNER: (int j = 0; j < 2; j++)"), "%s", formatted);
+}

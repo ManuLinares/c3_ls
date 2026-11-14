@@ -17,6 +17,19 @@ fn bool Location.eq(self, Location other) @operator(==)
 	return self.line == other.line && self.column == other.column;
 }
 
+fn bool Location.before(self, Location other) => self.line < other.line || (self.line == other.line && self.column < other.column);
+
+<*
+ Location of byte `offset` in `text`, counted as the lexer counts: lines by
+ '\n', columns in bytes.
+*>
+fn Location location_at(String text, sz offset)
+{
+	String before = text[:offset];
+	sz line_start = (before.rindex_of_char('\n') ?? -1) + 1;
+	return { (int)before.count("\n"), (int)(offset - line_start) };
+}
+
 struct Range (Printable)
 {
 	Location start;
@@ -52,6 +65,11 @@ fn bool Range.contains(self, Location loc)
 
 	return true;
 }
+
+<*
+ Like `contains`, but also true right after the last character, where a cursor still touches a name.
+*>
+fn bool Range.touches(self, Location loc) => self.contains(loc) || loc == self.end;
 
 fn bool Range.contains_range(self, Range other)
 {

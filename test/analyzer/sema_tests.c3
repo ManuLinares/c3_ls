@@ -291,7 +291,7 @@ fn void test_ct_if_elif_else_same_var_name()
 	test::eq(diags.len, 0);
 }
 
-fn void test_resolve_type_of_chain_indexing_and_casts()
+fn void test_type_of_range_indexing_and_casts()
 {
 	String source_code = `
 		module test_chain;
@@ -302,6 +302,7 @@ fn void test_resolve_type_of_chain_indexing_and_casts()
 		{
 			Point first = pts[0];
 			Point* p = (Point*)raw;
+			Point* q = ((Point*)raw);
 		}
 	`;
 
@@ -310,17 +311,21 @@ fn void test_resolve_type_of_chain_indexing_and_casts()
 	assert(success);
 
 	SourceFile* sf = context.files.get("test_chain.c3")!!;
-	Location loc = { .line = 7, .column = 4 };
 
 	// 1. Array/slice indexing resolves to element type
-	String t_index = query::resolve_type_of_chain(context, sf, "pts[0]", loc);
-	test::eq(t_index, "Point");
+	test::eq(@type_at(context, sf, "pts[0]"), "Point");
 
 	// 2. Type cast resolves to cast target type
-	String t_cast = query::resolve_type_of_chain(context, sf, "(Point*)raw", loc);
-	test::eq(t_cast, "Point*");
+	test::eq(@type_at(context, sf, "(Point*)raw"), "Point*");
 
 	// 3. Parenthesized cast resolves to cast target type
-	String t_nested = query::resolve_type_of_chain(context, sf, "((Point*)raw)", loc);
-	test::eq(t_nested, "Point*");
+	test::eq(@type_at(context, sf, "((Point*)raw)"), "Point*");
+}
+
+macro String @type_at(AnalyzerContext* context, SourceFile* sf, String expr)
+{
+	sz start = sf.content.index_of(expr)!!;
+	Range range = { core::location_at(sf.content, start), core::location_at(sf.content, start + expr.len) };
+	Node* parsed = parser::parse_expression(context, sf, range);
+	return parsed ? query::type_of(context, sf, parsed, range.start) : "";
 }

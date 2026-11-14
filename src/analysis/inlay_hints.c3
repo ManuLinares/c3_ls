@@ -1,98 +1,12 @@
 module lsp::analysis::inlay_hints;
-import analyzer, lsp, uri, std::collections::list, std::collections::map, std::io;
+import analyzer, lsp, uri, std::collections::list, std::io;
 
 struct InlayHintCollector
 {
 	LspProject* project;
 	SourceFile* sf;
-	String caller_mod;
-	String current_assoc_type;
 	LspRange range;
 	List{InlayHint} * hints;
-	HashMap{String, String} local_types;
-}
-
-fn Node* resolve_inlay_callee(InlayHintCollector* ctx, CallExpr* call)
-{
-	if (!call || !call.callee) return null;
-	if (!ctx.project.workspace.ctx) return null;
-	AnalyzerContext* actx = ctx.project.workspace.ctx;
-
-	switch (call.callee.kind)
-	{
-		case IDENT_EXPR:
-			{
-				IdentExpr* ie = call.callee.as(IdentExpr);
-				String iname = ie.ident ? ie.ident.text : "";
-				if (iname.len == 0) return null;
-
-				if (ie.path_expr && ie.path_expr.kind == PATH_EXPR)
-				{
-					String ptext = ie.path_expr.as(PathExpr).path ? ie.path_expr.as(PathExpr).path.text : "";
-					String qname = string::tformat("%s%s", ptext, iname);
-					if (actx.registry)
-					{
-						if (try fn_info = actx.registry.functions.get(qname))
-						{
-							if (fn_info && fn_info.node) return fn_info.node;
-						}
-						if (try mac_info = actx.registry.macros.get(qname))
-						{
-							if (mac_info && mac_info.node) return mac_info.node;
-						}
-					}
-				}
-				else
-				{
-					if (ctx.caller_mod.len > 0 && actx.registry)
-					{
-						String local_qname = string::tformat("%s::%s", ctx.caller_mod, iname);
-						if (try fn_info = actx.registry.functions.get(local_qname))
-						{
-							if (fn_info && fn_info.node) return fn_info.node;
-						}
-						if (try mac_info = actx.registry.macros.get(local_qname))
-						{
-							if (mac_info && mac_info.node) return mac_info.node;
-						}
-					}
-
-					if (actx.registry)
-					{
-						if (try fn_info = actx.registry.functions.get(iname))
-						{
-							if (fn_info && fn_info.node) return fn_info.node;
-						}
-						if (try mac_info = actx.registry.macros.get(iname))
-						{
-							if (mac_info && mac_info.node) return mac_info.node;
-						}
-					}
-				}
-				return query::resolve_callee_by_name(actx, ctx.sf, iname);
-			}
-
-		case ACCESS_EXPR:
-			{
-				AccessExpr* acc = call.callee.as(AccessExpr);
-				String recv_name = cursor::spelling(acc.left, tmem);
-				String member_name = cursor::spelling(acc.member, tmem);
-				if (recv_name.len == 0 || member_name.len == 0) return null;
-
-				String recv_type = ctx.local_types.get(recv_name) ?? "";
-				if (recv_type.len > 0)
-				{
-					Node* mnode = query::find_method_in_type(actx, recv_type, member_name, ctx.sf);
-					if (mnode) return mnode;
-				}
-
-				String full_name = string::tformat("%s.%s", recv_name, member_name);
-				return query::resolve_callee_by_name(actx, ctx.sf, full_name);
-			}
-
-		default:
-			return null;
-	}
 }
 
 fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_data)
@@ -128,77 +42,19 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 		case NOP_STMT:
 			return CONTINUE;
 
-		case FN_DECL:
-			{
-				FnDecl* fd = c.as(FnDecl);
-				if (fd.associated_type)
-				{
-					ctx.current_assoc_type = cursor::spelling(fd.associated_type, tmem);
-				}
-				foreach (param : fd.params)
-				{
-					if (!param || param.kind != VAR_DECL) continue;
-					VarDecl* vd = param.as(VarDecl);
-					if (vd.name && vd.type)
-					{
-						String tname = cursor::spelling(vd.type, tmem);
-						if (tname.len > 0) ctx.local_types.set(vd.name.text, tname);
-					}
-					else if (vd.name && vd.var_flags.is_self && ctx.current_assoc_type.len > 0)
-					{
-						ctx.local_types.set(vd.name.text, ctx.current_assoc_type);
-					}
-				}
-			}
-
-		case VAR_DECL:
-			{
-				VarDecl* vd = c.as(VarDecl);
-				if (vd.name && vd.type)
-				{
-					String tname = cursor::spelling(vd.type, tmem);
-					if (tname.len > 0) ctx.local_types.set(vd.name.text, tname);
-				}
-			}
-
 		case CALL_EXPR:
 			{
 				CallExpr* call = c.as(CallExpr);
 				if (!call.callee || call.args.len == 0) break;
 
-				Node* callee_node = resolve_inlay_callee(ctx, call);
-				if (!callee_node) break;
-
-				NodeArray params = {};
-				switch (callee_node.kind)
-				{
-					case FN_DECL:
-						params = callee_node.as(FnDecl).params;
-					case MACRO_DECL:
-						params = callee_node.as(MacroDecl).params;
-					case VAR_DECL:
-						{
-							VarDecl* vd = callee_node.as(VarDecl);
-							if (vd.type && vd.type.kind == TYPE_EXPR)
-							{
-								TypeExpr* te = vd.type.as(TypeExpr);
-								if (te.type_kind == TYPE_FUNCTION)
-								{
-									params = te.func.params;
-								}
-							}
-						}
-					default:
-						break;
-				}
-
+				if (!ctx.project.workspace.ctx) break;
+				CallTarget target = query::call_target(ctx.project.workspace.ctx, ctx.sf, call);
+				NodeArray params = target.params;
 				if (params.len == 0) break;
-
-				sz param_offset = query::receiver_is_implicit(call, callee_node) ? 1 : 0;
 
 				for (sz i = 0; i < call.args.len; i++)
 				{
-					sz param_idx = i + param_offset;
+					sz param_idx = i + target.first_param;
 					if (param_idx >= params.len) break;
 
 					Node* arg = call.args[i];
@@ -242,16 +98,12 @@ fn InlayHint[]? get_inlay_hints(LspProject* project, Uri uri, LspRange range)
 	List{InlayHint} hints;
 	hints.tinit();
 
-	String caller_mod = query::get_source_file_module_name(sf);
-
 	InlayHintCollector collector = {
 		.project = project,
 		.sf = sf,
-		.caller_mod = caller_mod,
 		.range = range,
 		.hints = &hints
 	};
-	collector.local_types.tinit();
 
 	foreach (stmt : sf.ast.statements)
 	{

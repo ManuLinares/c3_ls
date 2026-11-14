@@ -26,8 +26,12 @@ struct FormatterContext
 	int generic_depth;
 	int decl_generic_depth;
 	int ternary_depth;
+	int[32] open_ternary_nesting;
 	bool in_case_header;
 	bool in_case_body;
+	bool[32] enclosing_switch_in_case_body;
+	int switch_depth;
+	bool ct_header_is_switch;
 	int ct_foreach_colons;
 	bool last_rparen_was_cast;
 	BraceKind[128] brace_stack;
@@ -420,7 +424,7 @@ fn bool is_paren_cast(Token[] tokens, sz rparen_idx)
 		}
 	}
 	if (depth != 0 || idx + 1 >= rparen_idx) return false;
-	if (idx > 0 && is_type_name_token(tokens[idx - 1].kind)) return false;  // `struct Foo (Iface)`, `enum Foo : int (Type field)`
+	if (idx > 0 && is_type_name_token(tokens[idx - 1].kind)) return false;
 
 	TokenKind first = tokens[idx + 1].kind;
 	bool first_is_type = is_type_name_token(first) || first == TYPE_IDENT;
@@ -460,6 +464,33 @@ fn bool is_paren_cast(Token[] tokens, sz rparen_idx)
 	return true;
 }
 
+<*
+ Paren and bracket nesting of the current token.
+*>
+fn int FormatterContext.nesting(&self) @inline => self.paren_depth * 256 + self.bracket_depth;
+
+<*
+ Whether a `:` here closes the innermost open `?` at the same nesting.
+*>
+fn bool FormatterContext.is_ternary_colon(&self) => self.ternary_depth > 0 && self.open_ternary_nesting[self.ternary_depth - 1] == self.nesting();
+
+<*
+ Starts the cases of a nested switch, saving the enclosing switch's case state.
+*>
+fn void FormatterContext.enter_switch(&self)
+{
+	if (self.switch_depth < self.enclosing_switch_in_case_body.len) self.enclosing_switch_in_case_body[self.switch_depth++] = self.in_case_body;
+	self.in_case_body = false;
+}
+
+<*
+ Ends a switch's cases, restoring the enclosing switch's case state.
+*>
+fn void FormatterContext.leave_switch(&self)
+{
+	self.in_case_body = self.switch_depth > 0 ? self.enclosing_switch_in_case_body[--self.switch_depth] : false;
+}
+
 fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind curr)
 {
 	if (ctx.at_line_start) return false;
@@ -491,8 +522,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	}
 	if (is_control_or_statement_keyword(prev))
 	{
-		if (curr == EOS) return false;
-		if (curr == COLON && (prev == DEFAULT || prev == CT_DEFAULT || prev == CASE || prev == CT_CASE)) return false;
+		if (curr == EOS || curr == COLON) return false;
 		return true;
 	}
 	if (is_strictly_binary_operator(prev) || is_assignment_operator(prev))
@@ -747,6 +777,7 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 	}
 	if (curr == COLON)
 	{
+		if (ctx.is_ternary_colon()) return true;
 		if (prev == DEFAULT || prev == CT_DEFAULT || prev == CASE || prev == CT_CASE) return false;
 		if (ctx.in_ct_header || ctx.in_case_header) return false;
 		if (ctx.ct_foreach_colons == 2) return false;
@@ -761,7 +792,6 @@ fn bool should_space_between(FormatterContext* ctx, TokenKind prev, TokenKind cu
 		{
 			return false;
 		}
-		if (ctx.ternary_depth > 0) return true;
 		if (prev == CONST_IDENT) return false;
 		if (ctx.is_decl_header) return true;
 		return false;
@@ -938,6 +968,7 @@ bool single_line = false
 		if (tok.kind == CT_IF || tok.kind == CT_FOR || tok.kind == CT_SWITCH)
 		{
 			ctx.in_ct_header = true;
+			ctx.ct_header_is_switch = tok.kind == CT_SWITCH;
 		}
 
 		if (tok.kind == CT_FOREACH)
@@ -1066,8 +1097,8 @@ bool single_line = false
 			if (ctx.in_case_body)
 			{
 				if (ctx.indent_level > 0) ctx.indent_level--;
-				ctx.in_case_body = false;
 			}
+			ctx.leave_switch();
 			if (ctx.indent_level > 0) ctx.indent_level--;
 			if (!ctx.at_line_start) newline(&ctx);
 		}
@@ -1093,8 +1124,8 @@ bool single_line = false
 					if (ctx.in_case_body)
 					{
 						if (ctx.indent_level > 0) ctx.indent_level--;
-						ctx.in_case_body = false;
 					}
+					ctx.leave_switch();
 					if (ctx.indent_level > 0)
 					{
 						ctx.indent_level--;
@@ -1152,7 +1183,7 @@ bool single_line = false
 		if ((tok.kind == QUESTION && !is_type_ending_token(ctx.prev_kind) && ctx.prev_kind != RBRACE && is_expr_operand_end(ctx.prev_kind)) ||
 		tok.kind == CT_TERNARY)
 		{
-			ctx.ternary_depth++;
+			if (ctx.ternary_depth < ctx.open_ternary_nesting.len) ctx.open_ternary_nesting[ctx.ternary_depth++] = ctx.nesting();
 		}
 
 		if (tok.kind != RBRACE && i > start_idx && ctx.prev_kind != ERROR &&
@@ -1236,14 +1267,15 @@ bool single_line = false
 
 		if (tok.kind == COLON)
 		{
-			if (ctx.ternary_depth > 0 && ctx.bracket_depth == 0 && ctx.paren_depth == 0)
+			if (ctx.is_ternary_colon())
 			{
 				ctx.ternary_depth--;
 			}
-			if (ctx.in_ct_header)
+			else if (ctx.in_ct_header)
 			{
 				ctx.in_ct_header = false;
 				ctx.indent_level++;
+				if (ctx.ct_header_is_switch) ctx.enter_switch();
 				newline(&ctx, 1);
 			}
 			else if (ctx.ct_foreach_colons == 1)
@@ -1311,13 +1343,18 @@ bool single_line = false
 				ctx.multiline_paren_depth++;
 				ctx.indent_level++;
 			}
-			if (ctx.prev_kind == FOR || ctx.prev_kind == CT_FOR)
+			sz keyword = i >= 3 && ctx.tokens[i - 1].kind == COLON && ctx.tokens[i - 2].kind == CONST_IDENT ? i - 3 : i - 1;
+			switch (i ? ctx.tokens[keyword].kind : TokenKind.EOF)
 			{
-				ctx.for_paren_depth = ctx.paren_depth;
-			}
-			if (ctx.prev_kind == FOREACH || ctx.prev_kind == FOREACH_R || ctx.prev_kind == CT_FOREACH)
-			{
-				ctx.foreach_paren_depth = ctx.paren_depth;
+				case FOR:
+				case CT_FOR:
+					ctx.for_paren_depth = ctx.paren_depth;
+				case FOREACH:
+				case FOREACH_R:
+				case CT_FOREACH:
+					ctx.foreach_paren_depth = ctx.paren_depth;
+				default:
+					break;
 			}
 		}
 
@@ -1362,6 +1399,7 @@ bool single_line = false
 			{
 				push_brace(&ctx, SWITCH_BLOCK);
 				ctx.indent_level++;
+				ctx.enter_switch();
 				newline(&ctx);
 				ctx.is_switch_header = false;
 				ctx.is_decl_header = false;
