@@ -143,9 +143,8 @@ enum AccessKind : char
 
 <*
  `overload` is the operator method an operator calls, or for a combined
- assignment such as `+=` that of the operator it applies; `<=` and `>=` call
- `==` as well. `assign_overload` is the overload of a combined assignment
- itself.
+ assignment such as `+=` that of the operator it applies. `assign_overload`
+ is the overload of a combined assignment itself.
 *>
 enum OperatorKind : (OverloadKind overload, OverloadKind assign_overload)
 {

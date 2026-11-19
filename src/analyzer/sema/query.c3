@@ -2290,32 +2290,51 @@ fn String aliased_type(AnalyzerContext* context, SourceFile* sf, String type, bo
 fn String element_type(AnalyzerContext* context, SourceFile* sf, String type, Location loc = { -1, -1 })
 {
 	String t = type.trim();
+	bool past_typedef;
 	for (int depth = 0; depth < MAX_ALIAS_DEPTH && t.len; depth++)
 	{
 		t = builtin_definition(t);
 		if (t.ends_with(">]")) return t[:t.rindex_of("[<") ?? 0].trim();
 		if (t.ends_with("]")) return t[:t.rindex_of_char('[') ?? 0].trim();
 		if (t.ends_with("*")) return t[:t.len - 1].trim();
-		if (Node* method = operator_method(context, sf, t, OV_ELEMENT_AT, loc: loc).method)
+		if (!past_typedef)
 		{
-			return instance_type(context, sf, t, method, return_type(method));
+			if (Node* method = operator_method(context, sf, t, OV_ELEMENT_AT, loc: loc).method)
+			{
+				return instance_type(context, sf, t, method, return_type(method));
+			}
 		}
+		// Only built-in indexing reaches through a typedef; overloads do not.
+		Node* decl = find_type_node_in_context(context, sf, generic_base(t), loc);
+		past_typedef = past_typedef || (decl && decl.kind == TYPEDEF_DECL);
 		t = aliased_type(context, sf, t);
 	}
 	return "";
 }
 
+<*
+ How well an operator overload's operand parameter takes the other operand,
+ worst first, as c3c ranks them: untyped, by conversion, or of its exact type.
+*>
+enum MatchLevel : char
+{
+	NO_MATCH,
+	WILDCARD,
+	CONVERSION,
+	EXACT,
+}
+
 struct OperatorMatch
 {
 	Node* method;
-	bool exact;
+	MatchLevel level;
 }
 
 <*
  Method of the user-defined `type` overloading `kind`: with `@operator` or
  `@operator_s` when `type` is the left operand, `@operator_r` or `@operator_s`
- when it is the right one. One whose operand parameter is `other` is exact
- and preferred, as c3c does. Aliases and inline typedefs of `type` are followed.
+ when it is the right one. The best match for the operand type `other` is
+ taken, as c3c does; without `other` the first. Aliases of `type` are followed.
 *>
 fn OperatorMatch operator_method(AnalyzerContext* context, SourceFile* sf, String type, OverloadKind kind, bool reverse = false, String other = "", Location loc = { -1, -1 })
 {
@@ -2324,7 +2343,10 @@ fn OperatorMatch operator_method(AnalyzerContext* context, SourceFile* sf, Strin
 	{
 		OperatorMatch found = declared_operator_method(context, sf, t, kind, reverse, other, loc);
 		if (found.method) return found;
-		t = aliased_type(context, sf, t, true);
+		// A typedef, even an inline one, is a type of its own without the overloads of what it wraps.
+		Node* decl = find_type_node_in_context(context, sf, generic_base(t), loc);
+		if (!decl || decl.kind != ALIAS_DECL) return {};
+		t = aliased_type(context, sf, t);
 	}
 	return {};
 }
@@ -2339,15 +2361,22 @@ fn OperatorMatch declared_operator_method(AnalyzerContext* context, SourceFile* 
 	String base = generic_base(t);
 	foreach (op : ranked(context, sf, loc, context.registry.methods_by_type.get(method_key(base)) ?? (MethodInfo*)null))
 	{
-		if (found.exact) break;
+		if (found.level == EXACT) break;
 		Node* method = op.node;
 		if (!overloads(method, kind, reverse)) continue;
 		Node* receiver = receiver_type_expr(method);
 		if (!receiver || !is_matching_associated_type(receiver, base)) continue;
 		if (sf && !is_symbol_accessible_at(context, sf, loc, method, op.mod)) continue;
 		NodeArray params = method.kind == FN_DECL ? method.as(FnDecl).params : method.as(MacroDecl).params;
-		bool exact = params.len > 1 && params[1] && params[1].kind == VAR_DECL && cursor::instance_name(params[1].as(VarDecl).type) == other;
-		if (!found.method || exact) found = { method, exact };
+		Node* operand = params.len > 1 && params[1] && params[1].kind == VAR_DECL ? params[1].as(VarDecl).type : null;
+		MatchLevel level = EXACT;
+		if (other.len)
+		{
+			level = CONVERSION;
+			if (params.len > 1 && !operand) level = WILDCARD;
+			if (operand && cursor::instance_name(operand) == other) level = EXACT;
+		}
+		if (level > found.level) found = { method, level };
 	}
 	return found;
 }
@@ -2422,23 +2451,23 @@ struct OverloadCall
 }
 
 <*
- Overload of `kind` called by `left op right`: the left operand's, unless only
- the right operand's matches its type exactly, as c3c resolves them.
+ Overload of `kind` called by `left op right`: the operand's whose overload
+ matches the other operand better, as c3c resolves them. c3c rejects a tie;
+ the left one is taken then.
 *>
 fn OverloadCall binary_overload(AnalyzerContext* context, SourceFile* sf, OverloadKind kind, String left, String right, Location loc) @local
 {
 	OperatorMatch on_left = operator_method(context, sf, left, kind, false, right, loc);
-	OperatorMatch on_right = on_left.exact ? {} : operator_method(context, sf, right, kind, true, left, loc);
-	if (on_left.method && (on_left.exact || !on_right.exact)) return { on_left.method, left };
+	OperatorMatch on_right = on_left.level == EXACT ? {} : operator_method(context, sf, right, kind, true, left, loc);
+	if (on_left.method && on_left.level >= on_right.level) return { on_left.method, left };
 	return on_right.method ? { on_right.method, right } : {};
 }
 
 <*
  Overload methods called by the operator token at `loc`: a binary or unary
  operator, the brackets of an index, or `lengthof`. A derived operator gives
- the overloads it is derived from: `!=` uses `==`; `>` uses `<`; `<=` and `>=`
- use `<` and `==`; a combined assignment such as `+=` uses `+` when it has no
- overload of its own.
+ the overload it is derived from: `!=` uses `==`; `>`, `<=` and `>=` use `<`;
+ a combined assignment such as `+=` uses `+` when it has no overload of its own.
 *>
 fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location loc, List{OverloadCall}* out)
 {
@@ -2465,13 +2494,9 @@ fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location
 						return;
 					}
 				}
-				OverloadKind[2] kinds = { be.op.overload, be.op == OP_LE || be.op == OP_GE ? OV_EQUAL : UNKNOWN };
-				foreach (kind : kinds)
-				{
-					if (kind == UNKNOWN) continue;
-					OverloadCall call = binary_overload(context, sf, kind, left, right, loc);
-					if (call.method) out.push(call);
-				}
+				if (be.op.overload == UNKNOWN) return;
+				OverloadCall call = binary_overload(context, sf, be.op.overload, left, right, loc);
+				if (call.method) out.push(call);
 				return;
 			case UNARY_EXPR:
 				UnaryExpr* ue = node.as(UnaryExpr);

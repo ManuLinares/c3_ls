@@ -43,50 +43,50 @@ fn bool has_feature(String[] features, SourceFile* caller, String feature)
 	return array::contains(features, feature) || (caller && array::contains(caller.features, feature));
 }
 
+faultdef NOT_A_FEATURE_LIST;
+
 <*
- Value of the feature list `expr` of a `@feat`: feature names combined with
- `&`, `|`, `!` and parentheses.
+ Value of the feature list `expr` of a `@feat` or `$feat`, as c3c evaluates
+ it: uppercase feature names without a path, combined with `&`, `|` and
+ parentheses, and negated by any unary operator. Anything else is an error
+ in c3c and NOT_A_FEATURE_LIST here.
 *>
-fn bool feature_list_holds(String[] features, SourceFile* caller, Node* expr)
+fn bool? feature_list_holds(String[] features, SourceFile* caller, Node* expr)
 {
-	if (!expr) return true;
+	if (!expr) return NOT_A_FEATURE_LIST~;
 	switch (expr.kind)
 	{
 		case IDENT_EXPR:
-			Ident* ident = expr.as(IdentExpr).ident;
-			return ident && has_feature(features, caller, ident.text);
+			IdentExpr* ie = expr.as(IdentExpr);
+			if (!ie.ident || ie.path_expr || !ie.ident.text.len || !ie.ident.text[0].is_upper() || !lexer::is_all_upper(ie.ident.text)) return NOT_A_FEATURE_LIST~;
+			return has_feature(features, caller, ie.ident.text);
 		case UNARY_EXPR:
-			UnaryExpr* ue = expr.as(UnaryExpr);
-			return ue.operator == UNARYOP_NOT ? !feature_list_holds(features, caller, ue.expr) : feature_list_holds(features, caller, ue.expr);
+			return !feature_list_holds(features, caller, expr.as(UnaryExpr).expr)!;
 		case BINARY_EXPR:
 			BinaryExpr* be = expr.as(BinaryExpr);
-			bool left = feature_list_holds(features, caller, be.left);
-			bool right = feature_list_holds(features, caller, be.right);
-			switch (be.op)
-			{
-				case OP_BIT_AND:
-				case OP_AND: return left && right;
-				case OP_BIT_OR:
-				case OP_OR: return left || right;
-				default: return true;
-			}
+			if (be.op != OP_BIT_AND && be.op != OP_BIT_OR) return NOT_A_FEATURE_LIST~;
+			bool left = feature_list_holds(features, caller, be.left)!;
+			bool right = feature_list_holds(features, caller, be.right)!;
+			return be.op == OP_BIT_AND ? left && right : left || right;
 		case GROUP_EXPR:
 			return feature_list_holds(features, caller, expr.as(GroupExpr).inner);
 		default:
-			return true;
+			return NOT_A_FEATURE_LIST~;
 	}
 }
 
 <*
  Whether one of the feature lists `exprs`, alternatives as in `@feat(A, B)`,
- holds; true when there are none.
+ holds. Like c3c, the first list that holds decides, and an invalid list
+ before it makes the whole attribute fail.
 *>
 fn bool any_feature_list_holds(String[] features, SourceFile* caller, NodeArray exprs)
 {
-	if (!exprs.len) return true;
 	foreach (expr : exprs)
 	{
-		if (feature_list_holds(features, caller, expr)) return true;
+		bool? holds = feature_list_holds(features, caller, expr);
+		if (catch holds) return false;
+		if (holds) return true;
 	}
 	return false;
 }
@@ -126,7 +126,7 @@ fn void positive_features(Node* expr, bool negated, List{String}* out)
 			if (ident && !negated) out.push(ident.text);
 		case UNARY_EXPR:
 			UnaryExpr* ue = expr.as(UnaryExpr);
-			positive_features(ue.expr, negated != (ue.operator == UNARYOP_NOT), out);
+			positive_features(ue.expr, !negated, out);
 		case BINARY_EXPR:
 			positive_features(expr.as(BinaryExpr).left, negated, out);
 			positive_features(expr.as(BinaryExpr).right, negated, out);
