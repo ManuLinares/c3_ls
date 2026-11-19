@@ -256,21 +256,45 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 						return "Infinity (float)";
 					}
 
-					if (member_name == "min" || member_name == "max")
+					if (member_name == "min")
 					{
-						if (try pt = constants::PrimitiveType::lookup_field(name, left_name))
+						switch (left_name)
 						{
-							Type* ty = ctx && ctx.lookup ? lookup::get_type_by_name(ctx.lookup, left_name) : null;
-							if (pt.kind == INT && ty)
-							{
-								uint bits = ty.data.builtin.bytesize * 8u;
-								// The top bit's value; an unsigned maximum of `2 * top - 1` would overflow written that way.
-								uint128 top = (uint128)1 << (bits - 1);
-								if (member_name == "min") return pt.is_signed ? string::tformat("-%s", top) : "0";
-								return string::tformat("%s", pt.is_signed ? top - 1 : top - 1 + top);
-							}
+							case "ichar": return "-128";
+							case "char":
+							case "ushort":
+							case "uint":
+							case "ulong":
+							case "uint128":
+							case "usz":
+							case "uptr": return "0";
+							case "short": return "-32768";
+							case "int": return "-2147483648";
+							case "long":
+							case "sz":
+							case "iptr": return "-9223372036854775808";
+							default: return string::tformat("%s::min", left_name);
 						}
-						return string::tformat("%s::%s", left_name, member_name);
+					}
+
+					if (member_name == "max")
+					{
+						switch (left_name)
+						{
+							case "ichar": return "127";
+							case "char": return "255";
+							case "short": return "32767";
+							case "ushort": return "65535";
+							case "int": return "2147483647";
+							case "uint": return "4294967295";
+							case "long":
+							case "sz":
+							case "iptr": return "9223372036854775807";
+							case "ulong":
+							case "usz":
+							case "uptr": return "18446744073709551615";
+							default: return string::tformat("%s::max", left_name);
+						}
 					}
 
 					Node* type_node = null;

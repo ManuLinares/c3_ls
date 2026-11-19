@@ -35,8 +35,6 @@ fn bool visit(Node* child, Node* parent, VisitorHooks hooks, void* data)
 		hooks.on_exit(child, parent, data);
 	}
 
-	// `int a, b;` chains `b` through `next`, a sibling of `a` outside its range.
-	if (child.kind == VAR_DECL && child.as(VarDecl).next) return visit(child.as(VarDecl).next, parent, hooks, data);
 	return true;
 }
 
@@ -253,10 +251,17 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case VAR_DECL:
 			{
 				VarDecl* vardecl = node.as(VarDecl);
-				// The type of an implicit self parameter is the method's associated
-				// type node, and `b` in `int a, b;` shares the type node of `a`.
-				bool owns_type = vardecl.type && node.range.contains(vardecl.type.range.start);
-				if (!visit_var_decl_parts(vardecl, owns_type, parent, hooks, data)) return false;
+				// An implicit self parameter's type is the method's associated type node.
+				if (!visit_var_decl_parts(vardecl, !vardecl.var_flags.is_self, parent, hooks, data)) return false;
+				// `int a, b;` chains `b` through `next`; all share the head's type node.
+				for (Node* n = vardecl.next; n; n = n.as(VarDecl).next)
+				{
+					VarDecl* chained = n.as(VarDecl);
+					ChildVisitResult res = hooks.on_enter(n, parent, data);
+					if (res == BREAK) return false;
+					if (res == RECURSE && !visit_var_decl_parts(chained, chained.type != vardecl.type, parent, hooks, data)) return false;
+					if (hooks.on_exit) hooks.on_exit(n, parent, data);
+				}
 				break;
 			}
 		case TYPEDEF_DECL:
@@ -888,7 +893,6 @@ fn bool visit_exprs(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case GENERIC_IDENT_EXPR:
 			{
 				GenericIdentExpr* gi = node.as(GenericIdentExpr);
-				if (gi.left && !visit(gi.left, parent, hooks, data)) return false;
 				foreach (e : gi.exprs)
 				{
 					if (!visit(e, parent, hooks, data)) return false;
@@ -905,7 +909,6 @@ fn bool visit_exprs(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 		case CONTRACT_EXPR:
 			{
 				ContractExpr* ce = node.as(ContractExpr);
-				if (ce.pinpoint && !visit(ce.pinpoint, parent, hooks, data)) return false;
 				if (ce.exprs && !visit(ce.exprs, parent, hooks, data)) return false;
 				if (ce.expr_string && !visit(ce.expr_string, parent, hooks, data)) return false;
 				break;

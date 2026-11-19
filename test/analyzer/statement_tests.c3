@@ -707,6 +707,7 @@ fn void ct_foreach_stmt()
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
 
 	MacroInfo* macro_info = context.registry.macros.get("hello::@create_set")!!;
+	// TODO Macro definitions in registry?
 	MacroDecl* macro_decl = macro_info.node.as(MacroDecl);
 	CompoundStmt* macro_body = macro_decl.body.as(CompoundStmt);
 	CtForeachStmt* foreach_stmt = macro_body.statements[0].as(CtForeachStmt);

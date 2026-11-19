@@ -624,6 +624,11 @@ fn void ParseContext.parse_function_decl(&self, Object* node)
 	});
 }
 
+fn bool is_type_name_defined(CTranslationUnit* tu, String name) @local
+{
+	return is_c3_type(name) || constants::is_primitive(name) || tu.has_type_name(name);
+}
+
 <*
  @param c_object : "C expression of an object of the record, or empty if it cannot be named."
 *>

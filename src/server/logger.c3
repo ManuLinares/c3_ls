@@ -46,6 +46,19 @@ struct LspLogger (Logger)
 	void* dummy;
 }
 
+fn MessageType to_type(LogPriority priority) @local
+{
+	switch (priority)
+	{
+		case CRITICAL:
+		case ERROR:
+			return ERROR;
+		case WARN: return WARNING;
+		case INFO: return INFO;
+		default: return LOG;
+	}
+}
+
 fn LogPriority to_category(LogLevel level) @local
 {
 	switch (level)

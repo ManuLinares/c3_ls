@@ -50,6 +50,15 @@ const String[] TOKEN_MODIFIERS = {
 fn String[] get_token_types() => TOKEN_TYPES;
 fn String[] get_token_modifiers() => TOKEN_MODIFIERS;
 
+struct RawSemanticToken
+{
+	uint line;
+	uint col;
+	uint length;
+	uint token_type;
+	uint token_modifiers;
+}
+
 fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 {
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);

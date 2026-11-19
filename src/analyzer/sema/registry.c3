@@ -232,7 +232,17 @@ fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)
 	context.registry.attrmacros.set(qname, attr_info);
 }
 
+fn AttrdefInfo* get_attrmacro(AnalyzerContext* context, String name)
+{
+	return context.registry.attrmacros.get(name) ?? null;
+}
+
 fn FunctionInfo* get_function(AnalyzerContext* context, String name)
 {
 	return context.registry.functions.get(name) ?? null;
+}
+
+fn TypeInfo* get_type(AnalyzerContext* context, String name)
+{
+	return context.registry.types.get(name) ?? null;
 }

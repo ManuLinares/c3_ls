@@ -206,8 +206,11 @@ struct CtExpandStmt
 struct AsmBlockStmt
 {
 	inline Node node;
+	bool is_volatile;
 	bool is_inline;
+	bool is_goto;
 	bool is_string;
+	bool is_aligned;
 }
 
 struct NopStmt

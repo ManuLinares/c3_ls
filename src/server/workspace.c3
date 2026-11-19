@@ -273,8 +273,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 					{
 						results.push(
 						{
-							.node = stmt,
-							.section_id = 0
+							.node = stmt,.section_id = 0
 						}
 						);
 					}
@@ -282,6 +281,66 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 			}
 		};
 	}
+
+	return results;
+}
+
+fn List{SymbolEntry} LspWorkspace.find_method(&self, String type_name, String method_name)
+{
+	List{SymbolEntry} results;
+	results.tinit();
+
+	if (!self.ctx || type_name.len == 0 || method_name.len == 0) return results;
+
+	self.ctx.files.@each(; file_path, sf)
+	{
+		if (sf)
+		{
+			foreach (stmt : sf.ast.statements)
+			{
+				if (!stmt || stmt.kind == ERROR) continue;
+
+				switch (stmt.kind)
+				{
+					case FN_DECL:
+						{
+							FnDecl* fn_decl = stmt.as(FnDecl);
+							if (fn_decl.name && fn_decl.name.text == method_name && fn_decl.associated_type)
+							{
+								if (query::is_matching_associated_type(fn_decl.associated_type, type_name))
+								{
+									results.push(
+									{
+										.node = stmt,.section_id = 0
+									}
+									);
+								}
+							}
+						}
+					case MACRO_DECL:
+						{
+							MacroDecl* mac_decl = stmt.as(MacroDecl);
+							if (mac_decl.name && mac_decl.name.text == method_name)
+							{
+								if (try assoc_node = mac_decl.associated_type.get())
+								{
+									if (query::is_matching_associated_type(assoc_node, type_name))
+									{
+										results.push(
+										{
+											.node = stmt,.section_id = 0
+										}
+										);
+									}
+								}
+							}
+						}
+					default:
+						break;
+				}
+			}
+		}
+	};
 
 	return results;
 }

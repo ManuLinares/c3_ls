@@ -170,35 +170,6 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	self.process_queue.push(file);
 }
 
-<*
- Byte offset in `text` of the LSP position `pos`, whose character counts UTF-16 code units.
-*>
-fn sz byte_offset_utf16(String text, LspPosition pos) @local
-{
-	sz i = 0;
-	for (uint line = 0; line < pos.line && i < text.len; line++)
-	{
-		i += (text[i..].index_of_char('\n') ?? (text.len - i)) + 1;
-	}
-	uint units = 0;
-	while (i < text.len && units < pos.character && text[i] != '\n')
-	{
-		sz bytes = text.len - i;
-		if (try c = conv::utf8_to_char32(&text[i], &bytes))
-		{
-			units += c > 0xFFFF ? 2 : 1;
-		}
-		else
-		{
-			// An invalid byte counts as one unit.
-			bytes = 1;
-			units++;
-		}
-		i += bytes;
-	}
-	return min(i, text.len);
-}
-
 fn void LspProject.change_file(&self, DidChangeParams params)
 {
 	String raw_uri = params.document.uri;
@@ -228,19 +199,7 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	file.version = params.document.version;
 	log::info("Reindexing: version = %d", file.version);
 
-	String text = file.text;
-	foreach (change : params.content_changes)
-	{
-		if (!change.range)
-		{
-			text = change.text;
-			continue;
-		}
-		sz start = byte_offset_utf16(text, change.range.start);
-		sz end = max(start, byte_offset_utf16(text, change.range.end));
-		text = string::tformat("%s%s%s", text[:start], change.text, text[end..]);
-	}
-	file.set_text(self.allocator, text);
+	file.set_text(self.allocator, params.content_changes.len > 0 ? params.content_changes[0].text : "");
 	FileInput input = {
 		.source_text = file.text,
 		.uri = file.uri.path,
@@ -517,17 +476,7 @@ fn void LspProject.update(&self)
 
 	if (self.process_queue.is_empty()) return;
 
-	// A file queued several times, as by edits waiting to be analyzed, is processed once with its latest entry.
-	List{FileInput} latest;
-	latest.tinit();
-	HashSet{String} queued;
-	queued.tinit();
-	foreach_r (f : self.process_queue)
-	{
-		if (queued.add(f.path.len > 0 ? f.path : f.uri)) latest.push(f);
-	}
-	latest.reverse();
-	FileInput[] files = latest.array_view();
+	FileInput[] files = self.process_queue.array_view();
 	defer self.process_queue.clear();
 
 	bool any_syntax_error = false;
@@ -548,17 +497,6 @@ fn void LspProject.update(&self)
 		{
 			String target_path = f.path.len > 0 ? f.path : f.uri;
 			bool ok = self.workspace.parse_and_register_file(target_path, text);
-			// `@feat` sees the project's features, those of the target built for this file, and TESTING in test files.
-			if (SourceFile* sf = self.workspace.get_source_file_by_path(target_path))
-			{
-				List{String} features;
-				features.init(&sf.arena);
-				features.push_all(self.config.features);
-				String target = self.get_c3c_target(target_path);
-				if (target.len) features.push_all(self.config.targets[target]!!.own_features());
-				if (self.is_test_source_file(target_path)) features.push("TESTING");
-				sf.features = features.array_view();
-			}
 			if (!f.is_library)
 			{
 				user_file_for_c3c = target_path;

@@ -76,7 +76,7 @@ enum MessageKind : char (String name, typeid params)
 
 	SHUTDOWN     { "shutdown", void },
 	EXIT         { "exit", void },
-	CANCEL       { "$/cancelRequest", CancelParams },
+	CANCEL       { "$/cancelRequest", void },
 	SET_TRACE    { "$/setTrace", void },
 	PROGRESS     { "$/progress", void },
 	LOG_TRACE    { "$/logTrace", void },
@@ -242,8 +242,7 @@ struct PublishDiagnosticsParams
 
 struct CancelParams
 {
-	<* Id of the request to cancel, a number or a string. *>
-	Object* id;
+	int id;
 }
 
 struct SetTraceParams
@@ -251,12 +250,9 @@ struct SetTraceParams
 	TraceKind value;
 }
 
-<*
- An edit replacing `range` with `text`, or the whole document when `range` is null.
-*>
 struct TextDocumentContentChangeEvent
 {
-	LspRange* range;
+	LspRange range;
 	uint range_length @Json("rangeLength");
 	String text;
 }

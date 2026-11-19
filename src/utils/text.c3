@@ -1,7 +1,7 @@
 module lsp::utils;
 
 import std::collections::list;
-import analyzer::core, analyzer::core::constants, analyzer::lexer;
+import analyzer::core;
 
 <*
  Precomputes line starting byte offsets in a single linear pass for O(1) lookups.
@@ -83,7 +83,7 @@ fn String extract_prefix(String text, sz byte_offset)
 	while (start_idx > 0)
 	{
 		char c = text[start_idx - 1];
-		if (lexer::is_ident(c))
+		if (c.is_alnum() || c == '_')
 		{
 			start_idx--;
 		}
@@ -93,11 +93,9 @@ fn String extract_prefix(String text, sz byte_offset)
 			{
 				case '@':
 				case '#':
-					start_idx--;
 				case '$':
 					start_idx--;
-					// `$$` prefixes compiler builtins.
-					if (start_idx > 0 && text[start_idx - 1] == '$') start_idx--;
+					break;
 				default:
 					break;
 			}
@@ -253,7 +251,7 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 				}
 			}
 
-			while (idx > 0 && lexer::is_name(text[idx - 1]))
+			while (idx > 0 && (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$'))
 			{
 				idx--;
 			}
@@ -298,9 +296,9 @@ fn sz scan_base_expression_start(String text, sz end_idx)
 			}
 			if (idx > 0) idx--;
 		}
-		else if (lexer::is_name(text[idx - 1]))
+		else if (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$')
 		{
-			while (idx > 0 && lexer::is_name(text[idx - 1]))
+			while (idx > 0 && (text[idx - 1].is_alnum() || text[idx - 1] == '_' || text[idx - 1] == '@' || text[idx - 1] == '#' || text[idx - 1] == '$'))
 			{
 				idx--;
 			}
@@ -347,7 +345,6 @@ struct CallTargetInfo
 	String callee_name;
 	uint active_param;
 	bool is_valid;
-	bool in_parens;
 	sz open_paren_idx;
 }
 
@@ -398,7 +395,6 @@ fn CallTargetInfo parse_call_context(String text, sz offset)
 
 	if (!found) return info;
 
-	info.in_parens = true;
 	info.open_paren_idx = open_paren_idx;
 
 	uint commas = 0;
@@ -511,9 +507,9 @@ fn CallTargetInfo parse_call_context(String text, sz offset)
 			}
 			continue;
 		}
-		else if (lexer::is_name(text[callee_start - 1]))
+		else if (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$')
 		{
-			while (callee_start > 0 && lexer::is_name(text[callee_start - 1]))
+			while (callee_start > 0 && (text[callee_start - 1].is_alnum() || text[callee_start - 1] == '_' || text[callee_start - 1] == '@' || text[callee_start - 1] == '#' || text[callee_start - 1] == '$'))
 			{
 				callee_start--;
 			}
@@ -540,7 +536,13 @@ fn CallTargetInfo parse_call_context(String text, sz offset)
 	if (callee_end > callee_start)
 	{
 		info.callee_name = text[callee_start : callee_end - callee_start];
-		info.is_valid = !constants::is_keyword(info.callee_name);
+		if (info.callee_name != "if" && info.callee_name != "while" && info.callee_name != "for" &&
+		info.callee_name != "foreach" && info.callee_name != "foreach_r" && info.callee_name != "switch" &&
+		info.callee_name != "catch" && info.callee_name != "try" && info.callee_name != "return" &&
+		info.callee_name != "do")
+		{
+			info.is_valid = true;
+		}
 	}
 
 	return info;

@@ -333,6 +333,10 @@ enum TokenKind : char (TokenTraits traits)
 	<* $vaarg, *>
 	CT_VAARG              { {} },
 
+	AT_INLINE             { {} },
+	AT_PURE               { {} },
+	AT_NOINLINE           { {} },
+
 	EOF                   { {} }
 }
 

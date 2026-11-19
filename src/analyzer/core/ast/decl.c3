@@ -165,6 +165,7 @@ struct AttributeDecl
 	Ident* name;
 	NodeArray exprs;
 	AttributeKind attribute_kind;
+	bool is_custom;
 }
 
 struct CtExpandDecl

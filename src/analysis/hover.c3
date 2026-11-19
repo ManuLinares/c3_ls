@@ -37,10 +37,6 @@ fn ChildVisitResult find_enclosing_access_callback(Node* c, Node* p, void* user_
 	return RECURSE;
 }
 
-<*
- Hover text at `pos`. On a documented keyword its doc follows whatever the code there shows,
- such as the declaration it starts or the value it evaluates to; alone it comes after the keyword's syntax.
-*>
 fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 {
 	Location loc = {
@@ -51,69 +47,8 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf || !project.workspace.ctx) return "";
 
-	String shown = code_hover(project, sf, loc)!;
-	if (!sf.lexer) return shown;
-	sz i = sf.lexer.token_at(loc);
-	if (i < 0) return shown;
-	constants::Keyword? kw = constants::Keyword::lookup_field(name, sf.lexer.tokens[i].value);
-	if (catch kw) return shown;
-	if (!kw.docs.len) return shown;
-	if (shown.len) return string::tformat("%s\n\n%s", shown, kw.docs);
-	return string::tformat("```c3\n%s\n```\n\n%s", kw.syntax(), kw.docs);
-}
-
-fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
-{
-	// A tag of a doc contract, such as `@param`.
-	if (sf.lexer)
-	{
-		Token[] tokens = sf.lexer.tokens.array_view();
-		sz i = sf.lexer.token_at(loc);
-		if (i >= 0 && tokens[i].kind == AT_IDENT)
-		{
-			sz j = i - 1;
-			while (j >= 0 && tokens[j].kind != DOCS_START && tokens[j].kind != DOCS_END) j--;
-			if (j >= 0 && tokens[j].kind == DOCS_START)
-			{
-				String tag = tokens[i].value.strip_prefix("@");
-				bool optional = i + 1 < tokens.len && tokens[i + 1].kind == QUESTION && tokens[i + 1].range.start == tokens[i].range.end;
-				if (optional) tag = string::tformat("%s?", tag);
-				if (try t = constants::DocTag::lookup_field(name, tag)) return string::tformat("```c3\n%s\n```\n\n%s", t.syntax, t.doc);
-			}
-		}
-	}
-
 	Range target_range = {.start = loc,.end = loc };
 	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
-
-	// `$$name` and `$$NAME`, defined by the compiler.
-	Ident* builtin = null;
-	if (target_node && target_node.kind == BUILTIN_EXPR) builtin = target_node.as(BuiltinExpr).name;
-	if (target_node && target_node.kind == COMPILER_CONST_EXPR) builtin = target_node.as(CompilerConstExpr).expr.name;
-	if (builtin)
-	{
-		String text = builtin.text;
-		String label = string::tformat("$$%s", text);
-		String doc;
-		if (target_node.kind == BUILTIN_EXPR)
-		{
-			if (try b = constants::Builtin::lookup_field(name, text))
-			{
-				label = b.signature();
-				doc = b.doc;
-			}
-		}
-		else if (try c = constants::BuiltinConstant::lookup_field(name, text))
-		{
-			doc = c.doc;
-		}
-		return doc.len ? string::tformat("```c3\n%s\n```\n\n%s", label, doc) : string::tformat("```c3\n%s\n```", label);
-	}
-
-	// An overloaded operator shows the method it calls.
-	List{OverloadCall} operators;
-	operators.tinit();
-	query::operator_overloads_at(project.workspace.ctx, sf, loc, &operators);
 
 	AccessFinderContext acc_finder = {.target_range = target_range,.found_access = null };
 	CallFinderContext call_finder = {.target_range = target_range,.found_call = null };
@@ -124,11 +59,8 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 		cursor::visit(stmt, null, {.on_enter = &find_call_callback }, &call_finder);
 	}
 
-	// An access describes its member only; its left side has hover of its own.
-	AccessExpr* access = acc_finder.found_access;
-	if (access && !(access.member && access.member.range.contains(loc))) access = null;
-	Node* ct_node = access ? (Node*)access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
-	if (ct_node && !operators.len())
+	Node* ct_node = acc_finder.found_access ? (Node*)acc_finder.found_access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
+	if (ct_node)
 	{
 		if (ct_node.kind == ACCESS_EXPR)
 		{
@@ -164,11 +96,6 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 						String recv_type = query::type_of(project.workspace.ctx, sf, acc.left, loc);
 						String type = query::value_property_type(project.workspace.ctx, sf, recv_type, property);
 						if (type.len) return string::tformat("```c3\n%s %s\n```\n\n%s", type, property.name, property.doc);
-					}
-					if (query::is_swizzle(mem_name))
-					{
-						String type = query::member_type(project.workspace.ctx, sf, query::type_of(project.workspace.ctx, sf, acc.left, loc), mem_name, loc);
-						if (type.len) return string::tformat("```c3\n%s %s\n```", type, mem_name);
 					}
 				}
 
@@ -209,12 +136,8 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 	List{Node*} overloads;
 	overloads.tinit();
-	Node* decl_node = operators.len() ? operators[0].method : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
+	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
 	if (!decl_node) return "";
-	// A member of a generic instance shows the instance's types: `int element` for `Type element` on a `List{int}`.
-	GenericBinding binding = operators.len()
-		? query::member_binding(project.workspace.ctx, sf, operators[0].receiver, decl_node)
-		: query::member_binding_at(project.workspace.ctx, sf, loc, decl_node);
 
 	if (decl_node.kind == TYPE_EXPR)
 	{
@@ -235,7 +158,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 	DString md_buf;
 	md_buf.tinit();
-	md_buf.append(declaration::header(project.workspace.ctx, decl_node, symbol_name, binding));
+	md_buf.append(declaration::header(project.workspace.ctx, decl_node, symbol_name));
 	if (overloads.len() > 1)
 	{
 		md_buf.append("\n\nDeclared for ");

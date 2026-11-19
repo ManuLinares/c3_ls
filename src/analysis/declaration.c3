@@ -36,8 +36,6 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 		case VAR_DECL:
 			VarDecl* vd = node.as(VarDecl);
 			if (vd.var_flags.is_self) return string::tformat("%s %s", cursor::spelling(vd.type, tmem), name);
-			// `b` in `int a, b;` shares the type written before `a`.
-			if (vd.type && !node.range.contains(vd.type.range.start)) return string::tformat("%s %s", cursor::spelling(vd.type, tmem), text(ctx, node, single_line) ?: name);
 			SourceFile* sf = source_file::file_of(ctx, node);
 			if (sf && vd.var_kind == VAR_LOCAL)
 			{
@@ -60,12 +58,11 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 }
 
 <*
- Markdown block with the signature of `node`, its generic parameters bound by
- `binding`, followed by its module when it is not local.
+ Markdown block with the signature of `node`, followed by its module when it is not local.
 *>
-fn String header(AnalyzerContext* ctx, Node* node, String name, GenericBinding binding = {})
+fn String header(AnalyzerContext* ctx, Node* node, String name)
 {
-	String sig = query::substitute(signature(ctx, node, name), binding.params, binding.args);
+	String sig = signature(ctx, node, name);
 	if (query::label_of(node)) return string::tformat("```c3\n%s\n```\nline %d", sig, node.range.start.line + 1);
 	String mod = module_name(ctx, node);
 	if (!mod.len) return string::tformat("```c3\n%s\n```", sig);

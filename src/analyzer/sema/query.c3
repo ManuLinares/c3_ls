@@ -27,10 +27,6 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 					{
 						ctx.found_type = cursor::spelling(vd.type, tmem);
 					}
-					else if (vd.init_expr)
-					{
-						ctx.found_type = type_of(ctx.context, ctx.sf, vd.init_expr);
-					}
 					return BREAK;
 				}
 			}
@@ -135,21 +131,6 @@ fn Node* find_local_decl_in_file(SourceFile* sf, String name, String* out_type =
 	return null;
 }
 
-<*
- Whether `name` picks vector components: only letters of `xyzw`, or only of `rgba`.
-*>
-fn bool is_swizzle(String name)
-{
-	if (!name.len) return false;
-	foreach (set : (String[2]){ "xyzw", "rgba" })
-	{
-		bool all = true;
-		foreach (c : name) all = all && @ok(set.index_of_char(c));
-		if (all) return true;
-	}
-	return false;
-}
-
 fn bool is_vector_type(String type_name)
 {
 	if (type_name.len == 0) return false;
@@ -177,7 +158,7 @@ fn String module_decl_name(Node* stmt) @local
  Index into `sf.ast.module_decls` of the last module section starting on or
  before the line of `loc`, or -1. A negative line means the end of the file.
 *>
-fn sz section_at(SourceFile* sf, Location loc)
+fn sz section_at(SourceFile* sf, Location loc) @local
 {
 	sz[] decls = sf.ast.module_decls.array_view();
 	if (loc.line < 0) return decls.len - 1;
@@ -246,10 +227,11 @@ fn bool section_imports_reach(SourceFile* sf, Location loc, String target_mod, b
 	sz end_idx = 0;
 	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
 
-	foreach (i : sf.ast.import_decls)
+	for (sz i = start_idx; i < end_idx; i++)
 	{
-		if (i < start_idx || i >= end_idx) continue;
-		ImportDecl* imp = sf.ast.statements[i].as(ImportDecl);
+		Node* stmt = sf.ast.statements.get(i);
+		if (!stmt || stmt.kind != IMPORT_DECL) continue;
+		ImportDecl* imp = stmt.as(ImportDecl);
 		bool stmt_is_public = cursor::has_attribute((Node*)imp, PUBLIC, null);
 		bool stmt_is_recursive = !cursor::has_attribute((Node*)imp, NORECURSE, null);
 
@@ -272,31 +254,6 @@ fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod
 	return section_imports_reach(sf, loc, target_mod, require_public: true);
 }
 
-<*
- Modules usable as a qualifier at `loc` of `sf`: those imported there,
- explicitly or implicitly (`std::core`, every ancestor and descendant of
- the current module), each with its submodules.
-*>
-fn List{String} visible_modules(AnalyzerContext* context, SourceFile* sf, Location loc)
-{
-	List{String} visible;
-	visible.tinit();
-	if (!context || !sf) return visible;
-	List{String} roots = get_imported_modules_at_location(sf, loc);
-	String current = get_module_name_at_location(sf, loc);
-	context.modules.@each(; name, m)
-	{
-		bool seen = current.len > 0 && (name == current || current.starts_with(string::tformat("%s::", name)) || name.starts_with(string::tformat("%s::", current)));
-		foreach (root : roots)
-		{
-			if (seen) break;
-			seen = name == root || name.starts_with(string::tformat("%s::", root));
-		}
-		if (seen) visible.push(name);
-	};
-	return visible;
-}
-
 fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 {
 	List{String} list;
@@ -313,10 +270,11 @@ fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 	sz end_idx = 0;
 	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
 
-	foreach (i : sf.ast.import_decls)
+	for (sz i = start_idx; i < end_idx; i++)
 	{
-		if (i < start_idx || i >= end_idx) continue;
-		ImportDecl* imp = sf.ast.statements[i].as(ImportDecl);
+		Node* stmt = sf.ast.statements.get(i);
+		if (!stmt || stmt.kind != IMPORT_DECL) continue;
+		ImportDecl* imp = stmt.as(ImportDecl);
 		foreach (p : imp.paths)
 		{
 			if (!p || p.kind != PATH_EXPR) continue;
@@ -385,24 +343,13 @@ fn bool is_symbol_accessible_at(AnalyzerContext* context, SourceFile* sf, Locati
 	}
 }
 
-<*
- Module the prefix `mod_prefix` names at `loc` of `sf`: an exact name, a module
- alias, an import or a sub-module of one, tried in that order. With `symbol`,
- the first of those declaring it, as c3c resolves `env::tget_var` to
- `std::os::env` and not to `std::core::env`; the first by name if none does.
- With `all`, every module visible at `loc` that the prefix can name is added
- to it instead, as `env::` names both of those.
-*>
-fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, Location loc, String mod_prefix, String symbol = "", List{Module*}* all = null)
+fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, Location loc, String mod_prefix)
 {
 	if (!context || mod_prefix.len == 0) return null;
-	List{Module*} candidates;
-	candidates.tinit();
 
 	if (Module* m = context.modules.get(mod_prefix) ?? null)
 	{
-		if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
-		candidates.push(m);
+		return m;
 	}
 
 	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
@@ -424,8 +371,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 					String target_path = pe.path ? pe.path.text.strip_suffix("::") : "";
 					if (Module* target_mod = context.modules.get(target_path) ?? null)
 					{
-						if (!all && (!symbol.len || find_symbol_in_module(context, target_mod, symbol, sf, loc))) return target_mod;
-						candidates.push(target_mod);
+						return target_mod;
 					}
 				}
 			}
@@ -442,8 +388,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			{
 				if (Module* imp_mod = context.modules.get(imp) ?? null)
 				{
-					if (!all && (!symbol.len || find_symbol_in_module(context, imp_mod, symbol, sf, loc))) return imp_mod;
-					candidates.push(imp_mod);
+					return imp_mod;
 				}
 			}
 		}
@@ -454,8 +399,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 		String submod_name = string::tformat("%s::%s", caller_mod, mod_prefix);
 		if (Module* submod = context.modules.get(submod_name) ?? null)
 		{
-			if (!all && (!symbol.len || find_symbol_in_module(context, submod, symbol, sf, loc))) return submod;
-			candidates.push(submod);
+			return submod;
 		}
 	}
 
@@ -468,8 +412,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			String imp_sub = string::tformat("%s::%s", imp, mod_prefix);
 			if (Module* submod = context.modules.get(imp_sub) ?? null)
 			{
-				if (!all && (!symbol.len || find_symbol_in_module(context, submod, symbol, sf, loc))) return submod;
-				candidates.push(submod);
+				return submod;
 			}
 
 			String imp_prefix = string::tformat("%s::", imp);
@@ -477,8 +420,7 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			{
 				if (mname.starts_with(imp_prefix) && (mname == mod_prefix || mname.ends_with(suffix)))
 				{
-					if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
-					candidates.push(m);
+					return m;
 				}
 			};
 		}
@@ -492,31 +434,21 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			String top_sub = string::tformat("%s::%s", top_mod, mod_prefix);
 			if (Module* top_sub_mod = context.modules.get(top_sub) ?? null)
 			{
-				if (!all && (!symbol.len || find_symbol_in_module(context, top_sub_mod, symbol, sf, loc))) return top_sub_mod;
-				candidates.push(top_sub_mod);
+				return top_sub_mod;
 			}
 		}
 	}
 
 	String suffix = string::tformat("::%s", mod_prefix);
+	Module* fallback_mod = null;
 	context.modules.@each(; mname, m)
 	{
-		if (mname == mod_prefix || mname.ends_with(suffix))
+		if (!fallback_mod && (mname == mod_prefix || mname.ends_with(suffix)))
 		{
-			if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
-			candidates.push(m);
+			fallback_mod = m;
 		}
 	};
-	if (all)
-	{
-		foreach (mod : candidates)
-		{
-			if (!array::contains(all.array_view(), mod) && (!sf || is_module_visible_at(context, sf, loc, mod.name))) all.push(mod);
-		}
-		return all.len() ? (*all)[0] : null;
-	}
-	// None declares `symbol`: the first that matched by name.
-	return candidates.len() ? candidates[0] : null;
+	return fallback_mod;
 }
 
 fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, String type_name, Location loc = { -1, -1 })
@@ -554,12 +486,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 	{
 		if (clean_type.contains("::"))
 		{
-			foreach (curr : ranked(context, sf, loc, context.registry.types.get(clean_type) ?? (TypeInfo*)null))
+			TypeInfo* curr = context.registry.types.get(clean_type) ?? null;
+			while (curr != null)
 			{
 				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 				{
 					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 
@@ -567,12 +501,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		if (caller_mod.len > 0)
 		{
 			String local_qname = string::tformat("%s::%s", caller_mod, clean_type);
-			foreach (curr : ranked(context, sf, loc, context.registry.types.get(local_qname) ?? (TypeInfo*)null))
+			TypeInfo* curr = context.registry.types.get(local_qname) ?? null;
+			while (curr != null)
 			{
 				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 				{
 					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 
@@ -582,12 +518,14 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 			foreach (imp : imports)
 			{
 				String imp_qname = string::tformat("%s::%s", imp, clean_type);
-				foreach (curr : ranked(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null))
+				TypeInfo* curr = context.registry.types.get(imp_qname) ?? null;
+				while (curr != null)
 				{
 					if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
 					{
 						return curr.node;
 					}
+					curr = curr.next;
 				}
 			}
 		}
@@ -598,13 +536,15 @@ fn Node* find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, Str
 		{
 			if (!matched && (qname == clean_type || qname.ends_with(suffix)))
 			{
-				foreach (curr : ranked(context, sf, loc, tinfo))
+				TypeInfo* curr = tinfo;
+				while (curr != null)
 				{
 					if (!sf || (is_module_visible_at(context, sf, loc, curr.mod) && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 					{
 						matched = curr;
 						break;
 					}
+					curr = curr.next;
 				}
 			}
 		};
@@ -737,7 +677,8 @@ fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, St
 
 fn Node* check_fn_list_for_function(AnalyzerContext* context, FunctionInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
 {
-	foreach (curr : ranked(context, sf, loc, head))
+	FunctionInfo* curr = head;
+	while (curr != null)
 	{
 		if (curr.node && curr.node.kind == FN_DECL)
 		{
@@ -750,13 +691,15 @@ fn Node* check_fn_list_for_function(AnalyzerContext* context, FunctionInfo* head
 				}
 			}
 		}
+		curr = curr.next;
 	}
 	return null;
 }
 
 fn Node* check_macro_list_for_macro(AnalyzerContext* context, MacroInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
 {
-	foreach (curr : ranked(context, sf, loc, head))
+	MacroInfo* curr = head;
+	while (curr != null)
 	{
 		if (curr.node && curr.node.kind == MACRO_DECL)
 		{
@@ -769,6 +712,7 @@ fn Node* check_macro_list_for_macro(AnalyzerContext* context, MacroInfo* head, S
 				}
 			}
 		}
+		curr = curr.next;
 	}
 	return null;
 }
@@ -780,21 +724,25 @@ fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 	if (caller_mod.len > 0)
 	{
 		String local_qname = string::tformat("%s::%s", caller_mod, name);
-		foreach (curr : ranked(context, sf, loc, context.registry.attrmacros.get(local_qname) ?? (AttrdefInfo*)null))
+		AttrdefInfo* curr = context.registry.attrmacros.get(local_qname) ?? null;
+		while (curr != null)
 		{
 			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 			{
 				return curr.node;
 			}
+			curr = curr.next;
 		}
 	}
 
-	foreach (direct : ranked(context, sf, loc, context.registry.attrmacros.get(name) ?? (AttrdefInfo*)null))
+	AttrdefInfo* direct = context.registry.attrmacros.get(name) ?? null;
+	while (direct != null)
 	{
 		if (direct.node && (!sf || is_symbol_accessible_at(context, sf, loc, direct.node, direct.mod)))
 		{
 			return direct.node;
 		}
+		direct = direct.next;
 	}
 
 	if (sf)
@@ -803,12 +751,14 @@ fn Node* find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, name);
-			foreach (curr : ranked(context, sf, loc, context.registry.attrmacros.get(imp_qname) ?? (AttrdefInfo*)null))
+			AttrdefInfo* curr = context.registry.attrmacros.get(imp_qname) ?? null;
+			while (curr != null)
 			{
 				if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
 				{
 					return curr.node;
 				}
+				curr = curr.next;
 			}
 		}
 	}
@@ -881,12 +831,14 @@ fn Node* find_symbol_in_module(AnalyzerContext* context, Module* mod, String sym
 	String qname = string::tformat("%s::%s", mod.name, symbol_name);
 	if (context.registry)
 	{
-		foreach (curr : ranked(context, sf, loc, context.registry.types.get(qname) ?? (TypeInfo*)null))
+		TypeInfo* curr = context.registry.types.get(qname) ?? null;
+		while (curr != null)
 		{
 			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
 			{
 				return curr.node;
 			}
+			curr = curr.next;
 		}
 	}
 
@@ -1017,7 +969,7 @@ const String ANY_VECTOR = "[<>]";
 fn Node* pick_method(AnalyzerContext* context, String key, String name, String type, SourceFile* sf, Location loc, String caller_mod, List{Node*}* all = null) @local
 {
 	Node* found = null;
-	foreach (m : ranked(context, sf, loc, context.registry.methods_by_type.get(key) ?? (MethodInfo*)null))
+	for (MethodInfo* m = context.registry.methods_by_type.get(key) ?? null; m; m = m.next)
 	{
 		if (cursor::spelling(m.node, tmem).strip_prefix("@") != name) continue;
 		if (!is_matching_associated_type(receiver_type_expr(m.node), type)) continue;
@@ -1064,24 +1016,10 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 		}
 	}
 
-	Node* type_node = find_type_node_in_context(context, sf, clean_type, loc);
+	Node* type_node = find_type_node_in_context(context, sf, clean_type);
 	if (type_node)
 	{
-		if (type_node.kind == INTERFACE_DECL)
-		{
-			InterfaceDecl* id = type_node.as(InterfaceDecl);
-			foreach (m : id.methods)
-			{
-				if (m && m.kind == FN_DECL && m.as(FnDecl).name && m.as(FnDecl).name.text == name) return m;
-			}
-			foreach (parent : id.interfaces)
-			{
-				String parent_name = cursor::raw_type_identifier(parent) ?? "";
-				if (parent_name.len == 0 || parent_name == clean_type) continue;
-				if (Node* m = find_method_in_type(context, parent_name, method_name, sf, loc, overloads)) return m;
-			}
-		}
-		else if (type_node.kind == STRUCT_DECL)
+		if (type_node.kind == STRUCT_DECL)
 		{
 			StructDecl* sd = type_node.as(StructDecl);
 			foreach (inter : sd.interfaces)
@@ -1168,7 +1106,7 @@ fn Node* find_method_in_type(AnalyzerContext* context, String type_name, String 
 	return null;
 }
 
-fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String member_name, SourceFile* sf = null, Location loc = { -1, -1 })
+fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String member_name, SourceFile* sf = null)
 {
 	if (!context || type_name.len == 0 || member_name.len == 0) return null;
 
@@ -1179,7 +1117,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	}
 	clean_type = clean_type.trim_right("*&? \t");
 
-	Node* type_node = find_type_node_in_context(context, sf, clean_type, loc);
+	Node* type_node = find_type_node_in_context(context, sf, clean_type);
 	if (!type_node)
 	{
 		type_node = find_type_node_in_context(context, null, clean_type);
@@ -1197,7 +1135,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 			String sub_type = cursor::raw_type_identifier(inter) ?? "";
 			if (sub_type.len > 0 && sub_type != type_name)
 			{
-				Node* res = find_member_in_type(context, sub_type, member_name, sf, loc);
+				Node* res = find_member_in_type(context, sub_type, member_name, sf);
 				if (res) return res;
 			}
 		}
@@ -1210,7 +1148,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 				String sub_type = cursor::raw_type_identifier(vd.type) ?? "";
 				if (sub_type.len > 0 && sub_type != type_name)
 				{
-					Node* res = find_member_in_type(context, sub_type, member_name, sf, loc);
+					Node* res = find_member_in_type(context, sub_type, member_name, sf);
 					if (res) return res;
 				}
 			}
@@ -1218,15 +1156,14 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	}
 	else if (type_node.kind == TYPEDEF_DECL)
 	{
-		// A typedef keeps the fields of what it wraps; only `inline` keeps the methods.
 		TypedefDecl* td = type_node.as(TypedefDecl);
-		if (td.base_type)
+		if (td.is_inline && td.base_type)
 		{
 			String base_type = cursor::raw_type_identifier(td.base_type) ?? cursor::spelling(td.base_type, tmem);
 			base_type = base_type.trim_right("*&? \t");
 			if (base_type.len > 0 && base_type != clean_type)
 			{
-				Node* res = find_member_in_type(context, base_type, member_name, sf, loc);
+				Node* res = find_member_in_type(context, base_type, member_name, sf);
 				if (res) return res;
 			}
 		}
@@ -1245,7 +1182,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 					t_type = t_type.trim_right("*&? \t");
 					if (t_type.len > 0 && t_type != clean_type)
 					{
-						Node* res = find_member_in_type(context, t_type, member_name, sf, loc);
+						Node* res = find_member_in_type(context, t_type, member_name, sf);
 						if (res) return res;
 					}
 				}
@@ -1255,7 +1192,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 					e_type = e_type.trim_right("*&? \t");
 					if (e_type.len > 0 && e_type != clean_type)
 					{
-						Node* res = find_member_in_type(context, e_type, member_name, sf, loc);
+						Node* res = find_member_in_type(context, e_type, member_name, sf);
 						if (res) return res;
 					}
 				}
@@ -1266,7 +1203,7 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 				target_type = target_type.trim_right("*&? \t");
 				if (target_type.len > 0 && target_type != clean_type)
 				{
-					Node* res = find_member_in_type(context, target_type, member_name, sf, loc);
+					Node* res = find_member_in_type(context, target_type, member_name, sf);
 					if (res) return res;
 				}
 			}
@@ -1301,18 +1238,11 @@ fn String type_of_symbol(AnalyzerContext* context, SourceFile* sf, Node* sym, Lo
 		case ALIAS_DECL:
 			{
 				AliasDecl* ad = sym.as(AliasDecl);
-				if (!ad.target) break;
-				if (ad.alias_kind != IDENT_ALIAS)
+				if (ad.target)
 				{
 					String t = cursor::instance_name(ad.target);
 					if (t.len > 0) return t;
-					break;
 				}
-				// `alias tmem = current_temp;` has the type of what it names, resolved where declared.
-				SourceFile* alias_sf = source_file::file_of(context, sym) ?: sf;
-				Ident* ident = ad.target.kind == IDENT_EXPR ? ad.target.as(IdentExpr).ident : null;
-				Node* target = resolve_name(context, alias_sf, ad.target, null, ident ? ident.range.start : ad.target.range.start);
-				if (target && target != sym) return type_of_symbol(context, alias_sf, target);
 			}
 		default:
 			break;
@@ -1329,7 +1259,7 @@ fn Node* find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, String
 		sz last_colons = symbol_name.rindex_of("::") ?? 0;
 		String mod_prefix = symbol_name[:last_colons];
 		String short_name = symbol_name[last_colons + 2..];
-		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_prefix, short_name);
+		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_prefix);
 		if (mod) return find_symbol_in_module(context, mod, short_name, sf, loc);
 		return null;
 	}
@@ -1478,7 +1408,7 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				if (ident.path_expr && ident.path_expr.kind == PATH_EXPR)
 				{
 					String mod_name = ident.path_expr.as(PathExpr).path ? ident.path_expr.as(PathExpr).path.text.strip_suffix("::") : "";
-					Module* mod = resolve_module_for_prefix(context, sf, effective_loc, mod_name, id_name);
+					Module* mod = resolve_module_for_prefix(context, sf, effective_loc, mod_name);
 
 					if (mod)
 					{
@@ -1519,14 +1449,6 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 		case ACCESS_EXPR:
 			{
 				AccessExpr* acc = expr.as(AccessExpr);
-				// `T::kind` is a TypeKind whatever `T` is, even a compile-time `$Type`.
-				if (acc.access_kind == STATIC && acc.member)
-				{
-					if (try p = constants::TypeProperty::lookup_field(name, cursor::spelling(acc.member, tmem)))
-					{
-						if (!p.type_desc.starts_with("any") && !p.type_desc.starts_with("fn")) return p.type_desc;
-					}
-				}
 				String parent_type = type_of(context, sf, acc.left, effective_loc);
 				if (parent_type.len == 0) return "";
 				return member_type(context, sf, parent_type, cursor::spelling(acc.member, tmem), effective_loc);
@@ -1538,7 +1460,6 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				if (!call.callee) return "";
 
 				String full_name;
-				Node* name_node = call.callee.kind == GENERIC_IDENT_EXPR ? call.callee.as(GenericIdentExpr).left : call.callee;
 				if (call.callee.kind == ACCESS_EXPR)
 				{
 					AccessExpr* acc = call.callee.as(AccessExpr);
@@ -1551,9 +1472,9 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 					}
 					full_name = string::tformat("%s.%s", cursor::spelling(acc.left, tmem), method_name);
 				}
-				else if (name_node && name_node.kind == IDENT_EXPR)
+				else if (call.callee.kind == IDENT_EXPR)
 				{
-					IdentExpr* ie = name_node.as(IdentExpr);
+					IdentExpr* ie = call.callee.as(IdentExpr);
 					full_name = ie.ident ? ie.ident.text : "";
 					if (ie.path_expr && ie.path_expr.kind == PATH_EXPR)
 					{
@@ -1561,11 +1482,8 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 						if (pe.path) full_name = string::tformat("%s%s", pe.path.text, full_name);
 					}
 				}
-				Node* callee_decl = resolve_callee_by_name(context, sf, full_name, effective_loc);
-				Node* ret = return_type(callee_decl);
-				if (!ret) return "";
-				GenericIdentExpr* generic = call.callee.kind == GENERIC_IDENT_EXPR ? call.callee.as(GenericIdentExpr) : null;
-				return bound_type(context, sf, cursor::instance_name(ret), call_binding(context, sf, callee_decl, null, generic));
+				Node* ret = return_type(resolve_callee_by_name(context, sf, full_name, effective_loc));
+				return ret ? cursor::instance_name(ret) : "";
 			}
 
 		default:
@@ -1588,8 +1506,7 @@ fn ChildVisitResult find_access_callback(Node* c, Node* p, void* user_data)
 	{
 		case ACCESS_EXPR:
 			AccessExpr* acc = c.as(AccessExpr);
-			// A `$eval(...)` member is not a name; what it contains is resolved on its own.
-			if (acc.member && acc.member.kind == IDENT_EXPR && acc.member.range.contains_range(ctx.target_range))
+			if (acc.member && acc.member.range.contains_range(ctx.target_range))
 			{
 				ctx.found_access = c;
 				return BREAK;
@@ -1693,42 +1610,38 @@ fn List{Node*} enclosing_labeled(SourceFile* sf, Location loc)
 	return labeled;
 }
 
+fn String type_name_of(Node* type_expr) @local
+{
+	if (!type_expr) return "";
+	return cursor::raw_type_identifier(type_expr) ?? cursor::spelling(type_expr, tmem);
+}
+
 <*
- Type reached by applying a `.a[i].b` designator chain to `owner`.
+ Type reached by applying a `.a.b` designator chain to `owner`.
 *>
 fn String designator_chain_type(AnalyzerContext* context, SourceFile* sf, String owner, Node* des) @local
 {
 	if (!des || des.kind != DESIGNATOR_EXPR || owner.len == 0) return "";
 	DesignatorExpr* d = des.as(DesignatorExpr);
+	if (d.designator_kind != PERIOD) return "";
 	String base = d.path ? designator_chain_type(context, sf, owner, d.path) : owner;
-	if (d.designator_kind != PERIOD) return element_type(context, sf, base);
 	if (base.len == 0 || !d.data.field || d.data.field.kind != IDENT_EXPR) return "";
 	IdentExpr* ie = d.data.field.as(IdentExpr);
-	return ie.ident ? member_type(context, sf, base, ie.ident.text) : "";
-}
-
-<*
- Generic parameters and the arguments bound to them.
-*>
-struct GenericBinding
-{
-	GenericDecl* params;
-	String[] args;
+	if (!ie.ident) return "";
+	Node* field = find_member_in_type(context, base, ie.ident.text, sf);
+	return type_of_symbol(context, sf, field);
 }
 
 <*
  What a call invokes: a function, a macro or a function pointer, its
  parameters, and the index of the first parameter that takes an argument,
- 1 when the receiver of a method call is passed as `self`. `binding` holds
- the generic arguments of the call: the receiver's, as for `list.push` on a
- `List{Entry}`, or the explicit ones of `first{Entry}(...)`.
+ 1 when the receiver of a method call is passed as `self`.
 *>
 struct CallTarget
 {
 	Node* decl;
 	NodeArray params;
 	sz first_param;
-	GenericBinding binding;
 }
 
 <*
@@ -1738,10 +1651,8 @@ fn CallTarget call_target(AnalyzerContext* context, SourceFile* sf, CallExpr* ca
 {
 	AccessExpr* access = call.callee && call.callee.kind == ACCESS_EXPR ? call.callee.as(AccessExpr) : null;
 	Node* name = access ? access.member : call.callee;
-	GenericIdentExpr* generic = name && name.kind == GENERIC_IDENT_EXPR ? name.as(GenericIdentExpr) : null;
-	if (generic) name = generic.left;
 	if (!name || name.kind != IDENT_EXPR || !name.as(IdentExpr).ident) return {};
-	return target_of(context, sf, name, access, generic);
+	return target_of(context, sf, name, access);
 }
 
 <*
@@ -1755,22 +1666,19 @@ fn CallTarget call_target_at(AnalyzerContext* context, SourceFile* sf, Location 
 	List{Node*} stack = ancestors_of(sf, ident);
 	sz n = stack.len();
 	AccessExpr* access = n >= 2 && stack[n - 2].kind == ACCESS_EXPR && stack[n - 2].as(AccessExpr).member == ident ? stack[n - 2].as(AccessExpr) : null;
-	GenericIdentExpr* generic = n >= 2 && stack[n - 2].kind == GENERIC_IDENT_EXPR && stack[n - 2].as(GenericIdentExpr).left == ident ? stack[n - 2].as(GenericIdentExpr) : null;
-	return target_of(context, sf, ident, access, generic);
+	return target_of(context, sf, ident, access);
 }
 
 <*
  Target called through the callee name `name`, the member of `access` if not null.
 *>
-fn CallTarget target_of(AnalyzerContext* context, SourceFile* sf, Node* name, AccessExpr* access, GenericIdentExpr* generic) @local
+fn CallTarget target_of(AnalyzerContext* context, SourceFile* sf, Node* name, AccessExpr* access) @local
 {
-	// At the identifier: in `mod::name` the start is on `mod::`, naming the module.
-	Ident* ident = name.kind == IDENT_EXPR ? name.as(IdentExpr).ident : null;
-	Node* decl = resolve_name(context, sf, name, access, ident ? ident.range.start : name.range.start);
+	Node* decl = resolve_name(context, sf, name, access, name.range.start);
 	if (!decl) return {};
 	bool callable = decl.kind == FN_DECL || decl.kind == MACRO_DECL || (decl.kind == VAR_DECL && function_type(context, sf, decl.as(VarDecl).type) != null);
 	if (!callable) return {};
-	CallTarget target = { .decl = decl, .params = callable_params(context, sf, decl), .binding = call_binding(context, sf, decl, access, generic) };
+	CallTarget target = { .decl = decl, .params = callable_params(context, sf, decl) };
 	if (access && target.params.len && receiver_type_expr(decl) && access.left && access.left.kind != TYPE_EXPR) target.first_param = 1;
 	return target;
 }
@@ -1812,44 +1720,6 @@ fn TypeExpr* function_type(AnalyzerContext* context, SourceFile* sf, Node* type)
 }
 
 <*
- Generic arguments the callable `decl` is called with: those of the
- receiver of `access`, or the explicit ones of `generic`.
-*>
-fn GenericBinding call_binding(AnalyzerContext* context, SourceFile* sf, Node* decl, AccessExpr* access, GenericIdentExpr* generic) @local
-{
-	if (access && access.left && access.left.kind != TYPE_EXPR)
-	{
-		String receiver = type_of(context, sf, access.left, access.range.start);
-		return receiver.len ? member_binding(context, sf, receiver, decl) : {};
-	}
-	if (!generic) return {};
-	List{String} args;
-	args.tinit();
-	foreach (arg : generic.exprs) args.push(arg ? cursor::instance_name(arg) : "");
-	return { generic_params(context, decl), args.array_view() };
-}
-
-<*
- Declared type of the parameter `param` of `target` called as `call`.
- An untyped macro parameter, as `#init` of `mem::new($Type, #init)`, is
- taken to have the type passed to the macro's first `$Type` parameter.
-*>
-fn String param_type(AnalyzerContext* context, SourceFile* sf, CallTarget target, CallExpr* call, VarDecl* param) @local
-{
-	if (param.type) return bound_type(context, sf, cursor::instance_name(param.type), target.binding);
-	foreach (pi, p : target.params)
-	{
-		if (!p || p.kind != VAR_DECL || !p.as(VarDecl).name) continue;
-		String name = p.as(VarDecl).name.text;
-		if (name.len < 2 || name[0] != '$' || !name[1].is_upper()) continue;
-		sz ai = pi - target.first_param;
-		if (pi < target.first_param || ai >= call.args.len || !call.args[ai] || call.args[ai].kind != TYPE_EXPR) return "";
-		return cursor::instance_name(call.args[ai]);
-	}
-	return "";
-}
-
-<*
  Type of the parameter receiving argument `arg` of `call`, or "".
  `arg` is either a positional argument or the value of a named one.
 *>
@@ -1865,7 +1735,7 @@ fn String call_param_type(AnalyzerContext* context, SourceFile* sf, CallExpr* ca
 		{
 			if (p && p.kind == VAR_DECL && p.as(VarDecl).name && p.as(VarDecl).name.text == arg_name)
 			{
-				return param_type(context, sf, target, call, p.as(VarDecl));
+				return type_name_of(p.as(VarDecl).type);
 			}
 		}
 		return "";
@@ -1876,67 +1746,36 @@ fn String call_param_type(AnalyzerContext* context, SourceFile* sf, CallExpr* ca
 		if (a != arg) continue;
 		sz pi = i + target.first_param;
 		if (pi >= params.len || !params[pi] || params[pi].kind != VAR_DECL) return "";
-		return param_type(context, sf, target, call, params[pi].as(VarDecl));
+		return type_name_of(params[pi].as(VarDecl).type);
 	}
 	return "";
 }
 
 <*
- Type of the value of the DESIGNATED_INITIALIZER_EXPR at `stack[idx]`, or "".
-*>
-fn String designated_value_type(AnalyzerContext* context, SourceFile* sf, Node*[] stack, sz idx) @local
-{
-	if (idx < 1 || stack[idx - 1].kind != INITIALIZER_LIST_EXPR) return "";
-	String owner = initializer_list_type(context, sf, stack, idx - 1);
-	return designator_chain_type(context, sf, owner, stack[idx].as(DesignatedInitializerExpr).path);
-}
-
-<*
- Type initialized by the INITIALIZER_LIST_EXPR at `stack[idx]`, or "".
+ Struct type initialized by the INITIALIZER_LIST_EXPR at `stack[idx]`, or "".
 *>
 fn String initializer_list_type(AnalyzerContext* context, SourceFile* sf, Node*[] stack, sz idx) @local
 {
-	Node* list = stack[idx];
-	while (idx > 0 && stack[idx - 1].kind == GROUP_EXPR) list = stack[--idx];
 	if (idx == 0) return "";
+	Node* list = stack[idx];
 	Node* parent = stack[idx - 1];
 	switch (parent.kind)
 	{
 		case VAR_DECL:
 			VarDecl* vd = parent.as(VarDecl);
-			if (vd.init_expr != list || !vd.type) return "";
-			return cursor::instance_name(vd.type);
+			if (vd.init_expr != list) return "";
+			return type_name_of(vd.type);
 		case COMPOUND_LITERAL_EXPR:
-			Node* type = parent.as(CompoundLiteralExpr).type_expr;
-			return type ? cursor::instance_name(type) : "";
+			return type_name_of(parent.as(CompoundLiteralExpr).type_expr);
 		case CAST_EXPR:
 			// `(Type){ ... }` compound literal.
 			CastExpr* ce = parent.as(CastExpr);
-			return ce.operand == list && ce.inner ? cursor::instance_name(ce.inner) : "";
-		case INITIALIZER_LIST_EXPR:
-			sz position = array::index_of(parent.as(InitializerListExpr).exprs, list) ?? -1;
-			// An element of an enum variant's associated values has its parameter's type.
-			if (idx >= 3 && stack[idx - 2].kind == VAR_DECL && stack[idx - 2].as(VarDecl).assoc_values == parent && stack[idx - 3].kind == ENUM_DECL)
-			{
-				NodeArray params = stack[idx - 3].as(EnumDecl).assoc_params;
-				if (position < 0 || position >= params.len || !params[position] || params[position].kind != VAR_DECL) return "";
-				Node* param_type = params[position].as(VarDecl).type;
-				return param_type ? cursor::instance_name(param_type) : "";
-			}
-			String owner = initializer_list_type(context, sf, stack, idx - 1);
-			if (owner.len == 0) return "";
-			Node* type_node = find_type_node_in_context(context, sf, owner);
-			if (!type_node || type_node.kind != STRUCT_DECL) return element_type(context, sf, owner);
-			NodeArray fields = type_node.as(StructDecl).fields;
-			if (position < 0 || position >= fields.len) return "";
-			Node* field = fields[position];
-			Ident* name = null;
-			if (field && field.kind == VAR_DECL) name = field.as(VarDecl).name;
-			if (field && field.kind == STRUCT_DECL) name = field.as(StructDecl).name;
-			return name ? member_type(context, sf, owner, name.text) : "";
+			return ce.operand == list ? type_name_of(ce.inner) : "";
 		case DESIGNATED_INITIALIZER_EXPR:
-			if (parent.as(DesignatedInitializerExpr).value != list) return "";
-			return designated_value_type(context, sf, stack, idx - 1);
+			DesignatedInitializerExpr* di = parent.as(DesignatedInitializerExpr);
+			if (di.value != list || idx < 2 || stack[idx - 2].kind != INITIALIZER_LIST_EXPR) return "";
+			String owner = initializer_list_type(context, sf, stack, idx - 2);
+			return designator_chain_type(context, sf, owner, di.path);
 		case CALL_EXPR:
 			return call_param_type(context, sf, parent.as(CallExpr), list, "");
 		case NAMED_ARG_EXPR:
@@ -1951,70 +1790,13 @@ fn String initializer_list_type(AnalyzerContext* context, SourceFile* sf, Node*[
 			for (sz i = idx; i > 0; i--)
 			{
 				Node* n = stack[i - 1];
-				Node* ret = null;
-				if (n.kind == FN_DECL) ret = n.as(FnDecl).ret_type;
-				if (n.kind == MACRO_DECL) ret = n.as(MacroDecl).ret_type.get() ?? null;
-				if (n.kind == FN_DECL || n.kind == MACRO_DECL) return ret ? cursor::instance_name(ret) : "";
+				if (n.kind == FN_DECL) return type_name_of(n.as(FnDecl).ret_type);
+				if (n.kind == MACRO_DECL) return type_name_of(n.as(MacroDecl).ret_type.get() ?? null);
 			}
 			return "";
 		default:
 			return "";
 	}
-}
-
-<*
- Type expected at `loc` inside an initializer list, or "": the list's type
- at an element, the type whose member the designator `.a.|` names, or the
- type of the value after `.a =`.
-*>
-fn String initializer_slot_type(AnalyzerContext* context, SourceFile* sf, Location loc)
-{
-	Node* node = node_at(sf, loc);
-	if (!node) return "";
-	List{Node*} stack = ancestors_of(sf, node);
-	if (stack.len() == 0) return "";
-	Node*[] view = stack.array_view();
-	sz top = stack.len() - 1;
-	if (top > 0 && stack[top - 1].kind == DESIGNATOR_EXPR && stack[top - 1].as(DesignatorExpr).data.field == node) node = stack[--top];
-	Node* parent = top > 0 ? stack[top - 1] : null;
-
-	switch
-	{
-		case node.kind == INITIALIZER_LIST_EXPR:
-			return initializer_list_type(context, sf, view, top);
-		case node.kind == DESIGNATED_INITIALIZER_EXPR:
-			return designated_value_type(context, sf, view, top);
-		case node.kind == DESIGNATOR_EXPR:
-			sz i = top;
-			while (i > 0 && stack[i - 1].kind == DESIGNATOR_EXPR) i--;
-			if (i > 0 && stack[i - 1].kind == DESIGNATED_INITIALIZER_EXPR) i--;
-			if (i < 1 || stack[i - 1].kind != INITIALIZER_LIST_EXPR) return "";
-			String owner = initializer_list_type(context, sf, view, i - 1);
-			Node* path = node.as(DesignatorExpr).path;
-			return path ? designator_chain_type(context, sf, owner, path) : owner;
-		case !parent:
-			return "";
-		case parent.kind == DESIGNATED_INITIALIZER_EXPR && parent.as(DesignatedInitializerExpr).value == node:
-			return designated_value_type(context, sf, view, top - 1);
-		case parent.kind == INITIALIZER_LIST_EXPR:
-			return initializer_list_type(context, sf, view, top - 1);
-		default:
-			return "";
-	}
-}
-
-<*
- Innermost `switch` or `$switch` statement around `loc`, or null.
-*>
-fn Node* enclosing_switch(SourceFile* sf, Location loc)
-{
-	Node* node = node_at(sf, loc);
-	if (!node) return null;
-	foreach_r (n : ancestors_of(sf, node))
-	{
-		if (n.kind == SWITCH_STMT || n.kind == CT_SWITCH_STMT) return n;
-	}
-	return null;
 }
 
 <*
@@ -2035,11 +1817,10 @@ fn Node* resolve_designator_field(AnalyzerContext* context, SourceFile* sf, Node
 
 	sz i = n - 2;
 	while (i > 0 && stack[i - 1].kind == DESIGNATOR_EXPR) i--;
-	if (i > 0 && stack[i - 1].kind == DESIGNATED_INITIALIZER_EXPR) i--;
-	if (i < 1 || stack[i - 1].kind != INITIALIZER_LIST_EXPR) return null;
+	if (i < 2 || stack[i - 1].kind != DESIGNATED_INITIALIZER_EXPR || stack[i - 2].kind != INITIALIZER_LIST_EXPR) return null;
 
 	Node*[] view = stack.array_view();
-	String owner = initializer_list_type(context, sf, view, i - 1);
+	String owner = initializer_list_type(context, sf, view, i - 2);
 	String base = d.path ? designator_chain_type(context, sf, owner, d.path) : owner;
 	if (base.len == 0) return null;
 	return find_member_in_type(context, base, target.as(IdentExpr).ident.text, sf);
@@ -2102,34 +1883,6 @@ fn String generic_param_name(Node* param)
 }
 
 <*
- Generic parameters in scope at `loc`: those of the enclosing declaration,
- of the type a method is declared on, and of the module section.
-*>
-fn List{Node*} generic_params_at(AnalyzerContext* context, SourceFile* sf, Location loc)
-{
-	List{Node*} params;
-	params.tinit();
-	if (!sf) return params;
-	Node* decl = enclosing_top_level(sf, loc);
-	Node*[3] owners;
-	owners[0] = decl;
-	Node* receiver = receiver_type_expr(decl);
-	if (receiver) owners[1] = find_type_node_in_context(context, sf, cursor::raw_type_identifier(receiver) ?? "");
-	sz section = section_at(sf, loc);
-	if (section >= 0) owners[2] = sf.ast.statements[sf.ast.module_decls[section]];
-	foreach (owner : owners)
-	{
-		GenericDecl* gd = generics_of(owner);
-		if (!gd) continue;
-		foreach (p : gd.params)
-		{
-			if (p && p.kind != ERROR) params.push(p);
-		}
-	}
-	return params;
-}
-
-<*
  Type a method is declared on, or null when `decl` is no method.
 *>
 fn Node* receiver_type_expr(Node* decl)
@@ -2170,19 +1923,8 @@ fn String member_type(AnalyzerContext* context, SourceFile* sf, String receiver,
 		String t = value_property_type(context, sf, type, property);
 		if (t.len) return t;
 	}
-	if (is_swizzle(name))
-	{
-		// One component is the element; several make a vector of them.
-		String vector = type;
-		for (int depth = 0; depth < MAX_ALIAS_DEPTH && vector.len && !is_vector_type(vector); depth++) vector = aliased_type(context, sf, vector);
-		if (is_vector_type(vector))
-		{
-			String element = element_type(context, sf, vector, loc);
-			return name.len == 1 ? element : string::tformat("%s[<%d>]", element, name.len);
-		}
-	}
 
-	Node* member = find_member_in_type(context, type, name, sf, loc);
+	Node* member = find_member_in_type(context, type, name, sf);
 	if (member && member.kind == VAR_DECL)
 	{
 		VarDecl* vd = member.as(VarDecl);
@@ -2219,24 +1961,11 @@ fn String value_property_type(AnalyzerContext* context, SourceFile* sf, String t
 			{
 				case LEN: return "sz";
 				case PTR: return t.ends_with("[]") ? string::tformat("%s*", t[:t.len - 2]) : "";
-				default: return "";
+				case TYPE:
+				case ORDINAL: return "";
 			}
 		}
 		if (t == "any") return property == ValueProperty.PTR ? "void*" : property == ValueProperty.TYPE ? "typeid" : "";
-		// The properties of a `typeid` available at runtime.
-		if (t == "typeid")
-		{
-			switch (property)
-			{
-				case KIND: return "TypeKind";
-				case SIZE:
-				case LEN: return "sz";
-				case PARENT:
-				case INNER: return "typeid";
-				case NAMES: return "String[]";
-				default: return "";
-			}
-		}
 		Node* decl = find_type_node_in_context(context, sf, generic_base(t));
 		if (!decl) return "";
 		switch (decl.kind)
@@ -2268,7 +1997,7 @@ fn String builtin_definition(String type) @local => type == "String" ? "char[]" 
  bound. With `inline_only`, typedefs that are not inline are not followed.
  Empty when `type` is no such typedef or alias.
 *>
-fn String aliased_type(AnalyzerContext* context, SourceFile* sf, String type, bool inline_only = false)
+fn String aliased_type(AnalyzerContext* context, SourceFile* sf, String type, bool inline_only = false) @local
 {
 	Node* decl = find_type_node_in_context(context, sf, generic_base(type));
 	if (!decl) return "";
@@ -2317,31 +2046,16 @@ struct OperatorMatch
  Method of the user-defined `type` overloading `kind`: with `@operator` or
  `@operator_s` when `type` is the left operand, `@operator_r` or `@operator_s`
  when it is the right one. One whose operand parameter is `other` is exact
- and preferred, as c3c does. Aliases and inline typedefs of `type` are followed.
+ and preferred, as c3c does.
 *>
 fn OperatorMatch operator_method(AnalyzerContext* context, SourceFile* sf, String type, OverloadKind kind, bool reverse = false, String other = "", Location loc = { -1, -1 })
 {
-	String t = type.trim_right("? \t");
-	for (int depth = 0; depth < MAX_ALIAS_DEPTH && t.len; depth++)
-	{
-		OperatorMatch found = declared_operator_method(context, sf, t, kind, reverse, other, loc);
-		if (found.method) return found;
-		t = aliased_type(context, sf, t, true);
-	}
-	return {};
-}
-
-<*
- Overload of `kind` declared on `type` itself; see `operator_method`.
-*>
-fn OperatorMatch declared_operator_method(AnalyzerContext* context, SourceFile* sf, String t, OverloadKind kind, bool reverse, String other, Location loc) @local
-{
 	OperatorMatch found;
+	String t = type.trim_right("? \t");
 	if (!context.registry || !t.len || t.ends_with("*") || t.ends_with("]")) return found;
 	String base = generic_base(t);
-	foreach (op : ranked(context, sf, loc, context.registry.methods_by_type.get(method_key(base)) ?? (MethodInfo*)null))
+	for (MethodInfo* op = context.registry.methods_by_type.get(method_key(base)) ?? null; op && !found.exact; op = op.next)
 	{
-		if (found.exact) break;
 		Node* method = op.node;
 		if (!overloads(method, kind, reverse)) continue;
 		Node* receiver = receiver_type_expr(method);
@@ -2393,8 +2107,11 @@ fn String arithmetic_type(AnalyzerContext* context, SourceFile* sf, OperatorKind
 {
 	String left = type_of(context, sf, left_expr, loc);
 	String right = type_of(context, sf, right_expr, loc);
-	OverloadCall call = binary_overload(context, sf, overload_of(op), left, right, loc);
-	if (call.method) return instance_type(context, sf, call.receiver, call.method, return_type(call.method));
+	OverloadKind kind = overload_of(op);
+	OperatorMatch on_left = operator_method(context, sf, left, kind, false, right, loc);
+	OperatorMatch on_right = on_left.exact ? {} : operator_method(context, sf, right, kind, true, left, loc);
+	if (on_left.method && (on_left.exact || !on_right.exact)) return instance_type(context, sf, left, on_left.method, return_type(on_left.method));
+	if (on_right.method) return instance_type(context, sf, right, on_right.method, return_type(on_right.method));
 
 	if (op == OP_SHL || op == OP_SHR) return promoted(context, left);
 	if (left.ends_with("*"))
@@ -2419,157 +2136,6 @@ fn String arithmetic_type(AnalyzerContext* context, SourceFile* sf, OperatorKind
 		right = flat_right;
 	}
 	return "";
-}
-
-<*
- An operator overload method and the type of the operand it is called on.
-*>
-struct OverloadCall
-{
-	Node* method;
-	String receiver;
-}
-
-<*
- Overload of `kind` called by `left op right`: the left operand's, unless only
- the right operand's matches its type exactly, as c3c resolves them.
-*>
-fn OverloadCall binary_overload(AnalyzerContext* context, SourceFile* sf, OverloadKind kind, String left, String right, Location loc) @local
-{
-	OperatorMatch on_left = operator_method(context, sf, left, kind, false, right, loc);
-	OperatorMatch on_right = on_left.exact ? {} : operator_method(context, sf, right, kind, true, left, loc);
-	if (on_left.method && (on_left.exact || !on_right.exact)) return { on_left.method, left };
-	return on_right.method ? { on_right.method, right } : {};
-}
-
-<*
- Overload methods called by the operator token at `loc`: a binary or unary
- operator, the brackets of an index, or `lengthof`. A derived operator gives
- the overloads it is derived from: `!=` uses `==`; `>` uses `<`; `<=` and `>=`
- use `<` and `==`; a combined assignment such as `+=` uses `+` when it has no
- overload of its own.
-*>
-fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location loc, List{OverloadCall}* out)
-{
-	if (!sf || !sf.lexer) return;
-	sz token = sf.lexer.token_at(loc);
-	if (token < 0) return;
-	Location at = sf.lexer.tokens[token].range.start;
-	List{Node*} stack = ancestors_of(sf, node_at(sf, loc));
-	foreach_r (i, node : stack)
-	{
-		if (!node || at.before(node.range.start)) continue;
-		switch (node.kind)
-		{
-			case BINARY_EXPR:
-				BinaryExpr* be = node.as(BinaryExpr);
-				if (!be.left || !be.right || at.before(be.left.range.end) || !at.before(be.right.range.start)) continue;
-				String left = type_of(context, sf, be.left, loc);
-				String right = type_of(context, sf, be.right, loc);
-				OverloadKind own = compound_overload_of(be.op);
-				if (own != UNKNOWN)
-				{
-					if (Node* method = operator_method(context, sf, left, own, false, right, loc).method)
-					{
-						out.push({ method, left });
-						return;
-					}
-				}
-				OverloadKind[2] kinds = { overload_of(compound_base_of(be.op)), UNKNOWN };
-				switch (be.op)
-				{
-					case OP_EQ:
-					case OP_NE: kinds = { OV_EQUAL, UNKNOWN };
-					case OP_LT:
-					case OP_GT: kinds = { OV_LESS_THAN, UNKNOWN };
-					case OP_LE:
-					case OP_GE: kinds = { OV_LESS_THAN, OV_EQUAL };
-					default: break;
-				}
-				foreach (kind : kinds)
-				{
-					if (kind == UNKNOWN) continue;
-					OverloadCall call = binary_overload(context, sf, kind, left, right, loc);
-					if (call.method) out.push(call);
-				}
-				return;
-			case UNARY_EXPR:
-				UnaryExpr* ue = node.as(UnaryExpr);
-				if (!ue.expr || !at.before(ue.expr.range.start)) continue;
-				OverloadKind kind;
-				switch (ue.operator)
-				{
-					case UNARYOP_NEG: kind = OV_UNARY_MINUS;
-					case UNARYOP_BITNEG: kind = OV_NEGATE;
-					default: return;
-				}
-				String operand = type_of(context, sf, ue.expr, loc);
-				if (Node* method = operator_method(context, sf, operand, kind, loc: loc).method) out.push({ method, operand });
-				return;
-			case DESIGNATOR_EXPR:
-				DesignatorExpr* d = node.as(DesignatorExpr);
-				if (d.designator_kind != INDEX || !d.path || at.before(d.path.range.end)) continue;
-				Node* index = d.data.range;
-				if (index && !at.before(index.range.start) && at.before(index.range.end)) continue;
-				Node* parent = i > 0 ? stack[i - 1] : null;
-				OverloadKind kind = OV_ELEMENT_AT;
-				if (parent && parent.kind == BINARY_EXPR && parent.as(BinaryExpr).op == OP_ASSIGN && parent.as(BinaryExpr).left == node) kind = OV_ELEMENT_SET;
-				if (parent && parent.kind == UNARY_EXPR && parent.as(UnaryExpr).operator == UNARYOP_ADDR) kind = OV_ELEMENT_REF;
-				String container = type_of(context, sf, d.path, loc);
-				if (Node* method = operator_method(context, sf, container, kind, loc: loc).method) out.push({ method, container });
-				return;
-			case LENGTHOF_EXPR:
-				Node* inner = node.as(LengthofExpr).inner_expr;
-				if (!inner || !at.before(inner.range.start)) continue;
-				String measured = type_of(context, sf, inner, loc);
-				if (Node* method = operator_method(context, sf, measured, OV_LEN, loc: loc).method) out.push({ method, measured });
-				return;
-			default:
-				continue;
-		}
-	}
-}
-
-<*
- Overload of a combined assignment itself, such as `+=`, or UNKNOWN.
-*>
-fn OverloadKind compound_overload_of(OperatorKind op) @local
-{
-	switch (op)
-	{
-		case OP_ADD_ASSIGN: return OV_PLUS_ASSIGN;
-		case OP_SUB_ASSIGN: return OV_MINUS_ASSIGN;
-		case OP_MULT_ASSIGN: return OV_MULTIPLY_ASSIGN;
-		case OP_DIV_ASSIGN: return OV_DIVIDE_ASSIGN;
-		case OP_MOD_ASSIGN: return OV_REMINDER_ASSIGN;
-		case OP_BIT_AND_ASSIGN: return OV_AND_ASSIGN;
-		case OP_BIT_OR_ASSIGN: return OV_OR_ASSIGN;
-		case OP_BIT_XOR_ASSIGN: return OV_XOR_ASSIGN;
-		case OP_SHL_ASSIGN: return OV_SHL_ASSIGN;
-		case OP_SHR_ASSIGN: return OV_SHR_ASSIGN;
-		default: return UNKNOWN;
-	}
-}
-
-<*
- Operator a combined assignment applies, such as `+` for `+=`; `op` itself otherwise.
-*>
-fn OperatorKind compound_base_of(OperatorKind op) @local
-{
-	switch (op)
-	{
-		case OP_ADD_ASSIGN: return OP_ADD;
-		case OP_SUB_ASSIGN: return OP_SUB;
-		case OP_MULT_ASSIGN: return OP_MULT;
-		case OP_DIV_ASSIGN: return OP_DIV;
-		case OP_MOD_ASSIGN: return OP_MOD;
-		case OP_BIT_AND_ASSIGN: return OP_BIT_AND;
-		case OP_BIT_OR_ASSIGN: return OP_BIT_OR;
-		case OP_BIT_XOR_ASSIGN: return OP_BIT_XOR;
-		case OP_SHL_ASSIGN: return OP_SHL;
-		case OP_SHR_ASSIGN: return OP_SHR;
-		default: return op;
-	}
 }
 
 fn OverloadKind overload_of(OperatorKind op) @local
@@ -2739,11 +2305,13 @@ fn String unary_type(AnalyzerContext* context, SourceFile* sf, UnaryExpr* ue, Lo
 }
 
 <*
- Generic arguments `receiver` gives the type declaring `member`.
+ `type_expr`, declared by `member` of the type `receiver`, with the generic
+ parameters of the type declaring `member` bound to the receiver's arguments.
  Typedefs, aliases and inline members are followed from `receiver` to that type.
 *>
-fn GenericBinding member_binding(AnalyzerContext* context, SourceFile* sf, String receiver, Node* member)
+fn String instance_type(AnalyzerContext* context, SourceFile* sf, String receiver, Node* member, Node* type_expr) @local
 {
+	String type = cursor::instance_name(type_expr);
 	String current = receiver;
 	for (int depth = 0; depth < MAX_ALIAS_DEPTH && current.len; depth++)
 	{
@@ -2756,37 +2324,12 @@ fn GenericBinding member_binding(AnalyzerContext* context, SourceFile* sf, Strin
 		bool declared = member_receiver
 			? (cursor::raw_type_identifier(member_receiver) ?? "") == base
 			: decl.range.contains_range(member.range) && source_file::file_of(context, decl) == source_file::file_of(context, member);
-		if (declared) return { params, args };
+		if (declared) return substitute(type, params, args);
 		Node* inner = inner_type(decl);
 		if (!inner) break;
 		current = substitute(cursor::instance_name(inner), params, args);
 	}
-	return {};
-}
-
-<*
- Generic arguments of the receiver for `member`, named by the member of an
- access at `loc`, as `push` in `list.push`; none elsewhere.
-*>
-fn GenericBinding member_binding_at(AnalyzerContext* context, SourceFile* sf, Location loc, Node* member)
-{
-	Node* node = node_at(sf, loc);
-	List{Node*} stack = ancestors_of(sf, node);
-	sz n = stack.len();
-	if (n < 2 || stack[n - 2].kind != ACCESS_EXPR) return {};
-	AccessExpr* access = stack[n - 2].as(AccessExpr);
-	if (access.member != node || !access.left || access.left.kind == TYPE_EXPR) return {};
-	String receiver = type_of(context, sf, access.left, loc);
-	return receiver.len ? member_binding(context, sf, receiver, member) : {};
-}
-
-<*
- `type_expr`, declared by `member` of the type `receiver`, with the generic
- parameters of the type declaring `member` bound to the receiver's arguments.
-*>
-fn String instance_type(AnalyzerContext* context, SourceFile* sf, String receiver, Node* member, Node* type_expr) @local
-{
-	return bound_type(context, sf, cursor::instance_name(type_expr), member_binding(context, sf, receiver, member));
+	return type;
 }
 
 <*
@@ -2838,7 +2381,7 @@ fn String generic_base(String type) => type[:type.index_of_char('{') ?? type.len
 <*
  Name the methods of `type` are indexed under: `std::List{int}[]*` is `List`.
 *>
-fn String method_key(String type)
+fn String method_key(String type) @local
 {
 	String t = type[:type.index_of_char('{') ?? type.len];
 	t = t[:t.index_of_char('[') ?? t.len].trim_right("*&? \t");
@@ -2880,28 +2423,9 @@ fn String[] generic_args(String type) @local
 }
 
 <*
- `type` with the generic parameters of `binding` bound to its arguments.
- A type declared under the same parameters and named without arguments, as `Box` inside `module box <Type>`,
- is that instance: `Box{args}`.
-*>
-fn String bound_type(AnalyzerContext* context, SourceFile* sf, String type, GenericBinding binding)
-{
-	GenericDecl* params = binding.params;
-	String[] args = binding.args;
-	String bound = substitute(type, params, args);
-	if (!params || !args.len || type.contains("{")) return bound;
-	sz end = 0;
-	while (end < type.len && (lexer::is_ident(type[end]) || type[end] == ':')) end++;
-	String name = type[:end];
-	Node* decl = find_type_node_in_context(context, sf, name) ?: find_type_node_in_context(context, null, name);
-	if (!decl || generic_params(context, decl) != params) return bound;
-	return string::tformat("%s{%s}%s", name, string::join(tmem, args, ", "), type[end..]);
-}
-
-<*
  `type` with each identifier naming one of `params` replaced by its argument in `args`.
 *>
-fn String substitute(String type, GenericDecl* params, String[] args)
+fn String substitute(String type, GenericDecl* params, String[] args) @local
 {
 	if (!params || !args.len) return type;
 	DString out;
@@ -2909,19 +2433,8 @@ fn String substitute(String type, GenericDecl* params, String[] args)
 	sz i = 0;
 	while (i < type.len)
 	{
-		char quote = type[i];
-		if (quote == '"' || quote == '\'' || quote == '`')
-		{
-			// Literals, as default values in a signature, are copied as written.
-			sz end = i + 1;
-			while (end < type.len && type[end] != quote) end += quote != '`' && type[end] == '\\' ? 2 : 1;
-			end = min(end + 1, type.len);
-			out.append(type[i:end - i]);
-			i = end;
-			continue;
-		}
 		sz start = i;
-		while (i < type.len && lexer::is_ident(type[i])) i++;
+		while (i < type.len && (type[i].is_alnum() || type[i] == '_')) i++;
 		if (i == start)
 		{
 			out.append(type[i++]);
@@ -2976,18 +2489,12 @@ fn Node* find_enum_argument_value(AnalyzerContext* context, SourceFile* sf, Enum
 *>
 fn Node* enclosing_top_level(SourceFile* sf, Location loc)
 {
-	Node*[] stmts = sf.ast.statements.array_view();
-	for (sz i = sort::binarysearch(stmts, (Node*)null, &starts_at_or_before, &loc) - 1; i >= 0; i--)
+	foreach (stmt : sf.ast.statements)
 	{
-		if (stmts[i]) return stmts[i].range.contains(loc) ? stmts[i] : null;
+		if (stmt && stmt.range.contains(loc)) return stmt;
 	}
 	return null;
 }
-
-<*
- Never equal, so a binary search over statements ends after the last one starting at or before `loc`.
-*>
-fn int starts_at_or_before(Node* stmt, Node* unused, Location* loc) @local => !stmt || !loc.before(stmt.range.start) ? -1 : 1;
 
 <*
  Parameter `name` of the callable `decl`, or null.
@@ -3242,7 +2749,7 @@ fn Node* resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_nod
 			}
 
 			String mod_name = pe.path ? pe.path.text.strip_suffix("::") : "";
-			Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name, symbol_name);
+			Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
 
 			if (mod)
 			{
@@ -3262,7 +2769,7 @@ fn Node* resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_nod
 			Node* mnode = find_method_in_type(context, receiver_type, symbol_name, sf, loc, overloads);
 			if (mnode) return mnode;
 
-			Node* field = find_member_in_type(context, receiver_type, symbol_name, sf, loc);
+			Node* field = find_member_in_type(context, receiver_type, symbol_name, sf);
 			if (field) return field;
 		}
 
@@ -3300,12 +2807,14 @@ fn Node* resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_nod
 
 	if (context && context.registry)
 	{
-		foreach (direct_ty : ranked(context, sf, loc, context.registry.types.get(symbol_name) ?? (TypeInfo*)null))
+		TypeInfo* direct_ty = context.registry.types.get(symbol_name) ?? null;
+		while (direct_ty != null)
 		{
 			if (direct_ty.node && is_symbol_accessible_at(context, sf, loc, direct_ty.node, direct_ty.mod))
 			{
 				return direct_ty.node;
 			}
+			direct_ty = direct_ty.next;
 		}
 
 		String caller_mod = get_module_name_at_location(sf, loc);
@@ -3315,12 +2824,14 @@ fn Node* resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_nod
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, symbol_name);
-			foreach (imp_ty : ranked(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null))
+			TypeInfo* imp_ty = context.registry.types.get(imp_qname) ?? null;
+			while (imp_ty != null)
 			{
 				if (imp_ty.node && is_symbol_accessible_at(context, sf, loc, imp_ty.node, imp_ty.mod))
 				{
 					return imp_ty.node;
 				}
+				imp_ty = imp_ty.next;
 			}
 		}
 	}
@@ -3381,7 +2892,7 @@ fn Node* resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, String
 		String mod_name = callee_name[:idx];
 		String fn_name = callee_name[idx + 2..];
 
-		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name, fn_name);
+		Module* mod = resolve_module_for_prefix(context, sf, loc, mod_name);
 		return find_callable_in_module(context, mod, fn_name, sf, loc);
 	}
 

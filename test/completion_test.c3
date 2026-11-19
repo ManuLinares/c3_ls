@@ -5,7 +5,6 @@ import lsp::analysis::completion;
 import lsp;
 import uri;
 import std::io;
-import std::collections::list;
 
 fn void test_keyword_and_global_completion()
 {
@@ -825,17 +824,6 @@ fn void test() {
 }
 `;
 
-	// `mem::new` as the stdlib declares it: `#init` takes the `$Type` passed.
-	proj.workspace.process_file("/virtual/mem.c3", `module std::core::mem;
-macro new($Type, #init = ...) @safemacro
-{
-	$Type* val;
-	$if $defined(#init):
-		*val = #init;
-	$endif
-	return val;
-}
-`);
 	proj.workspace.process_file("/virtual/edge_comp.c3", source);
 	Uri doc_uri = uri::from_file_path(mem, "/virtual/edge_comp.c3");
 	defer doc_uri.free();
@@ -1119,15 +1107,18 @@ fn void main() {
 	LspPosition pos = { .line = 4, .character = 4 };
 	CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
 
-	bool found_qualifier = false;
+	bool found_module_in_expr = false;
 	foreach (item : items)
 	{
-		// Module paths belong in import statements, not inside expression bodies.
-		assert(!item.label.contains("::"), "%s", item.label);
-		// The last segment qualifies names: `io::print`.
-		if (item.label == "io" && item.kind == MODULE) found_qualifier = true;
+		if (item.kind == MODULE || item.label == "std::io")
+		{
+			found_module_in_expr = true;
+			break;
+		}
 	}
-	assert(found_qualifier);
+
+	// Module paths belong in import statements, not inside expression bodies
+	assert(!found_module_in_expr);
 }
 
 <*
@@ -2788,231 +2779,4 @@ constset Flags : inline
 	assert(found_uint2);
 	assert(found_custom_type2);
 	assert(!found_helper_func2);
-}
-fn void test_visible_module_names_in_expressions() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	proj.workspace.process_file("/virtual/mathx.c3", "module lib::mathx;\nstruct Vec { int x; }\nfn int twice(int x) => x * 2;\n");
-	proj.workspace.process_file("/virtual/other.c3", "module lib::other;\nfn int once(int x) => x;\n");
-	String src = "module app;\nimport lib::mathx;\nfn int f()\n{\n\tmathx::Vec v;\n\treturn mathx::twice(1);\n}\n";
-	proj.workspace.process_file("/virtual/app.c3", src);
-	Uri u = uri::from_file_path(tmem, "/virtual/app.c3");
-
-	// `\tmat|hx::Vec` and `return mat|hx::twice`: imported, offered by its last segment.
-	LspPosition[2] positions = { { 4, 4 }, { 5, 11 } };
-	foreach (i, pos : positions)
-	{
-		bool found_mathx, found_other;
-		foreach (item : completion::resolve(&proj, u, pos)!!)
-		{
-			if (item.label == "mathx") found_mathx = item.kind == MODULE;
-			if (item.label == "other") found_other = true;
-		}
-		assert(found_mathx, "position %d", i);
-		// Not imported.
-		assert(!found_other, "position %d", i);
-	}
-
-	// `lib::|`: the next segment of a visible module.
-	proj.workspace.process_file("/virtual/app.c3", "module app;\nimport lib::mathx;\nfn int f() => lib::mathx::twice(1);\n");
-	bool found_sub;
-	foreach (item : completion::resolve(&proj, u, { 2, 19 })!!)
-	{
-		if (item.label == "mathx") found_sub = item.kind == MODULE;
-		assert(item.label != "other", "lib::other is not imported");
-	}
-	assert(found_sub);
-}
-
-fn void test_ct_switch_case_completion() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	String src = "module t;\nenum Mode { FAST, SLOW, SAFE }\nmacro pick(Mode $m)\n{\n\t$switch $m:\n\t\t$case FAST: return 1;\n\t\t$case \n\t$endswitch\n}\n";
-	proj.workspace.process_file("/virtual/ct_switch.c3", src);
-	Uri u = uri::from_file_path(tmem, "/virtual/ct_switch.c3");
-	bool fast, slow, safe;
-	foreach (item : completion::resolve(&proj, u, { 6, 8 })!!)
-	{
-		if (item.label == "FAST") fast = true;
-		if (item.label == "SLOW") slow = true;
-		if (item.label == "SAFE") safe = true;
-	}
-	assert(slow && safe, "slow=%s safe=%s", slow, safe);
-	assert(!fast, "FAST is already handled");
-}
-
-const String MEMBER_SRC = `module t;
-interface Alloc { fn void* acquire(sz n); }
-struct Arena (Alloc) { int used; }
-fn void* Arena.acquire(&self, sz n) @dynamic => null;
-struct Iter { int count; int pos; }
-fn int Iter.next(&self) => self.pos;
-typedef KeyIter = Iter;
-Arena arena;
-Alloc current = &arena;
-alias cur @builtin = current;
-fn void f(KeyIter k, typeid t)
-{
-	k.count = 2;
-	cur.acquire(1);
-	bool b = t.kind == STRUCT;
-}
-`;
-
-fn void test_member_completion_through_typedef_alias_and_typeid() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	proj.workspace.process_file("/virtual/members.c3", MEMBER_SRC);
-	Uri u = uri::from_file_path(tmem, "/virtual/members.c3");
-
-	// `k.|count`: fields of the struct a typedef wraps; its methods need `inline`.
-	// `cur.|acquire`: an alias of a variable has the variable's type.
-	// `t.|kind`: properties of a typeid value.
-	LspPosition[3] positions = { { 12, 3 }, { 13, 5 }, { 14, 12 } };
-	String[3] wanted = { "count", "acquire", "kind" };
-	foreach (i, pos : positions)
-	{
-		bool found;
-		foreach (item : completion::resolve(&proj, u, pos)!!)
-		{
-			if (item.label == wanted[i]) found = true;
-			assert(i != 0 || item.label != "next", "methods of Iter are not methods of KeyIter");
-		}
-		assert(found, "%s", wanted[i]);
-		String h = hover::hover(&proj, u, pos)!!;
-		assert(h.contains(wanted[i]), "hover %s: %s", wanted[i], h);
-	}
-}
-
-fn void test_assignment_ranks_expected_type_without_hiding_others() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	String src = "module t;\nstruct Box { int[4] st; }\nfn int count(Box* b) => b.st[0];\nfn void f(Box* self, int n)\n{\n\tint x = \n}\n";
-	proj.workspace.process_file("/virtual/rank.c3", src);
-	Uri u = uri::from_file_path(tmem, "/virtual/rank.c3");
-	String self_sort, n_sort;
-	bool has_count;
-	foreach (item : completion::resolve(&proj, u, { 5, 9 })!!)
-	{
-		if (item.label == "self") self_sort = item.sortText;
-		if (item.label == "n") n_sort = item.sortText;
-		if (item.label == "count") has_count = true;
-	}
-	// `self.st[0]` and `count(self)` reach an int from other types.
-	assert(self_sort.len > 0 && has_count, "self=%s count=%s", self_sort, has_count);
-	assert(n_sort.len > 0 && n_sort.compare_to(self_sort) < 0, "n=%s self=%s", n_sort, self_sort);
-}
-
-fn void test_completion_after_slice_colon_cast_and_case_label() @test
-{
-	String[*] srcs = {
-		// `[a:b]` slices; a single `:` is not a half-typed `::` after a variable.
-		"module t;\nfn void f(char[] buffer, sz read, sz len)\n{\n\tchar[] x = buffer[read:len|];\n}\n",
-		"module t;\nfn void f(sz capacity, double load_factor)\n{\n\tint t = (int)(capacity| * load_factor);\n}\n",
-		"module t;\nfn void f(int n, int k3)\n{\n\tswitch (n)\n\t{\n\t\tcase 11: k3| ^= 1;\n\t\tdefault: break;\n\t}\n}\n",
-	};
-	String[*] wanted = { "len", "capacity", "k3" };
-	foreach (i, src : srcs)
-	{
-		List{String} labels = bitstruct_hover_completion_test::labels_at(src);
-		assert(labels.contains(wanted[i]), "%s: %s", wanted[i], labels);
-	}
-}
-
-fn void test_completion_and_hover_in_contracts() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	String src = "module t;\n<*\n Scales.\n @require [a] a > 0 : \"a must be positive\"\n @require b.len > 0\n*>\nfn int scale(int a, int[] b) => a * b[0];\n";
-	proj.workspace.process_file("/virtual/contract.c3", src);
-	Uri u = uri::from_file_path(tmem, "/virtual/contract.c3");
-
-	// Prose is a comment: nothing to complete.
-	assert(completion::resolve(&proj, u, { 2, 4 })!!.len == 0);
-
-	// `@require [a] |a > 0` offers the parameters, `b.|len` the slice's properties.
-	bool has_a, has_b, has_len;
-	foreach (item : completion::resolve(&proj, u, { 3, 14 })!!)
-	{
-		if (item.label == "a") has_a = true;
-		if (item.label == "b") has_b = true;
-	}
-	foreach (item : completion::resolve(&proj, u, { 4, 12 })!!) if (item.label == "len") has_len = true;
-	assert(has_a && has_b && has_len, "a=%s b=%s len=%s", has_a, has_b, has_len);
-
-	// The pinpointed parameter `[|a]`.
-	String h = hover::hover(&proj, u, { 3, 12 })!!;
-	assert(h.contains("int a"), "hover: %s", h);
-	LspLocation[] locs = definition::goto_definition(&proj, u, { 3, 12 })!!;
-	assert(locs.len == 1 && locs[0].range.start.line == 6, "%s", locs);
-}
-
-fn void test_generic_parameters_are_offered() @test
-{
-	String[*] srcs = {
-		// A generic struct's field, a method of it, a function's own and a module's parameters.
-		"module t;\nstruct Box <Type>\n{\n\tTyp| value;\n}\n",
-		"module t;\nstruct Box <Type>\n{\n\tType value;\n}\nmacro Typ| Box.get(&self) => self.value;\n",
-		"module t;\nfn Ele| first(Elem[] list) <Elem> => list[0];\n",
-		"module t <Item>;\nfn Ite| ident(Item i) => i;\n",
-	};
-	String[*] wanted = { "Type", "Type", "Elem", "Item" };
-	foreach (i, src : srcs)
-	{
-		List{String} labels = bitstruct_hover_completion_test::labels_at(src);
-		assert(labels.contains(wanted[i]), "%d %s: %s", i, wanted[i], labels);
-	}
-}
-
-fn void test_type_properties_of_compile_time_and_generic_types() @test
-{
-	// `$Type` and a generic parameter stand for any type, so any property fits.
-	String[*] srcs = {
-		"module t;\nmacro sz f($Type)\n{\n\treturn $Type::si|;\n}\n",
-		"module t;\nstruct Box <Type> { Type v; }\nfn sz Box.al(&self) => Type::al|;\n",
-	};
-	String[*] wanted = { "size", "alignment" };
-	foreach (i, src : srcs)
-	{
-		List{String} labels = bitstruct_hover_completion_test::labels_at(src);
-		assert(labels.contains(wanted[i]), "%s: %s", wanted[i], labels);
-	}
-
-	// `$Type::kind` is a TypeKind whatever `$Type` is.
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	proj.workspace.process_file("/virtual/types.c3", "module std::core::types;\nenum TypeKind { STRUCT, ENUM }\n");
-	String src = "module t;\nmacro sz f($Type)\n{\n\t$switch $Type::kind:\n\t\t$case \n\t$endswitch\n}\n";
-	proj.workspace.process_file("/virtual/ct_kind.c3", src);
-	bool found;
-	foreach (item : completion::resolve(&proj, uri::from_file_path(tmem, "/virtual/ct_kind.c3"), { 4, 8 })!!)
-	{
-		if (item.label == "STRUCT") found = true;
-	}
-	assert(found);
-}
-
-fn void test_macros_after_cast_and_statement_head() @test
-{
-	// After a cast or `if (x)` an expression or a statement follows, not an attribute.
-	String[*] srcs = {
-		"module t;\nmacro int @twice(#x) => #x * 2;\nfn float f(int x)\n{\n\treturn (float)@twi|(x);\n}\n",
-		"module t;\nmacro void @scope(;@body) { @body(); }\nfn void f(bool dd)\n{\n\tif (dd) @sco|() {};\n}\n",
-	};
-	String[*] wanted = { "@twice", "@scope" };
-	foreach (i, src : srcs)
-	{
-		List{String} labels = bitstruct_hover_completion_test::labels_at(src);
-		assert(labels.contains(wanted[i]), "%s: %s", wanted[i], labels);
-	}
 }

@@ -283,7 +283,7 @@ INVALID_VALUE,
 INVALID_ENUM_VALUE,
 END_OF_ARGS;
 
-int option_col_width     = 20;
+int option_col_width     = 15;
 int short_only_col_width = 20;
 
 const String ENV_FALLBACK_PREFIX = "=env:";
@@ -692,14 +692,16 @@ macro sz? @parse(#args, ...)
 
 								OptionMeta $h_meta = @clean_option_meta($h_short, $h_long);
 								// Print aligned option strings
-								$switch :
-									$case $h_meta.short_clean.len > 0 && $h_meta.long_opt_name.len > 0:
-										io::printf("  -%s, --%-*s ", $h_meta.short_clean, option_col_width, $h_meta.long_opt_name);
-									$case $h_meta.short_clean.len > 0:
-										io::printf("  -%-*s ", short_only_col_width, $h_meta.short_clean);
-									$case $h_meta.long_opt_name.len > 0:
-										io::printf("      --%-*s ", option_col_width, $h_meta.long_opt_name);
-								$endswitch
+								switch
+								{
+								case $h_meta.short_clean.len > 0 && $h_meta.long_opt_name.len > 0:
+									io::printf("  -%s, --%-*s ", $h_meta.short_clean, option_col_width, $h_meta.long_opt_name);
+								case $h_meta.short_clean.len > 0:
+									io::printf("  -%-*s ", short_only_col_width, $h_meta.short_clean);
+								case $h_meta.long_opt_name.len > 0:
+									io::printf("      --%-*s ", option_col_width, $h_meta.long_opt_name);
+							}
+
 							$switch :
 								$case @kindof($vaarg[$curr_h + $h_assignee_offset]) == FUNC:
 									io::printfn("%s", $h_desc);

@@ -484,11 +484,6 @@ fn Node*? contract(Node* node)
 					return val;
 				}
 			}
-		case FAULT_DECL:
-			{
-				FaultDecl* decl = node.as(FaultDecl);
-				if (try val = decl.contract.get()) return val;
-			}
 		case ENUM_DECL:
 			{
 				EnumDecl* decl = node.as(EnumDecl);

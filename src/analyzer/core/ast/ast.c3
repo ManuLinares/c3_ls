@@ -38,7 +38,6 @@ struct Ast
 	List{Node*} nodes;
 	List{Node*} statements;
 	List{sz} module_decls;
-	List{sz} import_decls;
 }
 
 macro Node* Ast.error(&self, Range range)

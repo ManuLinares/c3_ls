@@ -41,65 +41,6 @@ fn bool is_type(ParseContext* ctx)
 }
 
 <*
- Index of the token after the group opened by `open` at `ctx.peek(i)`.
-*>
-fn int skip_group(ParseContext* ctx, int i, TokenKind open, TokenKind close) @local
-{
-	int depth = 0;
-	for (; !ctx.peek(i).is_eof(); i++)
-	{
-		TokenKind k = ctx.peek(i).kind;
-		if (k == open) depth++;
-		if (k == close && --depth == 0) return i + 1;
-	}
-	return i;
-}
-
-<*
- Whether the tokens at the cursor are a type followed by a name, which
- starts a declaration and never continues an expression.
-*>
-fn bool starts_declaration(ParseContext* ctx)
-{
-	if (!is_type(ctx)) return false;
-	int i;
-	switch (ctx.current.kind)
-	{
-		case CT_TYPEOF:
-		case CT_TYPEFROM:
-			i = skip_group(ctx, 1, LPAREN, RPAREN);
-		default:
-			if (is_type_primitive(ctx.current.kind))
-			{
-				i = 1;
-				break;
-			}
-			while (ctx.peek(i).kind == IDENT && ctx.peek(i + 1).kind == SCOPE) i += 2;
-			i++;
-	}
-	while (true)
-	{
-		switch (ctx.peek(i).kind)
-		{
-			case QUESTION:
-			case ASTERISK:
-				i++;
-			case LBRACKET:
-				i = skip_group(ctx, i, LBRACKET, RBRACKET);
-			case LVEC:
-				i = skip_group(ctx, i, LVEC, RVEC);
-			case LBRACE:
-				i = skip_group(ctx, i, LBRACE, RBRACE);
-			case IDENT:
-			case CT_IDENT:
-				return true;
-			default:
-				return false;
-		}
-	}
-}
-
-<*
  Append an arena-owned node slice into a temporary node list.
  @param [&inout] list : "Destination list."
  @param nodes : "Nodes to append."
@@ -154,7 +95,6 @@ fn bool can_start_expression(TokenKind kind)
 		case HASH_CONST_IDENT:
 		case BUILTIN:
 		case CT_EVAL:
-		case CT_EMBED:
 		case CT_DEFINED:
 		case CT_FEATURE:
 		case CT_STRINGIFY:
