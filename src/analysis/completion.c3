@@ -2376,14 +2376,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 							collect_already_set_fields(ctx.sf.content, open_brace, ctx.offset, ctx.prefix.len, &seen_fields);
 						}
 					}
-					// Platform code built for several targets gets the fields of each of their variants.
-					List{Node*} variants;
-					variants.tinit();
-					query::usable_variants(ctx.ws.ctx, ctx.sf, ctx.loc, fields_node, &variants);
-					foreach (variant : variants)
-					{
-						if (variant.kind == STRUCT_DECL) collect_struct_fields_recursive(ctx, items, variant, fields_type, &seen_fields);
-					}
+					collect_struct_fields_recursive(ctx, items, fields_node, fields_type, &seen_fields);
 				}
 
 				if (!ctx.is_designated_initializer)

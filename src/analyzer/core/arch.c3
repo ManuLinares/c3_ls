@@ -30,59 +30,68 @@ fn char ptr_size(ArchType arch)
 	}
 }
 
-struct TargetFeatures
-{
-	OsType os;
-	ArchType arch;
-	String[] features;
-}
-
 <*
- Features c3c 0.8 enables in a default build of each of its targets that
- builds with the stdlib, as `$feat` reports them; one entry per OS and
- architecture.
-*>
-const TargetFeatures[*] C3C_TARGETS = {
-	{ ANDROID, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "ANDROID", "AARCH64" } },
-	{ ANDROID, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "ANDROID", "X86_64" } },
-	{ NONE, AARCH64, { "NO_LIBC", "FREESTANDING", "FREESTANDING_ELF", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "AARCH64" } },
-	{ NONE, RISCV32, { "NO_LIBC", "FREESTANDING", "FREESTANDING_ELF", "BACKTRACE", "PRINT_PANIC", "NATIVE_F128", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "RISCV32" } },
-	{ NONE, RISCV64, { "NO_LIBC", "FREESTANDING", "FREESTANDING_ELF", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F128", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "RISCV64" } },
-	{ NONE, X86, { "NO_LIBC", "FREESTANDING", "FREESTANDING_ELF", "BACKTRACE", "PRINT_PANIC", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "X86" } },
-	{ NONE, X86_64, { "NO_LIBC", "FREESTANDING", "FREESTANDING_ELF", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "X86_64" } },
-	{ FREEBSD, X86, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "FREEBSD", "X86" } },
-	{ FREEBSD, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "FREEBSD", "X86_64" } },
-	{ IOS, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "DARWIN", "IOS", "AARCH64" } },
-	{ IOS, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "DARWIN", "IOS", "X86_64" } },
-	{ LINUX, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "LINUX", "AARCH64" } },
-	{ LINUX, RISCV32, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_F128", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "LINUX", "RISCV32" } },
-	{ LINUX, RISCV64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F128", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "LINUX", "RISCV64" } },
-	{ LINUX, X86, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "LINUX", "X86" } },
-	{ LINUX, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "LINUX", "X86_64" } },
-	{ MACOS, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "DARWIN", "MACOS", "AARCH64" } },
-	{ MACOS, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "DARWIN", "MACOS", "X86_64" } },
-	{ WIN32, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "WIN32", "X86_64" } },
-	{ NETBSD, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "NETBSD", "AARCH64" } },
-	{ NETBSD, X86, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "NETBSD", "X86" } },
-	{ NETBSD, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "NETBSD", "X86_64" } },
-	{ OPENBSD, X86, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "OPENBSD", "X86" } },
-	{ OPENBSD, X86_64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "BSD", "OPENBSD", "X86_64" } },
-	{ UNKNOWN, WASM32, { "NO_LIBC", "FREESTANDING", "FREESTANDING_WASM", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "WASM", "WASM32" } },
-	{ UNKNOWN, WASM64, { "NO_LIBC", "FREESTANDING", "FREESTANDING_WASM", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "WASM", "WASM64" } },
-	{ EMSCRIPTEN, WASM32, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "ARCH_32_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "POSIX", "EMSCRIPTEN", "WASM", "WASM32" } },
-	{ WIN32, AARCH64, { "LIBC", "BACKTRACE", "PRINT_PANIC", "NATIVE_I128", "NATIVE_F16", "ARCH_64_BIT", "LITTLE_ENDIAN", "SAFE_MODE", "DEBUG_SYMBOLS", "WIN32", "AARCH64" } },
-};
-
-<*
- Features c3c enables for a default build for `target`; none for a target c3c lacks.
+ Features c3c enables for a default build for `target`, as in `compiler.c`:
+ the OS and architecture ones, LIBC, endianness, SAFE_MODE and DEBUG_SYMBOLS.
 *>
 fn String[] features(Allocator allocator, Target target)
 {
-	foreach (t : C3C_TARGETS)
+	List{String} out;
+	out.init(allocator);
+	out.push_all({ "LIBC", "SAFE_MODE", "DEBUG_SYMBOLS" });
+	switch (target.os)
 	{
-		if (t.os == target.os && t.arch == target.arch) return alloc::clone_slice(allocator, t.features);
+		case FREEBSD: out.push_all({ "POSIX", "BSD", "FREEBSD" });
+		case NETBSD: out.push_all({ "POSIX", "BSD", "NETBSD" });
+		case OPENBSD: out.push_all({ "POSIX", "BSD", "OPENBSD" });
+		case LINUX: out.push_all({ "POSIX", "LINUX" });
+		case MACOS: out.push_all({ "POSIX", "DARWIN", "MACOS" });
+		case IOS: out.push_all({ "POSIX", "DARWIN", "IOS" });
+		case TVOS: out.push_all({ "POSIX", "DARWIN", "TVOS" });
+		case WATCHOS: out.push_all({ "POSIX", "DARWIN", "WATCHOS" });
+		case ANDROID: out.push_all({ "POSIX", "ANDROID" });
+		case EMSCRIPTEN: out.push_all({ "POSIX", "EMSCRIPTEN" });
+		case WIN32: out.push("WIN32");
+		case WASI: out.push("WASI");
+		default: break;
 	}
-	return {};
+	switch (target.arch)
+	{
+		case ARM: out.push("ARM");
+		case ARMB: out.push("ARMB");
+		case AARCH64: out.push("AARCH64");
+		case RISCV32: out.push("RISCV32");
+		case RISCV64: out.push("RISCV64");
+		case X86: out.push("X86");
+		case X86_64: out.push("X86_64");
+		case WASM32: out.push_all({ "WASM", "WASM32" });
+		case WASM64: out.push_all({ "WASM", "WASM64" });
+		case XTENSA: out.push("XTENSA");
+		default: break;
+	}
+	switch (target.arch)
+	{
+		case ARMB:
+		case AARCH64_BE:
+		case MIPS:
+		case MIPS64:
+		case PPC:
+		case PPC64:
+		case SPARC:
+		case SPARCV9:
+		case SYSTEMZ:
+		case THUMBEB:
+			out.push("BIG_ENDIAN");
+		default:
+			out.push("LITTLE_ENDIAN");
+	}
+	switch (ptr_size(target.arch))
+	{
+		case 4: out.push("ARCH_32_BIT");
+		case 8: out.push("ARCH_64_BIT");
+		default: break;
+	}
+	return out.array_view();
 }
 
 fn TargetLayout get_platform_layout(OsType os, ArchType arch)

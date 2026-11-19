@@ -182,27 +182,31 @@ fn bool code_holds(AnalyzerContext* context, String[] features, SourceFile* sf, 
 }
 
 <*
- Feature sets the code at `loc` in `sf` may be compiled with: the target's
- when that code is compiled for it, else those of every c3c target that
- compiles it, as Linux and macOS for AARCH64 code seen on x86_64. Features
- the code's `@feat`, and the `$if $feat`/`$case $feat` branches around it,
- ask for that no c3c target defines, such as WAYLAND, are assumed set, the
- target being tried first.
+ Features of the platform the code at `loc` in `sf` is written for: the
+ target's when that code is compiled for it, else those of the first common
+ c3c platform that compiles it, as macOS code seen on Linux. Features the
+ code's `@feat`, and the `$if $feat`/`$case $feat` branches around it, ask
+ for that no platform defines, such as WAYLAND, are assumed set, the target
+ being tried first.
 *>
-fn String[][] platform_feature_sets(AnalyzerContext* context, SourceFile* sf, Location loc)
+fn String[] platform_features_at(AnalyzerContext* context, SourceFile* sf, Location loc)
 {
-	List{String[]} sets;
-	sets.tinit();
 	Node* code = enclosing_top_level(sf, loc);
 	if (!code || code.kind == MODULE_DECL) code = section_node_at(sf, loc);
+	if (!code) return context.features;
 	List{CtFeatureExpr*} branches;
 	branches.tinit();
-	if (code) branch_features(sf, loc, &branches);
-	if (!code || code_holds(context, context.features, sf, code, branches.array_view()))
-	{
-		sets.push(context.features);
-		return sets.array_view();
-	}
+	branch_features(sf, loc, &branches);
+	if (code_holds(context, context.features, sf, code, branches.array_view())) return context.features;
+	Target[*] platforms = {
+		{ .os = LINUX, .arch = X86_64 }, { .os = MACOS, .arch = AARCH64 }, { .os = WIN32, .arch = X86_64 },
+		{ .os = FREEBSD, .arch = X86_64 }, { .os = OPENBSD, .arch = X86_64 }, { .os = NETBSD, .arch = X86_64 },
+		{ .os = IOS, .arch = AARCH64 }, { .os = ANDROID, .arch = AARCH64 }, { .os = EMSCRIPTEN, .arch = WASM32 },
+		{ .os = WASI, .arch = WASM32 },
+	};
+	List{String} platform_defined;
+	platform_defined.tinit();
+	foreach (platform : platforms) platform_defined.push_all(arch::features(tmem, platform));
 	List{AttributeDecl*} attrs;
 	attrs.tinit();
 	feat_attributes(context, code, &attrs);
@@ -212,41 +216,30 @@ fn String[][] platform_feature_sets(AnalyzerContext* context, SourceFile* sf, Lo
 	foreach (branch : branches) foreach (expr : branch.expr_list) positive_features(expr, false, &named);
 	List{String} custom;
 	custom.tinit();
-	foreach (f : named)
-	{
-		bool defined;
-		foreach (t : arch::C3C_TARGETS) defined = defined || array::contains(t.features, f);
-		if (!defined && !array::contains(custom.array_view(), f)) custom.push(f);
-	}
+	foreach (f : named) if (!array::contains(platform_defined.array_view(), f) && !array::contains(custom.array_view(), f)) custom.push(f);
 
 	List{String} with_custom;
 	with_custom.tinit();
 	with_custom.push_all(context.features);
 	with_custom.push_all(custom.array_view());
-	if (custom.len() && code_holds(context, with_custom.array_view(), sf, code, branches.array_view()))
-	{
-		sets.push(with_custom.array_view());
-		return sets.array_view();
-	}
+	if (custom.len() && code_holds(context, with_custom.array_view(), sf, code, branches.array_view())) return with_custom.array_view();
 	foreach (assume : (bool[2]){ true, false })
 	{
-		foreach (t : arch::C3C_TARGETS)
+		foreach (platform : platforms)
 		{
 			List{String} features;
 			features.tinit();
-			features.push_all(t.features);
+			features.push_all(arch::features(tmem, platform));
 			if (assume) features.push_all(custom.array_view());
-			if (code_holds(context, features.array_view(), sf, code, branches.array_view())) sets.push(features.array_view());
+			if (code_holds(context, features.array_view(), sf, code, branches.array_view())) return features.array_view();
 		}
-		if (sets.len()) return sets.array_view();
 	}
-	sets.push(context.features);
-	return sets.array_view();
+	return context.features;
 }
 
 <*
  Entries of the variant chain `head` best first for code at `loc` in `sf`:
- variants compiled for a platform that code is written for, then those
+ variants compiled for the platform that code is written for, then those
  compiled for the target, then the rest, each group in chain order.
 *>
 macro ranked(AnalyzerContext* context, SourceFile* sf, Location loc, head)
@@ -261,52 +254,22 @@ macro ranked(AnalyzerContext* context, SourceFile* sf, Location loc, head)
 		for (var curr = head; curr; curr = curr.next) out.push(curr);
 		return out.array_view();
 	}
-	String[][] platforms = platform_feature_sets(context, sf, loc);
+	String[] platform = platform_features_at(context, sf, loc);
 	for (int rank = 2; rank >= 0; rank--)
 	{
 		for (var curr = head; curr; curr = curr.next)
 		{
-			if (variant_rank(context, sf, platforms, curr.node) == rank) out.push(curr);
+			if (variant_rank(context, sf, platform, curr.node) == rank) out.push(curr);
 		}
 	}
 	return out.array_view();
 }
 
-<*
- 2 when `node` is compiled with one of the feature sets `platforms` of
- platform code, 1 when compiled for the target, 0 otherwise.
-*>
-fn int variant_rank(AnalyzerContext* context, SourceFile* sf, String[][] platforms, Node* node)
+fn int variant_rank(AnalyzerContext* context, SourceFile* sf, String[] platform, Node* node)
 {
 	if (!node) return 0;
-	if (platforms[0].ptr != context.features.ptr)
-	{
-		foreach (features : platforms)
-		{
-			if (feat_enabled_with(context, features, sf, node)) return 2;
-		}
-	}
+	if (platform.ptr != context.features.ptr && feat_enabled_with(context, platform, sf, node)) return 2;
 	return feat_enabled(context, sf, node) ? 1 : 0;
-}
-
-<*
- The variants of the platform-specific declaration `decl`, itself first,
- that the code at `loc` in `sf` may be compiled with; `decl` alone when
- that code is compiled for the target.
-*>
-fn void usable_variants(AnalyzerContext* context, SourceFile* sf, Location loc, Node* decl, List{Node*}* out)
-{
-	out.push(decl);
-	if (!sf || !has_feat(context, decl)) return;
-	String[][] platforms = platform_feature_sets(context, sf, loc);
-	if (platforms[0].ptr == context.features.ptr) return;
-	List{Node*} variants;
-	variants.tinit();
-	platform_variants(context, decl, &variants);
-	foreach (v : variants)
-	{
-		if (v != decl && variant_rank(context, sf, platforms, v) == 2) out.push(v);
-	}
 }
 
 <*
