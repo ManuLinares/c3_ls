@@ -12,8 +12,6 @@ fn AnalyzerContext* create(Allocator alloc, Target target = {})
 	ctx.files.init(alloc);
 	ctx.files_by_node_id.init(alloc);
 	ctx.modules.init(alloc);
-	ctx.target = target;
-
 	if (target.arch == UNKNOWN)
 	{
 		target.arch = arch::current();
@@ -24,7 +22,9 @@ fn AnalyzerContext* create(Allocator alloc, Target target = {})
 		target.os = os::current();
 	}
 
-	ctx.target.layout = arch::get_platform_layout(target.os, target.arch);
+	target.layout = arch::get_platform_layout(target.os, target.arch);
+	ctx.target = target;
+	ctx.features = arch::features(alloc, target);
 
 	ctx.lookup = lookup::create(ctx, alloc);
 	ctx.registry = registry::create(alloc);
@@ -50,6 +50,7 @@ fn void free(AnalyzerContext* ctx)
 
 	if (ctx.lookup) lookup::free(ctx, ctx.lookup);
 	if (ctx.registry) registry::free(ctx, ctx.registry);
+	alloc::free(ctx.allocator, ctx.features.ptr);
 
 	alloc::free(ctx.allocator, ctx);
 }

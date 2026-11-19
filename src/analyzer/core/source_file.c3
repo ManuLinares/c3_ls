@@ -34,6 +34,7 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 	source_file.ast.nodes.init(&source_file.arena);
 	source_file.ast.statements.init(&source_file.arena);
 	source_file.ast.module_decls.init(&source_file.arena);
+	source_file.ast.import_decls.init(&source_file.arena);
 	source_file.path = path.copy(&source_file.arena);
 	source_file.min_node_id = ast::next_node_id;
 	context.files_by_node_id.push(source_file);

@@ -14,8 +14,8 @@ fn void initialize_with_nulls_and_folders()
 {
 	LspMessage msg = decode(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"rootPath":null,"trace":"verbose","clientInfo":{"name":"vscode","version":"1.0"},"workspaceFolders":[{"uri":"file:///w","name":"w"}],"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":true}}}}}}`);
 	test::eq(msg.method, MessageKind.INITIALIZE);
-	test::eq(msg.id, 1);
-	assert(msg.has_id);
+	test::eq(msg.id.i, 1);
+	assert(msg.id);
 	InitializeParams p = msg.params.initialize;
 	assert(p.process_id == null);
 	test::eq(p.root(tmem), "");
@@ -35,10 +35,10 @@ fn void initialize_root_path_fallback_and_option_spellings()
 	test::eq(decode(`{"id":1,"method":"initialize","params":{"initializationOptions":{"compiler_path":"/c"}}}`).params.initialize.options().compiler_path, "/c");
 }
 
-fn void string_id_is_not_an_int_id()
+fn void string_id_is_kept()
 {
 	LspMessage msg = decode(`{"jsonrpc":"2.0","id":"a1","method":"shutdown"}`);
-	assert(!msg.has_id);
+	assert(msg.id && msg.id.is_string() && msg.id.s == "a1");
 	test::eq(msg.method, MessageKind.SHUTDOWN);
 }
 

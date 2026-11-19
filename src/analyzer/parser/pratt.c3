@@ -116,22 +116,19 @@ fn void get_binding_power(TokenKind type, int* lbp, int* rbp)
 			*lbp = Precedence.MULTIPLICATIVE;
 			*rbp = Precedence.MULTIPLICATIVE + 1;
 			break;
-			// Postfix / Access / Call
+			// Postfix, access and call: nothing to their right is parsed by binding power.
 		case DOT:
 		case SCOPE:
 		case LPAREN:
 		case LBRACE:
 		case LBRACKET:
-			*lbp = Precedence.CALL;
-			*rbp = Precedence.CALL + 1;  // TODO: CALL or None?
-			break;
 		case BANGBANG:
 		case PLUSPLUS:
 		case MINUSMINUS:
 		case BANG:
 		case BIT_NOT:
 			*lbp = Precedence.CALL;
-			*rbp = Precedence.LOWEST;  // Postfix has no RHS to pull
+			*rbp = Precedence.LOWEST;
 			break;
 
 		default:
@@ -168,6 +165,19 @@ fn Node* parse_expr(ContextScope scope, Precedence min_bp = LOWEST)
 	}
 
 	return left;
+}
+
+<*
+ Expression where only a value fits. A declaration there, as in
+ `int a = ⏎ Foo b = 1;` while typing, is left to the caller and the value
+ is reported missing.
+*>
+fn Node* parse_value_expr(ContextScope scope)
+{
+	ParseContext* ctx = scope.ctx;
+	if (!starts_declaration(ctx)) return parse_expr(scope);
+	diagnostics::error(ctx.context, ctx.current.range, "Expected an expression");
+	return ctx.ast.error(ctx.current.range);
 }
 
 <*
@@ -211,6 +221,7 @@ fn Node* parse_prefix_expr(ContextScope scope)
 		case CONST_IDENT:
 		case AT_IDENT:
 		case CT_IDENT:
+		case CT_EMBED:
 		case HASH_IDENT:
 		case TYPE_IDENT:
 			return parse_ident_expr(scope);
@@ -324,7 +335,7 @@ fn Node* parse_infix(ContextScope scope, Node* left, Precedence rbp)
 
 				return (Node*)node;
 			}
-			return parse_generic_expr(scope);
+			return parse_generic_expr(scope, left);
 		case LBRACKET:
 			advance(ctx);  // Consume the '[' token
 			return parse_range_expr(scope, left, left.range);
@@ -345,7 +356,7 @@ fn Node* parse_decl_or_expr(ContextScope scope)
 	{
 		return parse_var_decl(scope.with_flags(
 		{
-			.is_expr = true,.is_local = true,.skip_eos = true,.is_var = true
+			.is_expr,.is_local,.skip_eos,.is_var
 		}
 		), null);
 	}
@@ -373,7 +384,7 @@ fn Node* parse_decl_or_expr(ContextScope scope)
 
 	return parse_var_decl(scope.with_flags(
 	{
-		.is_expr = true,.is_local = true,.skip_eos = true
+		.is_expr,.is_local,.skip_eos
 	}
 	), expr);
 }

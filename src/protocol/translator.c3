@@ -16,8 +16,8 @@ struct LspMessage
 {
 	String rpc;
 	MessageKind method;
-	int id;
-	bool has_id;
+	<* The request's id as sent, a number or a string; null for a notification. *>
+	Object* id;
 	MessageParams params;
 	Allocator allocator;
 }
@@ -26,6 +26,7 @@ fn void LspMessage.free(&self)
 {
 	if (self.allocator == tmem) return;
 	self.rpc.free(self.allocator);
+	if (self.id) self.id.free();
 	$foreach $m : MessageParams::members:
 		if (self.method.params == $m.type) object::recursively_free{$m.type}(self.allocator, &self.params.$m);
 	$endforeach
@@ -87,13 +88,9 @@ fn IoDecodeResult? decode(Allocator allocator, String message) => @pool()
 		.allocator = allocator,
 		.rpc = (envelope.jsonrpc.len > 0 ? envelope.jsonrpc : "2.0").copy(allocator),
 		.method = lsp::message_kind_from_string(envelope.method),
-		.id = -1,
 	};
-	if (envelope.id && envelope.id.is_int())
-	{
-		msg.id = (int)envelope.id.i;
-		msg.has_id = true;
-	}
+	if (envelope.id && envelope.id.is_int()) msg.id = object::new_int(allocator, envelope.id.i);
+	if (envelope.id && envelope.id.is_string()) msg.id = object::new_string(allocator, envelope.id.s);
 
 	$foreach $k : MessageKind::values:
 		int $n = 0;

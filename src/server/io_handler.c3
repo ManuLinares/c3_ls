@@ -33,7 +33,7 @@ fn LspMessage? read_string(Allocator allocator, String message)
   @return "LSP message allocated with `allocator`"
   @return? translator::INVALID_MESSAGE, translator::INCOMPLETE_JSON, io::EOF
 *>
-fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
+fn LspMessage? read(Allocator allocator, InStream stream = &stdin_reader)
 {
 	DString line;
 	line.tinit();
@@ -107,6 +107,55 @@ fn LspMessage? read(Allocator allocator, InStream stream = io::stdin())
 	}
 
 	return decode_result.message;
+}
+
+<*
+ Stdin read with the OS's own read call: unlike `io::stdin()`, whose libc
+ `fread` waits until the whole requested length arrived, a read returns what
+ the client has sent so far.
+*>
+struct RawStdin (InStream)
+{
+	bool at_end;
+}
+
+fn sz? RawStdin.read(&self, char[] bytes) @dynamic
+{
+	if (self.at_end) return 0;
+	$if env::WIN32:
+		Win32_DWORD got;
+		if (!win32::readFile(win32::getStdHandle(win32::STD_INPUT_HANDLE), bytes.ptr, (Win32_DWORD)bytes.len, &got, null)) got = 0;
+		sz n = got;
+	$else
+		sz n = max(libc::read(0, bytes.ptr, bytes.len), 0);
+	$endif
+	if (n == 0) self.at_end = true;
+	return n;
+}
+
+fn char? RawStdin.read_byte(&self) @dynamic
+{
+	char[1] byte;
+	return self.read(&byte)! == 1 ? byte[0] : io::EOF~;
+}
+
+RawStdin raw_stdin;
+char[65536] stdin_buffer;
+ReadBuffer stdin_reader;
+
+<*
+ Whether input is waiting: buffered in `stdin_reader`, or sent by the client and not read yet. Does not wait.
+*>
+fn bool has_pending()
+{
+	if (stdin_reader.array_view().len) return true;
+	$if env::WIN32:
+		Win32_DWORD available;
+		return win32::peekNamedPipe(win32::getStdHandle(win32::STD_INPUT_HANDLE), null, 0, null, &available, null) && available > 0;
+	$else
+		Posix_pollfd pfd = { .fd = 0, .events = os::POLLIN };
+		return os::poll(&pfd, 1, 0) > 0 && (pfd.revents & os::POLLIN);
+	$endif
 }
 
 fn void write(String message) @inline

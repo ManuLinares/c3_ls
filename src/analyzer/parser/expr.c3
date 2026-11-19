@@ -245,6 +245,7 @@ fn Node* parse_ident_expr(ContextScope scope)
 		case CONST_IDENT:
 		case AT_IDENT:
 		case CT_IDENT:
+		case CT_EMBED:
 		case HASH_IDENT:
 			{
 				Range full_range = path_prefix ? (Range){ path_prefix.range.start, t.range.end } : (Range){ start.start, t.range.end };
@@ -631,7 +632,7 @@ fn Node* parse_binary_expr(ContextScope scope, Node* left, Precedence prec)
 	advance(ctx);
 	Node* right = parse_expr(scope.with_flags(
 	{
-		.type_as_expression = true
+		.type_as_expression
 	}
 	), prec);
 
@@ -722,6 +723,9 @@ fn Node* parse_contract_expr(ContextScope scope)
 		advance(ctx);
 		if (ctx.is(IDENT) || ctx.is(CT_IDENT) || ctx.is(HASH_IDENT) || ctx.is(TYPE_IDENT))
 		{
+			IdentExpr* pinpoint = ctx.ast.alloc_node(IdentExpr, ctx.current.range);
+			pinpoint.ident = ctx.ident(ctx.current);
+			node.pinpoint = (Node*)pinpoint;
 			advance(ctx);
 		}
 		(void)consume(ctx, RBRACKET);
@@ -729,7 +733,7 @@ fn Node* parse_contract_expr(ContextScope scope)
 
 	node.exprs = parse_expr_list(scope.with_only_flags(
 	{
-		.is_contract = true
+		.is_contract
 	}
 	));
 
@@ -769,7 +773,7 @@ fn Node* parse_call_expr(ContextScope scope, Node* callee)
 	{
 		body_args = parse_parameter_list(scope.with_only_flags(
 		{
-			.is_call = true
+			.is_call
 		}
 		));
 	}
@@ -1029,7 +1033,6 @@ fn Node* parse_builtin_expr(ContextScope scope)
 	ParseContext* ctx = scope.ctx;
 	Range start = ctx.current.range;
 	advance(ctx);
-	BuiltinFunction builtin;
 	bool had_error;
 
 	diagnostics::log_debug("builtin");
@@ -1053,14 +1056,14 @@ fn Node* parse_builtin_expr(ContextScope scope)
 	{
 		case CONST_IDENT:
 			{
-				CompilerConstExpr* node = ctx.ast.alloc_node(CompilerConstExpr, ctx.current.range);
+				CompilerConstExpr* node = ctx.ast.alloc_node(CompilerConstExpr, { start.start, t.range.end });
 				if (had_error) error_node(ctx, node);
 				node.name = name;
 				return (Node*)node;
 			}
 		default:
 			{
-				BuiltinExpr* node = ctx.ast.alloc_node(BuiltinExpr, ctx.current.range);
+				BuiltinExpr* node = ctx.ast.alloc_node(BuiltinExpr, { start.start, t.range.end });
 				if (had_error) error_node(ctx, node);
 				node.name = name;
 				return (Node*)node;
@@ -1127,18 +1130,18 @@ fn Node* parse_lambda_expr(ContextScope scope)
 	{
 		node.return_type = parse_type_expr(scope.with_only_flags(
 		{
-			.no_generics = true
+			.no_generics
 		}
 		), null);
 	}
-	node.params = parse_parameter_list(scope.with_only_flags({ .is_function = true }));
+	node.params = parse_parameter_list(scope.with_only_flags({ .is_function }));
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
 		node.attributes = parse_attributes(scope, node);
 	}
 
 	ContextScope body_scope = scope.with_only_flags({
-		.is_local = true,
+		.is_local,
 		.is_comptime = scope.flags.is_comptime
 	});
 
@@ -1156,12 +1159,12 @@ fn Node* parse_lambda_expr(ContextScope scope)
 	return (Node*)node;
 }
 
-fn Node* parse_generic_expr(ContextScope scope) => @pool()
+fn Node* parse_generic_expr(ContextScope scope, Node* left) => @pool()
 {
 	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
-	GenericIdentExpr* node = ctx.ast.alloc_node(GenericIdentExpr, start);
+	GenericIdentExpr* node = ctx.ast.alloc_node(GenericIdentExpr, left.range);
 	defer node.range.end = ctx.peek(-1).range.end;
+	node.left = left;
 	expect(ctx, node, LBRACE);
 	List{Node*} exprs;
 	exprs.tinit();
@@ -1315,7 +1318,7 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 					}
 					else
 					{
-						val = parse_expr(scope);
+						val = parse_value_expr(scope);
 					}
 					DesignatedInitializerExpr* des_init_node = ctx.ast.alloc_node(DesignatedInitializerExpr, path_token.range);
 					des_init_node.range.end = ctx.peek(-1).range.end;
@@ -1336,7 +1339,7 @@ fn Node* parse_initializer_list_expr(ContextScope scope) => @pool()
 		exprs.push(expr);
 
 		if (consume(ctx, RBRACE)) break;
-		if (ctx.is(EOS) || ctx.is(RPAREN) || is_token_start_of_decl(ctx.current.kind)) break;
+		if (ctx.is(EOS) || ctx.is(RPAREN) || is_token_start_of_decl(ctx.current.kind) || starts_declaration(ctx)) break;
 		expect(ctx, node, COMMA);
 		if (ctx.is(RBRACE))
 		{
@@ -1378,14 +1381,7 @@ fn Node* parse_access_expr(ContextScope scope, Node* left)
 	switch (member_token.kind)
 	{
 		case CT_EVAL:
-			advance(ctx);
-			expect(ctx, (Node*)node, LPAREN);
-			node.member = parse_expr(scope.with_only_flags(
-			{
-				.type_as_expression = true
-			}
-			));
-			expect(ctx, (Node*)node, RPAREN);
+			node.member = parse_ct_eval_expr(scope.with_only_flags({ .type_as_expression }));
 			break;
 		case IDENT:
 		case CONST_IDENT:
@@ -1438,7 +1434,7 @@ fn Node* parse_range_expr(ContextScope scope, Node* left, Range start)
 	DesignatorExpr* designator_node = ctx.ast.alloc_node(DesignatorExpr, start);
 	defer designator_node.range.end = ctx.peek(-1).range.end;
 
-	RangeExpr* range_node = ctx.ast.alloc_node(RangeExpr, start);
+	RangeExpr* range_node = ctx.ast.alloc_node(RangeExpr, ctx.current.range);
 
 	designator_node.path = left;
 	designator_node.data.range = range_node;
@@ -1618,14 +1614,12 @@ fn Node* parse_vaarg_expr(ContextScope scope)
 
 	if (consume(ctx, DOT))
 	{
-		String token_text = ctx.current.value;
-		if (!ctx.is(IDENT) || token_text != constants::KW_LEN)
+		if (!ctx.is(IDENT) || ctx.current.value != "len")
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected '.%s' after '$vaarg'", constants::KW_LEN);
+			diagnostics::error(ctx.context, ctx.current.range, "Expected '.len' after '$vaarg'");
 			error_node(ctx, node);
 		}
 		advance(ctx);
-		node.vaarg_kind = VACOUNT;
 		return node;
 	}
 

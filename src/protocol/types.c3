@@ -101,6 +101,19 @@ struct CompletionItem
 	TextEdit* textEdit @JsonOmitEmpty; // Replaces the typed range; insertText is used when null.
 }
 
+<*
+ Drops what a client infers, to keep a long list small: `insertText` and
+ `filterText` equal to the label, the plain-text format, and `detail` when it
+ repeats `labelDetails.description`, which completionItem/resolve restores.
+*>
+fn void CompletionItem.compact(&self)
+{
+	if (self.insertText == self.label) self.insertText = "";
+	if (self.filterText == self.label) self.filterText = "";
+	if (self.insertTextFormat == PLAIN_TEXT) self.insertTextFormat = {};
+	if (self.detail == self.labelDetails.description) self.detail = "";
+}
+
 struct VersionedTextDocumentIdentifier
 {
 	DocumentUri uri;

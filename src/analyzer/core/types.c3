@@ -16,6 +16,8 @@ struct SourceFile
 	NodeID min_node_id;
 	NodeID max_node_id;
 	HashSet{String} identifiers; // Every identifier spelled in `content`.
+	<* Features enabled for this file in addition to the context's, such as TESTING in a test file. *>
+	String[] features;
 }
 
 <*
@@ -60,6 +62,8 @@ struct AnalyzerContext
 	Allocator allocator;
 	SourceFile* current_source_file;
 	Target target;
+	<* Features enabled for `target`, which `@feat` conditions are evaluated against. *>
+	String[] features;
 }
 
 struct ParseContext
@@ -116,7 +120,6 @@ struct TypeInfo
 	String name;
 	String mod;
 	Node* node;
-	Type* resolved;
 }
 
 struct VariableInfo
@@ -163,7 +166,6 @@ struct Scope
 enum ResolveStatus : char
 {
 	UNRESOLVED,
-	RESOLVING,
 	RESOLVED
 }
 
@@ -190,8 +192,6 @@ struct Type
 
 fn bool Type.is_struct(&self) @inline => self.kind == TYPE_STRUCT || self.kind == TYPE_UNION || self.kind == TYPE_BITSTRUCT;
 fn bool Type.is_enum(&self) @inline => self.kind == TYPE_ENUM;
-fn bool Type.is_pointer(&self) @inline => self.kind == TYPE_IPTR || self.kind == TYPE_UPTR;
-fn bool Type.is_integer(&self) @inline => self.kind >= TYPE_I8 && self.kind <= TYPE_U128;
 fn bool Type.is_float(&self) @inline => self.kind >= TYPE_F16 && self.kind <= TYPE_F128;
 
 struct Target

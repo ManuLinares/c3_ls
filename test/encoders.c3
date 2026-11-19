@@ -5,15 +5,16 @@ import lsp;
 import lsp::server;
 
 import std::io;
+import std::collections::object;
 
 fn void test_encode_initialize_response()
 {
 	LspResponse{InitializeResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 1,
+		.id = object::new_int(tmem, 1),
 		.result = {
 			.capabilities = {
-				.textDocumentSync = {.openClose = true,.change = FULL },
+				.textDocumentSync = {.openClose = true,.change = INCREMENTAL },
 				.hoverProvider = true,
 				.definitionProvider = true,
 				.signatureHelpProvider = {.triggerCharacters = { "(", "," } },
@@ -40,7 +41,7 @@ fn void test_encode_hover_response()
 {
 	LspResponse{HoverResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 2,
+		.id = object::new_int(tmem, 2),
 		.result = {
 			.contents = {.kind = MARKDOWN,.value = "```c3\nint x\n```" }
 		}
@@ -60,7 +61,7 @@ fn void test_encode_completion_response()
 	};
 	LspResponse{CompletionResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 3,
+		.id = object::new_int(tmem, 3),
 		.result = {
 			.isIncomplete = false,
 			.items = &items
@@ -81,7 +82,7 @@ fn void test_encode_completion_response_omits_absent_properties()
 	};
 	LspResponse{CompletionResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 3,
+		.id = object::new_int(tmem, 3),
 		.result = { .isIncomplete = false, .items = &items }
 	};
 	String encoded = translator::encode(resp, tmem);
@@ -115,7 +116,7 @@ fn void test_encode_goto_definition_response()
 	};
 	LspResponse{LspLocation[]} resp = {
 		.jsonrpc = "2.0",
-		.id = 4,
+		.id = object::new_int(tmem, 4),
 		.result = &locs
 	};
 	String encoded = translator::encode(resp, tmem);
@@ -142,7 +143,7 @@ fn void test_encode_signature_help_response()
 	};
 	LspResponse{SignatureHelpResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 5,
+		.id = object::new_int(tmem, 5),
 		.result = {
 			.signatures = &sigs,
 			.activeSignature = 0,
@@ -165,7 +166,7 @@ fn void test_encode_references_response()
 	};
 	LspResponse{LspLocation[]} resp = {
 		.jsonrpc = "2.0",
-		.id = 6,
+		.id = object::new_int(tmem, 6),
 		.result = &locs
 	};
 	String encoded = translator::encode(resp, tmem);
@@ -188,7 +189,7 @@ fn void test_encode_rename_response()
 	};
 	LspResponse{WorkspaceEdit} resp = {
 		.jsonrpc = "2.0",
-		.id = 7,
+		.id = object::new_int(tmem, 7),
 		.result = {.documentChanges = &doc_edits }
 	};
 	String encoded = translator::encode(resp, tmem);
@@ -202,7 +203,7 @@ fn void test_encode_semantic_tokens_response()
 	uint[5] data = { 0, 0, 6, 15, 0 };
 	LspResponse{SemanticTokensResult} resp = {
 		.jsonrpc = "2.0",
-		.id = 8,
+		.id = object::new_int(tmem, 8),
 		.result = {.data = &data }
 	};
 	String encoded = translator::encode(resp, tmem);

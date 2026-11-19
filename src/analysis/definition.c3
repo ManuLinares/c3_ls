@@ -92,8 +92,17 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 
 	List{Node*} overloads;
 	overloads.tinit();
-	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
+	List{OverloadCall} operators;
+	operators.tinit();
+	query::operator_overloads_at(project.workspace.ctx, sf, loc, &operators);
+	foreach (call : operators) overloads.push(call.method);
+	Node* decl_node = overloads.len() ? overloads[0] : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
 	if (!decl_node) return {};
+	if (overloads.len() <= 1)
+	{
+		overloads.clear();
+		query::platform_variants(project.workspace.ctx, decl_node, &overloads);
+	}
 
 	if (overloads.len() > 1)
 	{

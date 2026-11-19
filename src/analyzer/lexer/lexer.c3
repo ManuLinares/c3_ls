@@ -67,12 +67,22 @@ fn sz Lexer.first_token_at(&self, Location loc)
 }
 
 <*
+ Index of the token containing `loc`, or -1.
+*>
+fn sz Lexer.token_at(&self, Location loc)
+{
+	sz i = self.first_token_at(loc);
+	if (i >= self.tokens.len() || loc.before(self.tokens[i].range.start)) i--;
+	return i >= 0 && self.tokens[i].range.contains(loc) ? i : -1;
+}
+
+<*
  Never equal, so a binary search ends at the first token starting at or after `loc`.
 *>
 fn int token_starts_before(Token token, Token unused, Location* loc) @local => token.range.start.before(*loc) ? -1 : 1;
 
 <*
- Whether `loc` is inside a comment or doc block of the lexed text.
+ Whether `loc` is inside a comment or the prose of a doc block of the lexed text.
 *>
 fn bool Lexer.in_comment(&self, Location loc)
 {
@@ -94,6 +104,10 @@ fn bool Token.is_eof(&self) @inline => self.kind == EOF;
 fn bool is_digit(char c) @inline => c.is_digit();
 fn bool is_alpha(char c) @inline => c.is_alpha();
 fn bool is_ident(char c) @inline => is_alpha(c) || is_digit(c) || c == '_';
+<*
+ Whether `c` may be part of a name, its `@`, `#` or `$` sigil included.
+*>
+fn bool is_name(char c) @inline => is_ident(c) || c == '@' || c == '#' || c == '$';
 fn bool Lexer.eof(&self) => self.current == 0;
 
 fn bool is_all_upper(String text)
@@ -453,9 +467,9 @@ fn Token lex_number(Lexer* self)
 		default:
 			break;
 	}
-	if (self.current != 0 && (ascii::is_alnum(self.current) || self.current == '_'))
+	if (self.current != 0 && is_ident(self.current))
 	{
-		while (self.current != 0 && (ascii::is_alnum(self.current) || self.current == '_')) advance(self);
+		while (self.current != 0 && is_ident(self.current)) advance(self);
 		diagnostics::error(self.ctx, { start, self.location }, "This doesn't seem to be a valid literal.");
 	}
 
@@ -533,6 +547,8 @@ fn void lex_contract(Lexer* self)
 			.range = {.start = start_loc,.end = self.location }
 		};
 		self.tokens.push(t);
+		// Only the prose is a comment; contract clauses are code.
+		self.comments.push({ t.range, false });
 	}
 
 	while (self.current != 0)
@@ -614,11 +630,7 @@ fn void tokenize(Lexer* lexer)
 		}
 		lexer.tokens.push(t);
 		if (t.kind == EOF) break;
-		if (t.kind == DOCS_START)
-		{
-			lex_contract(lexer);
-			lexer.comments.push({ { t.range.start, lexer.tokens.last()!!.range.end }, false });
-		}
+		if (t.kind == DOCS_START) lex_contract(lexer);
 	}
 }
 
@@ -895,36 +907,8 @@ fn TokenKind categorize_identifier(Lexer* self, String text)
 
 		if (prefix == '$')
 		{
-			switch (base)
-			{
-				case "assert": return CT_ASSERT;
-				case "case": return CT_CASE;
-				case "default": return CT_DEFAULT;
-				case "defined": return CT_DEFINED;
-				case "echo": return CT_ECHO;
-				case "expand": return CT_EXPAND;
-				case "else": return CT_ELSE;
-				case "endfor": return CT_ENDFOR;
-				case "endforeach": return CT_ENDFOREACH;
-				case "endif": return CT_ENDIF;
-				case "endswitch": return CT_ENDSWITCH;
-				case "error": return CT_ERROR;
-				case "eval": return CT_EVAL;
-				case "exec": return CT_EXEC;
-				case "feat": return CT_FEATURE;
-				case "feature": return CT_FEATURE;
-				case "for": return CT_FOR;
-				case "foreach": return CT_FOREACH;
-				case "if": return CT_IF;
-				case "include": return CT_INCLUDE;
-				case "reflect": return CT_REFLECT;
-				case "stringify": return CT_STRINGIFY;
-				case "switch": return CT_SWITCH;
-				case "Typefrom": return CT_TYPEFROM;
-				case "Typeof": return CT_TYPEOF;
-				case "vaarg": return CT_VAARG;
-				default: break;
-			}
+			TokenKind kind = lookup_keyword(text);
+			if (kind != IDENT) return kind;
 		}
 	}
 	else

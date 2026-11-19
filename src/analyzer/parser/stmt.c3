@@ -59,28 +59,28 @@ fn Node* parse_stmt(ContextScope scope)
 		case VAR:
 			return parse_var_decl(scope.with_flags(
 			{
-				.is_var = true,.is_local = true
+				.is_var,.is_local
 			}
 			), null);
 		case CONST:
 			advance(ctx);
 			return starting_at(parse_var_decl(scope.with_flags(
 			{
-				.is_const = true,.is_local = true
+				.is_const,.is_local
 			}
 			), null), t.range.start);
 		case STATIC:
 			advance(ctx);
 			return starting_at(parse_var_decl(scope.with_flags(
 			{
-				.is_static = true,.is_local = true
+				.is_static,.is_local
 			}
 			), null), t.range.start);
 		case TLOCAL:
 			advance(ctx);
 			return starting_at(parse_var_decl(scope.with_flags(
 			{
-				.is_tlocal = true,.is_local = true
+				.is_tlocal,.is_local
 			}
 			), null), t.range.start);
 		case ASSERT:
@@ -161,7 +161,7 @@ fn Node* parse_decl_or_expr_stmt(ContextScope scope)
 	{
 		Node* decl = parse_var_decl(scope.with_flags(
 		{
-			.is_local = true
+			.is_local
 		}
 		), expr);
 		return decl;
@@ -193,7 +193,7 @@ fn Node* parse_decl_stmt(ContextScope scope)
 		case CT_IDENT:
 			return parse_var_decl(scope.with_flags(
 			{
-				.is_local = true
+				.is_local
 			}
 			), type);
 		default:
@@ -221,7 +221,7 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 	List{Node*} temp_stmts;
 	temp_stmts.init(tmem, 8);
 
-	ContextScope stmt_scope = scope.with_flags({ .is_local = true });
+	ContextScope stmt_scope = scope.with_flags({ .is_local });
 	stmt_scope.flags.type_as_expression = false;
 	stmt_scope.flags.is_expr = false;
 	stmt_scope.flags.skip_eos = false;
@@ -623,13 +623,13 @@ fn Node* parse_ct_switch_stmt(ContextScope scope) => @pool()
 			case CT_CASE:
 				stmt = parse_case_stmt(scope.with_only_flags(
 				{
-					.is_comptime = true
+					.is_comptime
 				}
 				));
 			case CT_DEFAULT:
 				stmt = parse_default_stmt(scope.with_only_flags(
 				{
-					.is_comptime = true
+					.is_comptime
 				}
 				));
 			default:
@@ -881,7 +881,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	{
 		node.init.set(parse_expr_list(scope.with_only_flags(
 		{
-			.is_comptime = true
+			.is_comptime
 		}
 		)));
 	}
@@ -895,7 +895,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	{
 		node.cond = parse_expr(scope.with_only_flags(
 		{
-			.is_comptime = true
+			.is_comptime
 		}
 		));
 	}
@@ -909,7 +909,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	{
 		node.incr.set(parse_expr_list(scope.with_only_flags(
 		{
-			.is_comptime = true
+			.is_comptime
 		}
 		)));
 	}
@@ -943,6 +943,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 		}
 	}
 
+	comp_node.range.end = ctx.peek(-1).range.end;
 	if (!consume(ctx, CT_ENDFOR))
 	{
 		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endfor' to terminate loop");
@@ -1068,8 +1069,6 @@ fn Node* parse_foreach_var(ContextScope scope)
 
 	if (ctx.is(AMP))
 	{
-		start = ctx.current.range;
-		var_node.range = start;
 		var_node.var_flags.is_ref = true;
 		advance(ctx);
 	}
@@ -1393,6 +1392,7 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 		node.flags.has_error = true;
 	}
 
+	CompoundStmt* body = ctx.ast.alloc_node(CompoundStmt, ctx.current.range);
 	List{Node*} stmts;
 	stmts.tinit();
 	while (!ctx.eof() && !ctx.is(CT_ENDFOREACH))
@@ -1415,13 +1415,13 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 		}
 	}
 
+	body.range.end = ctx.peek(-1).range.end;
 	if (!consume(ctx, CT_ENDFOREACH))
 	{
 		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endforeach' to terminate loop");
 		node.flags.has_error = true;
 	}
 
-	CompoundStmt* body = ctx.ast.alloc_node(CompoundStmt, ctx.current.range);
 	body.statements = alloc::clone_slice(ctx.allocator, stmts.array_view());
 	node.body = (Node*)body;
 

@@ -59,8 +59,32 @@ fn LspProject* get_project_for_raw_uri(String raw_uri)
 struct LspResponse <Result>
 {
 	String jsonrpc;
-	int id;
+	Object* id;
 	Result result;
+}
+
+struct LspResponseError
+{
+	int code;
+	String message;
+}
+
+struct LspErrorResponse
+{
+	String jsonrpc;
+	Object* id;
+	LspResponseError error;
+}
+
+const int REQUEST_CANCELLED = -32800;
+
+<*
+ Answers `message` with the RequestCancelled error, which a request the client cancelled still needs.
+*>
+fn void respond_cancelled(LspMessage* message)
+{
+	LspErrorResponse resp = { .jsonrpc = message.rpc, .id = message.id, .error = { REQUEST_CANCELLED, "Request cancelled" } };
+	io_handler::write(translator::encode(resp, tmem));
 }
 
 <*
@@ -70,7 +94,7 @@ fn void respond(LspMessage* message, Result result) <Result>
 {
 	LspResponse{Result} resp = {
 		.jsonrpc = message.rpc,
-		.id = message.has_id ? message.id : -1,
+		.id = message.id ?: object::new_int(tmem, -1),
 		.result = result,
 	};
 	io_handler::write(translator::encode(resp, tmem));
@@ -162,6 +186,7 @@ fn void start(CliArgs args)
 		log::info("log_level = %s", log_level);
 
 		io_handler::init();
+		io_handler::stdin_reader.init(&io_handler::raw_stdin, &io_handler::stdin_buffer);
 
 		project_manager.init(mem);
 		defer project_manager.free();
@@ -181,26 +206,68 @@ fn void loop()
 {
 	while (running) @pool()
 	{
-		LspMessage? data = io_handler::read(tmem);
-		if (catch err = data)
+		// Everything the client already sent is read together, so stale edits and cancelled requests can be skipped.
+		List{LspMessage} batch;
+		batch.tinit();
+		do
 		{
-			if (err == io::EOF)
+			LspMessage? data = io_handler::read(tmem);
+			if (catch err = data)
 			{
-				log::info("Client disconnected (EOF). Terminating process.");
-				running = false;
-				break;
+				if (err == io::EOF)
+				{
+					log::info("Client disconnected (EOF). Terminating process.");
+					running = false;
+					break;
+				}
+				log::error("Stream read error encountered: %s", err);
+				continue;
 			}
-			log::error("Stream read error encountered: %s", err);
-			continue;
+			batch.push(data);
 		}
+		while (io_handler::has_pending());
 
-		dispatch(&data);
+		process_batch(batch.array_view());
 
-		if (is_ready)
+		if (is_ready && running && !io_handler::has_pending())
 		{
 			project_manager.update_all();
 		}
 	};
+}
+
+<*
+ Handles messages read together. A request the batch also cancels is answered
+ as cancelled; an edit only queues its analysis, which runs before any other
+ message is handled.
+*>
+fn void process_batch(LspMessage[] batch)
+{
+	foreach (&message : batch)
+	{
+		if (message.id && is_cancelled_in(batch, message.id))
+		{
+			respond_cancelled(message);
+			continue;
+		}
+		if (is_ready && message.method != DID_CHANGE) project_manager.update_all();
+		dispatch(message);
+	}
+}
+
+<*
+ Whether `batch` cancels the request with `id`.
+*>
+fn bool is_cancelled_in(LspMessage[] batch, Object* id)
+{
+	foreach (&message : batch)
+	{
+		if (message.method != CANCEL) continue;
+		Object* cancelled = message.params.cancel.id;
+		if (!cancelled || cancelled.type != id.type) continue;
+		if (id.is_int() ? cancelled.i == id.i : id.is_string() && cancelled.s == id.s) return true;
+	}
+	return false;
 }
 
 <*
@@ -211,7 +278,7 @@ fn void dispatch(LspMessage* message)
 	if (catch err = route(message))
 	{
 		log::error("%s failed: %s", message.method, err);
-		if (message.has_id) respond{Object*}(message, null);
+		if (message.id) respond{Object*}(message, null);
 	}
 }
 
@@ -302,11 +369,11 @@ fn void? on_initialize(LspMessage* message, InitializeParams* params)
 		.capabilities = {
 			.textDocumentSync = {
 				.openClose = true,
-				.change = FULL,
+				.change = INCREMENTAL,
 				.save = { .includeText = false },
 			},
 			.completionProvider = {
-				.triggerCharacters = { ".", ":", "@", " " },
+				.triggerCharacters = { ".", ":", "@", "$", " " },
 				.resolveProvider = true,
 				.completionItem = {.labelDetailSupport = true }
 			},
@@ -398,7 +465,8 @@ fn void? on_did_save(LspMessage* message, DidSaveParams* params)
 fn void? on_completion(LspMessage* message, CompletionParams* params)
 {
 	Document doc = open_document(params.text_document.uri)!;
-	CompletionItem[]? items = completion::resolve(doc.project, doc.uri, params.position);
+	CompletionItem[]? items = completion::resolve(doc.project, doc.uri, params.position, params.context);
+	if (try list = items) foreach (&item : list) item.compact();
 	respond{CompletionResult}(message, {
 		.isIncomplete = true,
 		.items = items ?? {},

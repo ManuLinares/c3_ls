@@ -762,6 +762,46 @@ fn void main()
 	fx.expect(e, "v", "val", { "a.c3" }, { { 1, 3, 4 } });
 }
 
+fn void designator_bitstruct_flags_and_array_index() @test
+{
+	Fx fx;
+	fx.init();
+	defer fx.free();
+	fx.add("a.c3", `module t;
+bitstruct Kind : char
+{
+	bool ctl;
+	bool sp;
+}
+struct Pair { Kind a; Kind b; }
+const Kind[4] TABLE = {
+	[0..1] = { .ctl },
+	[2]    = { .ctl, .sp },
+	[3]    = { .sp = true },
+};
+fn bool f()
+{
+	Kind k = { .sp };
+	Pair p = { .a = { .ctl }, .b.sp };
+	return k.sp && TABLE[0].ctl && p.a.ctl;
+}
+`);
+	// Bare flags, flags under `[i]` and `[a..b]` designators, nested list.
+	int[6] ctl_sites = { 0, 1, 2, 3, 4, 5 };
+	foreach (n : ctl_sites)
+	{
+		WorkspaceEdit e = fx.rename("a.c3", "ctl", n, "control")!!;
+		fx.expect(e, "ctl", "control", { "a.c3" }, { { 0, 1, 2, 3, 4, 5 } });
+	}
+	// Bare flag, `= value` under `[i]`, bare chained designator.
+	int[6] sp_sites = { 0, 1, 2, 3, 4, 5 };
+	foreach (n : sp_sites)
+	{
+		WorkspaceEdit e = fx.rename("a.c3", "sp", n, "space")!!;
+		fx.expect(e, "sp", "space", { "a.c3" }, { { 0, 1, 2, 3, 4, 5 } });
+	}
+}
+
 fn void parameter_rename_includes_contract() @test
 {
 	Fx fx;

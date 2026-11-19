@@ -48,7 +48,7 @@ fn Node* parse_fn_decl(ContextScope scope)
 
 	node.params = parse_parameter_list(scope.with_flags(
 	{
-		.is_function = true
+		.is_function
 	}
 	));
 
@@ -76,7 +76,7 @@ fn Node* parse_fn_decl(ContextScope scope)
 	{
 		case AT_IDENT:
 		case AT_TYPE_IDENT:
-			node.attributes = parse_attributes(scope, node, {.allow_type_ident = true });
+			node.attributes = parse_attributes(scope, node, { .allow_type_ident });
 		default:
 			break;
 	}
@@ -153,7 +153,7 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 			}
 			func.body = parse_compound_stmt(scope.with_flags(
 			{
-				.is_local = true
+				.is_local
 			}
 			));
 			if (func.body)
@@ -170,7 +170,7 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 			}
 			func.body = parse_short_body(scope.with_flags(
 			{
-				.is_local = true
+				.is_local
 			}
 			), true);
 			if (func.body)

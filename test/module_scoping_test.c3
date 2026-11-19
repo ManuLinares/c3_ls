@@ -1,6 +1,6 @@
 module lsp::module_scoping_test @test;
 
-import lsp, uri, std::io;
+import lsp, lsp::analysis::completion, uri, std::io;
 
 fn void test_multi_section_module_isolation()
 {
@@ -212,4 +212,37 @@ fn void run() {
 
 	String h = hover::hover(&proj, doc_uri, pos) ?? "";
 	test::eq(h.len, 0);
+}
+fn void prefix_resolves_to_the_module_declaring_the_symbol()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/core_env.c3", "module std::core::env;\nconst bool WIN32 = false;\n");
+	proj.workspace.process_file("/virtual/os_env.c3", "module std::os::env;\nfn String? tget_var(String name) => name;\n");
+	proj.workspace.process_file("/virtual/app.c3", "module app;\nimport std::os;\nfn void f()\n{\n\tString? v = env::tget_var(\"x\");\n}\n");
+	String h = hover::hover(&proj, uri::from_file_path(tmem, "/virtual/app.c3"), { 4, 19 })!!;
+	assert(h.contains("tget_var"), "hover: %s", h);
+}
+
+fn void prefix_completion_lists_every_module_it_can_name()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/core_env.c3", "module std::core::env;\nconst bool WIN32 = false;\n");
+	proj.workspace.process_file("/virtual/os_env.c3", "module std::os::env;\nfn String? tget_var(String name) => name;\n");
+	proj.workspace.process_file("/virtual/other_env.c3", "module unrelated::env;\nfn void hidden() {}\n");
+	proj.workspace.process_file("/virtual/app.c3", "module app;\nimport std::os;\nfn void f()\n{\n\tenv::\n}\n");
+	bool core_member;
+	bool os_member;
+	bool hidden;
+	foreach (item : completion::resolve(&proj, uri::from_file_path(tmem, "/virtual/app.c3"), { 4, 6 })!!)
+	{
+		if (item.label == "WIN32") core_member = true;
+		if (item.label == "tget_var") os_member = true;
+		if (item.label == "hidden") hidden = true;
+	}
+	assert(core_member && os_member, "core %s, os %s", core_member, os_member);
+	assert(!hidden, "a module that is not imported");
 }

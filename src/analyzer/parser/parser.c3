@@ -353,6 +353,7 @@ fn bool parse(ParseContext* ctx, SourceFile* source_file) => @pool()
 	foreach (i, stmt : ctx.ast.statements)
 	{
 		if (stmt.kind == MODULE_DECL) ctx.ast.module_decls.push(i);
+		if (stmt.kind == IMPORT_DECL) ctx.ast.import_decls.push(i);
 	}
 
 	return ctx.error_count == 0;
@@ -511,7 +512,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 		case CONSTDEF:
 			node = parse_enum_constdef_decl(scope.with_flags(
 			{
-				.is_constdef = true
+				.is_constdef
 			}
 			));
 		case ENUM:
@@ -520,7 +521,7 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 			advance(ctx);
 			node = parse_var_decl(scope.with_flags(
 			{
-				.is_const = true
+				.is_const
 			}
 			), null);
 		case CT_EXPAND:

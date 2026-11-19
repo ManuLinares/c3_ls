@@ -53,18 +53,6 @@ fn VariableInfo* get_variable(Scope* scope, String name)
 	}
 }
 
-fn FunctionInfo* add_function(Scope* scope, Allocator alloc, String name, String mod, Node* node)
-{
-	FunctionInfo* function = alloc::new(alloc, FunctionInfo);
-
-	function.mod  = mod;
-	function.node = node;
-
-	scope.functions.set(name, function);
-
-	return function;
-}
-
 fn bool has_function(Scope* scope, String name)
 {
 	switch (true)

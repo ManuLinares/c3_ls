@@ -237,12 +237,12 @@ fn void main() {
 	LspPosition int_sz_pos = {.line = 3,.character = 18 };
 	String h1 = hover::hover(&proj, doc_uri, int_sz_pos)!!;
 	assert(h1.contains("4 (bytes)"));
-	// 2. Hover on `double::alignment` (line 4, col 20)
-	LspPosition dbl_align_pos = {.line = 4,.character = 20 };
+	// 2. Hover on `double::alignment` (line 4, col 26)
+	LspPosition dbl_align_pos = {.line = 4,.character = 26 };
 	String h2 = hover::hover(&proj, doc_uri, dbl_align_pos)!!;
 	assert(h2.contains("8 (bytes)"));
-	// 3. Hover on `Status::len` (line 5, col 23)
-	LspPosition status_len_pos = {.line = 5,.character = 23 };
+	// 3. Hover on `Status::len` (line 5, col 27)
+	LspPosition status_len_pos = {.line = 5,.character = 27 };
 	String h3 = hover::hover(&proj, doc_uri, status_len_pos)!!;
 	assert(h3.contains("3 (variants)"));
 }

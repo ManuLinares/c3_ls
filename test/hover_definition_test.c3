@@ -878,3 +878,253 @@ fn void main()
 	assert(h.contains("sz len"));
 	assert(h.contains("Number of elements"));
 }
+fn void test_hover_and_definition_on_chained_declaration()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/chained.c3", "module t;\nfn int f()\n{\n\tint a, b;\n\tb = 1;\n\treturn b;\n}\n");
+	Uri u = uri::from_file_path(tmem, "/virtual/chained.c3");
+
+	// `int a, |b;` and `|b = 1;`.
+	LspPosition[2] positions = { { 3, 8 }, { 4, 1 } };
+	foreach (i, pos : positions)
+	{
+		String h = hover::hover(&proj, u, pos)!!;
+		assert(h.contains("int b"), "hover %d: %s", i, h);
+		LspLocation[] locs = definition::goto_definition(&proj, u, pos)!!;
+		assert(locs.len == 1 && locs[0].range.start.line == 3 && locs[0].range.start.character == 8, "definition %d: %s", i, locs);
+	}
+}
+
+fn void test_hover_on_first_argument_of_builtin()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/builtin_arg.c3", "module t;\nfn int g(int value) => $$popcount(value);\n");
+	Uri u = uri::from_file_path(tmem, "/virtual/builtin_arg.c3");
+	// `$$popcount(|value)`
+	String h = hover::hover(&proj, u, { 1, 34 })!!;
+	assert(h.contains("int value"), "hover: %s", h);
+}
+
+fn void test_hover_on_ct_loop_variables_in_body()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module t;\nstruct Pt { int x; int y; }\nfn int f(Pt pt)\n{\n\tint s;\n\t$for var $i = 0; $i < 2; $i++:\n\t\ts += $i;\n\t$endfor\n\t$foreach $m : Pt::members:\n\t\ts += pt.$eval($m.name);\n\t$endforeach\n\treturn s;\n}\n";
+	proj.workspace.process_file("/virtual/ct_loop.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/ct_loop.c3");
+	// `s += $|i;` and `$eval($|m.name)`, declared on lines 5 and 8.
+	LspPosition[2] positions = { { 6, 8 }, { 9, 17 } };
+	uint[2] decl_lines = { 5, 8 };
+	foreach (i, pos : positions)
+	{
+		LspLocation[] locs = definition::goto_definition(&proj, u, pos)!!;
+		assert(locs.len == 1 && locs[0].range.start.line == decl_lines[i], "definition %d: %s", i, locs);
+		assert(hover::hover(&proj, u, pos)!!.len > 0, "hover %d", i);
+	}
+}
+
+fn void test_hover_on_type_of_foreach_reference_variable()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/foreach_ref.c3", "module t;\nstruct Entry { int v; }\nfn void f(Entry*[] table)\n{\n\tforeach (Entry** &e : table) (*e).v = 1;\n}\n");
+	Uri u = uri::from_file_path(tmem, "/virtual/foreach_ref.c3");
+	// `foreach (E|ntry** &e`
+	String h = hover::hover(&proj, u, { 4, 11 })!!;
+	assert(h.contains("struct Entry"), "hover: %s", h);
+	h = hover::hover(&proj, u, { 4, 19 })!!;
+	assert(h.contains("Entry** e"), "hover: %s", h);
+}
+
+fn void test_hover_shows_fault_doc_comment()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module t;\nfaultdef\n\t<* The pattern ends with a backslash. *>\n\tTRAILING_BACKSLASH,\n\n\t<* Unbalanced parentheses. *>\n\tUNBALANCED;\nfn void? f(int x)\n{\n\tif (x) return TRAILING_BACKSLASH~;\n\treturn UNBALANCED~;\n}\n";
+	proj.workspace.process_file("/virtual/fault_doc.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/fault_doc.c3");
+	// The declaration and its uses.
+	LspPosition[3] positions = { { 3, 3 }, { 9, 17 }, { 10, 10 } };
+	String[3] docs = { "ends with a backslash", "ends with a backslash", "Unbalanced parentheses" };
+	foreach (i, pos : positions)
+	{
+		String h = hover::hover(&proj, u, pos)!!;
+		assert(h.contains(docs[i]), "hover %d: %s", i, h);
+	}
+}
+
+fn void test_hover_and_completion_on_compiler_builtins()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module t;\nfn int f(int* p)\n{\n\tint x = $$volatile_load(p);\n\treturn x + $$LINE;\n}\n";
+	proj.workspace.process_file("/virtual/builtins.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/builtins.c3");
+
+	// `$$vol|atile_load` and `$$LI|NE`, documented in the language docs.
+	String h = hover::hover(&proj, u, { 3, 14 })!!;
+	assert(h.contains("$$volatile_load") && h.contains("volatile load"), "hover: %s", h);
+	h = hover::hover(&proj, u, { 4, 15 })!!;
+	assert(h.contains("$$LINE") && h.contains("current source line"), "hover: %s", h);
+
+	// `$$vol|`: builtin names, not other symbols.
+	bool found;
+	foreach (item : completion::resolve(&proj, u, { 3, 14 })!!)
+	{
+		assert(item.label.starts_with("$$"), "%s", item.label);
+		if (item.label == "$$volatile_load") found = true;
+	}
+	assert(found);
+}
+
+fn void test_hover_on_doc_contract_tags()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module t;\nfaultdef TOO_BIG;\n<*\n Scales.\n @param [&in] p : \"The value\"\n @require *p < 100 : \"Small values only\"\n @ensure return >= 0\n @return \"The scaled value\"\n @return? TOO_BIG\n @pure\n @deprecated \"Use other\"\n*>\nfn int? scale(int* p) => *p * 2;\n";
+	proj.workspace.process_file("/virtual/tags.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/tags.c3");
+
+	// The cursor on each tag; `@return?` is not `@return`.
+	uint[7] lines = { 4, 5, 6, 7, 8, 9, 10 };
+	String[7] wanted = { "@param", "@require", "@ensure", "@return <", "@return?", "@pure", "@deprecated" };
+	foreach (i, line : lines)
+	{
+		String h = hover::hover(&proj, u, { line, 3 })!!;
+		assert(h.contains(wanted[i]), "%s: %s", wanted[i], h);
+	}
+	// Outside a doc comment `@pure` is an attribute, not a tag.
+	assert(!(hover::hover(&proj, u, { 12, 3 }) ?? "").contains("@pure"));
+}
+
+fn void test_hover_and_completion_on_target_constants()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module t;\ntypedef JmpBuf = uptr[$$JMP_BUF_SIZE];\nfn int f() => $$C_INT_SIZE;\n";
+	proj.workspace.process_file("/virtual/target_consts.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/target_consts.c3");
+
+	// `uptr[$$JMP|_BUF_SIZE]` in a type and `$$C_IN|T_SIZE` in an expression.
+	String h = hover::hover(&proj, u, { 1, 26 })!!;
+	assert(h.contains("$$JMP_BUF_SIZE") && h.contains("jmp_buf"), "hover: %s", h);
+	h = hover::hover(&proj, u, { 2, 20 })!!;
+	assert(h.contains("$$C_INT_SIZE") && h.contains("C `int`"), "hover: %s", h);
+
+	bool found;
+	foreach (item : completion::resolve(&proj, u, { 1, 26 })!!)
+	{
+		if (item.label == "$$JMP_BUF_SIZE") found = true;
+	}
+	assert(found);
+}
+
+fn void test_hover_shows_builtin_signature()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/builtin_sig.c3", "module t;\nfn int f(int[<4>] v) => $$reduce_max(v);\n");
+	// `$$reduce|_max`
+	String h = hover::hover(&proj, uri::from_file_path(tmem, "/virtual/builtin_sig.c3"), { 1, 32 })!!;
+	assert(h.starts_with("```c3\n$$reduce_max(vec)\n```"), "hover: %s", h);
+}
+
+fn void test_hover_on_access_left_side_describes_the_left_side()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/access_left.c3", "module t;\nfn void main()\n{\n\tsz a = double::alignment;\n}\n");
+	// `dou|ble::alignment`
+	String h = hover::hover(&proj, uri::from_file_path(tmem, "/virtual/access_left.c3"), { 3, 10 })!!;
+	assert(h.starts_with("```c3\ndouble\n```"), "hover: %s", h);
+}
+
+fn void test_designators_in_enum_associated_values()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String src = "module app;\nbitstruct Flags : uint\n{\n\tbool is_a;\n}\nstruct Pair { int x; }\nenum Kind : int (String name, Flags flags, Pair p)\n{\n\tONE { \"one\", { .is_a = true }, { .x = 1 } },\n}\n";
+	proj.workspace.process_file("/virtual/enum_desig.c3", src);
+	Uri u = uri::from_file_path(tmem, "/virtual/enum_desig.c3");
+	// `{ .is|_a = true }`
+	String h = hover::hover(&proj, u, { 8, 18 })!!;
+	assert(h.starts_with("```c3\nbool is_a\n```"), "hover: %s", h);
+	LspLocation[] locs = definition::goto_definition(&proj, u, { 8, 18 })!!;
+	assert(locs.len == 1 && locs[0].range.start.line == 3, "definition");
+	// `{ .|x = 1 }`
+	h = hover::hover(&proj, u, { 8, 35 })!!;
+	assert(h.starts_with("```c3\nint x\n```"), "hover: %s", h);
+}
+
+macro void check_designator(LspProject* proj, Uri u, uint line, uint character, String expected)
+{
+	String h = hover::hover(proj, u, { line, character })!!;
+	assert(h.starts_with(string::tformat("```c3\n%s\n```", expected)), "%d:%d hover: %s", line, character, h);
+	assert(definition::goto_definition(proj, u, { line, character })!!.len == 1, "%d:%d no definition", line, character);
+}
+
+fn void test_deeply_nested_designators_in_enum_associated_values()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/deep_desig.c3", "module app;\nbitstruct Flags : uint\n{\n\tbool on;\n}\nstruct Leaf { Flags flags; int[2] nums; }\nstruct Mid { Leaf leaf; Leaf[2] leaves; }\nstruct Top { Mid mid; }\nenum Kind : int (String name, Top top, Mid[2] mids)\n{\n\tONE { \"one\", { .mid = { .leaf = { .flags = { .on = true } } } }, { [1] = { .leaf.flags = { .on = true } } } },\n\tTWO { \"two\", { .mid = { .leaves = { [0] = { .flags.on = true } } } }, { [0] = { .leaf = { .nums = { [1] = 3 } } }, [1] = { .leaves = { { .flags = { .on = true } }, {} } } } },\n}\n");
+	Uri u = uri::from_file_path(tmem, "/virtual/deep_desig.c3");
+	check_designator(&proj, u, 10, 18, "Mid mid");
+	check_designator(&proj, u, 10, 27, "Leaf leaf");
+	check_designator(&proj, u, 10, 37, "Flags flags");
+	check_designator(&proj, u, 10, 48, "bool on");
+	check_designator(&proj, u, 10, 78, "Leaf leaf");
+	check_designator(&proj, u, 10, 83, "Flags flags");
+	check_designator(&proj, u, 10, 94, "bool on");
+	check_designator(&proj, u, 11, 18, "Mid mid");
+	check_designator(&proj, u, 11, 27, "Leaf[2] leaves");
+	check_designator(&proj, u, 11, 47, "Flags flags");
+	check_designator(&proj, u, 11, 53, "bool on");
+	check_designator(&proj, u, 11, 83, "Leaf leaf");
+	check_designator(&proj, u, 11, 93, "int[2] nums");
+	check_designator(&proj, u, 11, 126, "Leaf[2] leaves");
+	check_designator(&proj, u, 11, 140, "Flags flags");
+	check_designator(&proj, u, 11, 151, "bool on");
+}
+
+fn void test_members_of_var_locals()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/var_local.c3", "module app;\nstruct Entry { int node; }\nmacro void main()\n{\n\tEntry e;\n\tvar g = e;\n\tint m = g.node;\n}\n");
+	// `g.no|de`
+	String h = hover::hover(&proj, uri::from_file_path(tmem, "/virtual/var_local.c3"), { 6, 11 })!!;
+	assert(h.starts_with("```c3\nint node\n```"), "hover: %s", h);
+}
+
+fn void test_hover_on_vector_swizzles()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/swizzle.c3", "module app;\nalias Point = int[<2>];\nfn void f(Point p, float[<4>] c)\n{\n\tint a = p.x;\n\tint[<2>] b = p.yx;\n\tfloat d = c.a;\n\tfloat[<3>] e = c.rgb;\n}\n");
+	Uri u = uri::from_file_path(tmem, "/virtual/swizzle.c3");
+	String h = hover::hover(&proj, u, { 4, 11 })!!;
+	assert(h.starts_with("```c3\nint x\n```"), "x: %s", h);
+	h = hover::hover(&proj, u, { 5, 17 })!!;
+	assert(h.starts_with("```c3\nint[<2>] yx\n```"), "yx: %s", h);
+	h = hover::hover(&proj, u, { 6, 13 })!!;
+	assert(h.starts_with("```c3\nfloat a\n```"), "a: %s", h);
+	h = hover::hover(&proj, u, { 7, 19 })!!;
+	assert(h.starts_with("```c3\nfloat[<3>] rgb\n```"), "rgb: %s", h);
+}

@@ -7,21 +7,6 @@ import analyzer::lexer;
 
 import std::io;
 import std::collections::list;
-<*
- @require t.kind == IDENT
-*>
-fn Ident* parse_identifier(ContextScope scope, Token t)
-{
-	ParseContext* ctx = scope.ctx;
-	String name = t.value;
-	if (!constants::is_valid_name(name))
-	{
-		diagnostics::error(ctx.context, t.range, "Reserved identifier");
-		return null;
-	}
-
-	return ctx.ident(ctx.current);
-}
 
 <*
  parameter_list ::= (param_decl (',' param_decl)*)?
@@ -107,7 +92,7 @@ fn void parse_macro_params(ContextScope scope, Node* macro_node)
 	ParseContext* ctx = scope.ctx;
 	NodeArray params = parse_parameter_list(scope.with_flags(
 	{
-		.is_macro = true
+		.is_macro
 	}
 	));
 	MacroDecl* mac   = macro_node.as(MacroDecl);
@@ -269,7 +254,7 @@ fn NodeArray parse_arg_list(ContextScope scope) => @pool()
 		{
 			expr = parse_expr(scope.with_only_flags(
 			{
-				.type_as_expression = true
+				.type_as_expression
 			}
 			));
 

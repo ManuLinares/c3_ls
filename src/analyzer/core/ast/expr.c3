@@ -21,7 +21,6 @@ struct PathExpr
 {
 	inline Node node;
 	Ident* path;
-	bool is_prefix;
 	NodeArray attributes;
 }
 
@@ -92,6 +91,7 @@ struct CallExpr
 struct ContractExpr
 {
 	inline Node node;
+	Node* pinpoint;
 	Node* exprs;
 	Ident**comment;
 	Node* expr_string;
@@ -180,7 +180,6 @@ struct TernaryExpr
 	Node* cond;
 	Node* then_expr;
 	Node* else_expr;
-	bool is_grouped;
 	bool is_const;
 }
 
@@ -194,7 +193,6 @@ struct MacroBodyExpr
 struct BuiltinExpr
 {
 	inline Node node;
-	BuiltinFunction builtin;
 	Ident* name;
 }
 
@@ -244,9 +242,13 @@ struct LambdaExpr
 	Node* body;
 }
 
+<*
+ `left{exprs}`: a generic function or macro named with its arguments.
+*>
 struct GenericIdentExpr
 {
 	inline Node node;
+	Node* left;
 	NodeArray exprs;
 }
 
@@ -364,11 +366,13 @@ struct CtStringifyExpr
 	Node* inner_expr;
 }
 
+<*
+ `$vaarg[expr]`, or `$vaarg.len` when `expr` is null.
+*>
 struct VaargExpr
 {
 	inline Node node;
 	Node* expr;
-	VaargKind vaarg_kind;
 	bool start_from_end;
 }
 

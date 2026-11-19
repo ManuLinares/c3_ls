@@ -47,8 +47,8 @@ fn void test_decode_hover()
 	defer res.message.free();
 
 	assert(res.message.method == HOVER);
-	assert(res.message.has_id);
-	assert(res.message.id == 10);
+	assert(res.message.id);
+	assert(res.message.id.i == 10);
 	assert(res.message.params.hover.document.uri == "file:///test.c3");
 	assert(res.message.params.hover.position.line == 5);
 	assert(res.message.params.hover.position.character == 12);
@@ -61,8 +61,8 @@ fn void test_decode_definition()
 	defer res.message.free();
 
 	assert(res.message.method == DEFINITION);
-	assert(res.message.has_id);
-	assert(res.message.id == 11);
+	assert(res.message.id);
+	assert(res.message.id.i == 11);
 	assert(res.message.params.definition.document.uri == "file:///test.c3");
 	assert(res.message.params.definition.position.line == 2);
 	assert(res.message.params.definition.position.character == 4);
@@ -75,8 +75,8 @@ fn void test_decode_completion()
 	defer res.message.free();
 
 	assert(res.message.method == COMPLETION);
-	assert(res.message.has_id);
-	assert(res.message.id == 12);
+	assert(res.message.id);
+	assert(res.message.id.i == 12);
 	assert(res.message.params.completion.text_document.uri == "file:///test.c3");
 	assert(res.message.params.completion.position.line == 7);
 	assert(res.message.params.completion.position.character == 1);
@@ -89,8 +89,8 @@ fn void test_decode_signature_help()
 	defer res.message.free();
 
 	assert(res.message.method == HELP);
-	assert(res.message.has_id);
-	assert(res.message.id == 13);
+	assert(res.message.id);
+	assert(res.message.id.i == 13);
 	assert(res.message.params.signature_help.text_document.uri == "file:///test.c3");
 	assert(res.message.params.signature_help.position.line == 8);
 	assert(res.message.params.signature_help.position.character == 15);
@@ -103,8 +103,8 @@ fn void test_decode_references()
 	defer res.message.free();
 
 	assert(res.message.method == REFERENCES);
-	assert(res.message.has_id);
-	assert(res.message.id == 14);
+	assert(res.message.id);
+	assert(res.message.id.i == 14);
 	assert(res.message.params.references.text_document.uri == "file:///test.c3");
 	assert(res.message.params.references.context.includeDeclaration == true);
 }
@@ -116,8 +116,8 @@ fn void test_decode_rename()
 	defer res.message.free();
 
 	assert(res.message.method == RENAME);
-	assert(res.message.has_id);
-	assert(res.message.id == 15);
+	assert(res.message.id);
+	assert(res.message.id.i == 15);
 	assert(res.message.params.rename.text_document.uri == "file:///test.c3");
 	assert(res.message.params.rename.newName == "renamed_var");
 }
@@ -129,8 +129,8 @@ fn void test_decode_semantic_tokens()
 	defer res.message.free();
 
 	assert(res.message.method == FULL);
-	assert(res.message.has_id);
-	assert(res.message.id == 16);
+	assert(res.message.id);
+	assert(res.message.id.i == 16);
 	assert(res.message.params.semantic_tokens.text_document.uri == "file:///test.c3");
 }
 
