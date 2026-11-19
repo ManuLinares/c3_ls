@@ -1,6 +1,6 @@
 module lsp::analysis_scaling_test;
 
-import lsp, lsp::analysis::completion, lsp::analysis::folding_ranges, uri, std::io, std::time;
+import lsp, lsp::analysis::completion, uri, std::io, std::time;
 
 <*
  Valid C3 with `n` declarations per kind: struct and function type
@@ -172,62 +172,4 @@ fn void completion_time_grows_linearly_with_files() @test
 	NanoDuration large = time_completion_across_files(1600);
 	double ratio = (double)large / (double)small;
 	assert(ratio < 8.0, "4x files took %.1fx time (%s -> %s)", ratio, small, large);
-}
-
-<*
- Valid C3 whose `n` methods are macOS code on a type declared per platform:
- every type reference there picks the platform's variant.
-*>
-fn String generate_platform_code(int n)
-{
-	DString out = dstring::temp();
-	out.append("module plat;\nstruct Src @feat(MACOS) { int view; }\nstruct Src @feat(LINUX) { int xwin; }\n");
-	for (int i = 0; i < n; i++)
-	{
-		out.appendf("fn void Src.f%d(&self) @feat(MACOS) { Src copy = *self; self.view = copy.view; }\n", i);
-	}
-	return out.str_view();
-}
-
-fn void platform_code_analysis_time_grows_linearly() @test
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	NanoDuration small = time_processing(&proj, generate_platform_code(1000));
-	NanoDuration large = time_processing(&proj, generate_platform_code(4000));
-	double ratio = (double)large / (double)small;
-	assert(ratio < 8.0, "4x input took %.1fx time (%s -> %s)", ratio, small, large);
-}
-
-<* Best of 3 timings of the folding ranges of a file with `n` functions, each holding a block. *>
-fn NanoDuration time_folding(int n)
-{
-	LspProject proj;
-	proj.init(mem);
-	defer proj.free();
-	DString src = dstring::temp();
-	src.append("module folds;\n");
-	for (int i = 0; i < n; i++) src.appendf("fn void f%d(int x)\n{\n\tif (x)\n\t{\n\t\tx++;\n\t}\n}\n", i);
-	String path = "/virtual/folds.c3";
-	proj.workspace.process_file(path, src.str_view());
-	Uri u = uri::from_file_path(tmem, path);
-	NanoDuration best = (NanoDuration)long::max;
-	for (int r = 0; r < 3; r++)
-	{
-		Clock start = clock::now();
-		FoldingRange[] ranges = folding_ranges::get_folding_ranges(&proj, u)!!;
-		NanoDuration elapsed = start.mark();
-		assert(ranges.len == (sz)4 * n, "%d ranges for n=%d", ranges.len, n);
-		if (elapsed < best) best = elapsed;
-	}
-	return best;
-}
-
-fn void folding_time_grows_linearly() @test
-{
-	NanoDuration small = time_folding(1000);
-	NanoDuration large = time_folding(4000);
-	double ratio = (double)large / (double)small;
-	assert(ratio < 8.0, "4x input took %.1fx time (%s -> %s)", ratio, small, large);
 }

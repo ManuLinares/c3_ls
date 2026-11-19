@@ -226,21 +226,6 @@ fn void get_module_section_stmt_range(SourceFile* sf, Location loc, sz* out_star
 }
 
 <*
- Indices in `sf.ast.statements` of the imports in the module section at
- `loc`, found by binary search in the file's sorted import index.
-*>
-fn sz[] section_imports(SourceFile* sf, Location loc) @local
-{
-	sz start_idx;
-	sz end_idx;
-	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
-	sz[] all = sf.ast.import_decls.array_view();
-	sz from = sort::binarysearch(all, start_idx);
-	sz to = sort::binarysearch(all, end_idx);
-	return all[from:to - from];
-}
-
-<*
  Whether importing `imp_path` makes `target_mod` visible: the module itself and,
  unless the import is `@norecurse`, its sub-modules and parent modules.
 *>
@@ -262,8 +247,13 @@ fn bool module_is_within(String mod, String ancestor) @local
 *>
 fn bool section_imports_reach(SourceFile* sf, Location loc, String target_mod, bool require_public) @local
 {
-	foreach (i : section_imports(sf, loc))
+	sz start_idx = 0;
+	sz end_idx = 0;
+	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+
+	foreach (i : sf.ast.import_decls)
 	{
+		if (i < start_idx || i >= end_idx) continue;
 		ImportDecl* imp = sf.ast.statements[i].as(ImportDecl);
 		bool stmt_is_public = cursor::has_attribute((Node*)imp, PUBLIC, null);
 		bool stmt_is_recursive = !cursor::has_attribute((Node*)imp, NORECURSE, null);
@@ -314,8 +304,13 @@ fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 	list.push("std::core::string");
 	list.push("std::core::types");
 
-	foreach (i : section_imports(sf, loc))
+	sz start_idx = 0;
+	sz end_idx = 0;
+	get_module_section_stmt_range(sf, loc, &start_idx, &end_idx);
+
+	foreach (i : sf.ast.import_decls)
 	{
+		if (i < start_idx || i >= end_idx) continue;
 		ImportDecl* imp = sf.ast.statements[i].as(ImportDecl);
 		foreach (p : imp.paths)
 		{
@@ -1654,14 +1649,6 @@ fn List{Node*} ancestors_of(SourceFile* sf, Node* target)
 {
 	AncestorSearch s = {.target = target };
 	s.stack.tinit();
-	// The declaration holding `target` is found by binary search; scanning every statement is the fallback.
-	Node* top = target ? enclosing_top_level(sf, target.range.start) : null;
-	if (top && top.kind != ERROR)
-	{
-		cursor::visit(top, null, {.on_enter = &ancestor_enter,.on_exit = &ancestor_exit }, &s);
-		if (s.found) return s.stack;
-		s.stack.clear();
-	}
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR) continue;
@@ -2123,10 +2110,7 @@ fn Node* resolve_designator_field(AnalyzerContext* context, SourceFile* sf, Node
 fn Node* node_at(SourceFile* sf, Location loc)
 {
 	if (!sf) return null;
-	// The declaration holding `loc` is found by binary search; scanning every statement is the fallback.
-	Node* node;
-	if (Node* top = enclosing_top_level(sf, loc)) node = cursor::find_at((Node*[1]){ top }[..], {.start = loc,.end = loc });
-	if (!node) node = cursor::find_at(sf.ast.statements.array_view(), {.start = loc,.end = loc });
+	Node* node = cursor::find_at(sf.ast.statements.array_view(), {.start = loc,.end = loc });
 	if (!node || node.kind != PATH_EXPR || node.range.contains(loc)) return node;
 	List{Node*} stack = ancestors_of(sf, node);
 	sz n = stack.len();

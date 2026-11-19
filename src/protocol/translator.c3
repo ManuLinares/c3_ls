@@ -40,12 +40,13 @@ fn void LspMessage.free(&self)
 macro String encode(expr, Allocator allocator, int indent = 0)
 {
 	String expr_json = json::marshal(allocator, expr, NONE);
-	// Appended, not formatted with `%s`: the formatter copies a string one character at a time.
-	DString out;
-	out.init(allocator, expr_json.len + 32);
-	out.appendf("Content-Length: %d\r\n\r\n", expr_json.len);
-	out.append(expr_json);
-	return out.str_view();
+	usz expr_size = expr_json.len;
+
+	return string::format(allocator,
+	"Content-Length: %d\r\n\r\n%s",
+	expr_size,
+	expr_json
+	);
 }
 
 struct IoDecodeResult

@@ -209,13 +209,7 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 		}
 		sz start = utils::compute_byte_offset(text, change.range.start.line, change.range.start.character);
 		sz end = max(start, utils::compute_byte_offset(text, change.range.end.line, change.range.end.character));
-		// Appended, not formatted with `%s`: the formatter copies a string one character at a time.
-		DString edited;
-		edited.tinit(text.len - (end - start) + change.text.len);
-		edited.append(text[:start]);
-		edited.append(change.text);
-		edited.append(text[end..]);
-		text = edited.str_view();
+		text = string::tformat("%s%s%s", text[:start], change.text, text[end..]);
 	}
 	file.set_text(self.allocator, text);
 	FileInput input = {

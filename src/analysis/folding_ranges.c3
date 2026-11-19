@@ -3,32 +3,42 @@ module lsp::analysis::folding_ranges;
 import analyzer::core;
 import analyzer::cursor;
 
-import std::collections::list, std::collections::set;
+import std::collections::list;
 import std::io;
 
 import lsp::core;
 import lsp;
 import uri;
 
-<*
- Folding ranges collected so far, each start and end line pair once.
-*>
-struct Folds
+struct FoldingCollector
 {
-	List{FoldingRange} ranges;
-	HashSet{ulong} seen;
+	List{FoldingRange} * ranges;
 }
 
-fn void Folds.add(&self, uint start_line, uint end_line, String kind)
+fn void add_folding_range(List{FoldingRange} * ranges, uint start_line, uint end_line, String kind = "")
 {
-	if (end_line <= start_line || !self.seen.add((ulong)start_line << 32 | end_line)) return;
-	self.ranges.push({ .startLine = start_line, .endLine = end_line, .kind = kind });
+	if (end_line <= start_line) return;
+
+	foreach (r : *ranges)
+	{
+		if (r.startLine == start_line && r.endLine == end_line) return;
+	}
+
+	ranges.push(
+	{
+		.startLine = start_line,
+		.startCharacter = 0,
+		.endLine = end_line,
+		.endCharacter = 0,
+		.kind = kind
+	}
+	);
 }
 
 fn ChildVisitResult collect_folding_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
-	Folds* folds = user_data;
+	FoldingCollector* ctx = (FoldingCollector*)user_data;
 
 	if (c.range.start.line < c.range.end.line)
 	{
@@ -47,7 +57,7 @@ fn ChildVisitResult collect_folding_callback(Node* c, Node* p, void* user_data)
 			case DO_WHILE_STMT:
 			case FOREACH_STMT:
 			case IF_STMT:
-				folds.add((uint)c.range.start.line, (uint)c.range.end.line, "region");
+				add_folding_range(ctx.ranges, (uint)c.range.start.line, (uint)c.range.end.line, "region");
 			default:
 				break;
 		}
@@ -56,7 +66,7 @@ fn ChildVisitResult collect_folding_callback(Node* c, Node* p, void* user_data)
 	return RECURSE;
 }
 
-fn void collect_comment_folds(String content, Folds* folds)
+fn void collect_comment_folds(String content, List{FoldingRange} * ranges)
 {
 	sz i = 0;
 	uint line = 0;
@@ -85,7 +95,7 @@ fn void collect_comment_folds(String content, Folds* folds)
 			uint end_line = line;
 			if (end_line > start_line)
 			{
-				folds.add(start_line, end_line, "comment");
+				add_folding_range(ranges, start_line, end_line, "comment");
 			}
 			continue;
 		}
@@ -106,7 +116,7 @@ fn void collect_comment_folds(String content, Folds* folds)
 			uint end_line = line;
 			if (end_line > start_line)
 			{
-				folds.add(start_line, end_line, "comment");
+				add_folding_range(ranges, start_line, end_line, "comment");
 			}
 			continue;
 		}
@@ -120,9 +130,8 @@ fn FoldingRange[]? get_folding_ranges(LspProject* project, Uri uri)
 	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
 	if (!sf) return {};
 
-	Folds folds;
-	folds.ranges.tinit();
-	folds.seen.tinit();
+	List{FoldingRange} ranges;
+	ranges.tinit();
 
 	int import_start = -1;
 	int import_end = -1;
@@ -141,7 +150,7 @@ fn FoldingRange[]? get_folding_ranges(LspProject* project, Uri uri)
 		{
 			if (import_start != -1 && import_end > import_start)
 			{
-				folds.add((uint)import_start, (uint)import_end, "imports");
+				add_folding_range(&ranges, (uint)import_start, (uint)import_end, "imports");
 			}
 			import_start = -1;
 			import_end = -1;
@@ -149,16 +158,17 @@ fn FoldingRange[]? get_folding_ranges(LspProject* project, Uri uri)
 	}
 	if (import_start != -1 && import_end > import_start)
 	{
-		folds.add((uint)import_start, (uint)import_end, "imports");
+		add_folding_range(&ranges, (uint)import_start, (uint)import_end, "imports");
 	}
 
+	FoldingCollector collector = {.ranges = &ranges };
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind == ERROR) continue;
-		cursor::visit(stmt, null, {.on_enter = &collect_folding_callback }, &folds);
+		cursor::visit(stmt, null, {.on_enter = &collect_folding_callback }, &collector);
 	}
 
-	collect_comment_folds(sf.content, &folds);
+	collect_comment_folds(sf.content, &ranges);
 
-	return folds.ranges.array_view();
+	return ranges.array_view();
 }
