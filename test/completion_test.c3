@@ -2,6 +2,7 @@ module lsp::completion_test @test;
 
 import lsp::core;
 import lsp::analysis::completion;
+import analyzer::sema::query;
 import lsp;
 import uri;
 import std::io;
@@ -467,6 +468,7 @@ fn void test() {
 	{
 		if (item.label == "xyz") found_swizzle = true;
 		if (item.label == "custom_norm") found_custom_norm = true;
+		if (item.detail == "swizzle") assert(query::is_swizzle(item.label), "c3c rejects .%s", item.label);
 	}
 	assert(found_swizzle);
 	assert(found_custom_norm);

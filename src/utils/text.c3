@@ -34,42 +34,34 @@ fn sz offset_from_line_table(sz[] line_offsets, String content, uint target_line
 }
 
 <*
- Converts line and character coordinates into a zero-indexed byte offset in a content buffer.
+ Byte offset in `content` of the LSP position `target_line`:`target_char`,
+ whose character counts UTF-16 code units. A character past the end of its
+ line is the line's end.
 *>
 fn sz compute_byte_offset(String content, uint target_line, uint target_char)
 {
-	sz target_col = (sz)target_char;
-
-	if (target_line == 0)
-	{
-		if (target_col > content.len) return content.len;
-		return target_col;
-	}
-
-	uint current_line = 0;
 	sz i = 0;
-
-	while (i < content.len && current_line < target_line)
+	for (uint line = 0; line < target_line && i < content.len; line++)
 	{
-		if (try next_nl = content[i..].index_of_char('\n'))
+		i += (content[i..].index_of_char('\n') ?? (content.len - i)) + 1;
+	}
+	uint units = 0;
+	while (i < content.len && units < target_char && content[i] != '\n')
+	{
+		sz bytes = content.len - i;
+		if (try c = conv::utf8_to_char32(&content[i], &bytes))
 		{
-			i += next_nl + 1;
-			current_line++;
+			units += c > 0xFFFF ? 2 : 1;
 		}
 		else
 		{
-			return content.len;
+			// An invalid byte counts as one unit.
+			bytes = 1;
+			units++;
 		}
+		i += bytes;
 	}
-
-	if (current_line == target_line)
-	{
-		sz final_pos = i + target_col;
-		if (final_pos > content.len) return content.len;
-		return final_pos;
-	}
-
-	return content.len;
+	return min(i, content.len);
 }
 
 <*

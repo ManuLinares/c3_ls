@@ -206,30 +206,7 @@ fn void pop_scope(SemaContext* ctx)
 	}
 }
 
-fn bool has_conditional_feat_or_if(Node* node) @local
-{
-	if (!node) return false;
-	NodeArray attrs;
-	switch (node.kind)
-	{
-		case VAR_DECL: attrs = node.as(VarDecl).attributes;
-		case FN_DECL: attrs = node.as(FnDecl).attributes;
-		case MACRO_DECL: attrs = node.as(MacroDecl).attributes;
-		case STRUCT_DECL: attrs = node.as(StructDecl).attributes;
-		default: return false;
-	}
-
-	foreach (attr : attrs)
-	{
-		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
-		AttributeDecl* ad = attr.as(AttributeDecl);
-		if (ad.attribute_kind == AttributeKind.FEAT || ad.attribute_kind == AttributeKind.IF)
-		{
-			return true;
-		}
-	}
-	return false;
-}
+fn bool has_conditional_feat_or_if(Node* node) @local => cursor::has_attribute(node, FEAT, null) || cursor::has_attribute(node, IF, null);
 
 fn void attribute_expression_types(SemaContext* ctx, Node* node)
 {
