@@ -140,32 +140,6 @@ fn void append_snippet_text(DString* out, String text) @local
 }
 
 <*
- A required parameter of a call; `named` when it must be passed by name.
-*>
-struct CallParam
-{
-	String name;
-	bool named;
-}
-
-<*
- Appends `params` to `out` as numbered snippet placeholders separated by
- commas, a named one as `name: ${n:name}`. Returns how many it appended.
-*>
-fn int append_placeholders(DString* out, CallParam[] params) @local
-{
-	foreach (i, param : params)
-	{
-		if (i) out.append(", ");
-		if (param.named) out.appendf("%s: ", param.name);
-		out.appendf("${%d:", i + 1);
-		append_snippet_text(out, param.name);
-		out.append_char('}');
-	}
-	return (int)params.len;
-}
-
-<*
  Call text for a function or macro: required parameters become placeholders,
  body parameters keep their declared names, which are valid as written, and a
  trailing body gets a block holding the cursor.
@@ -181,9 +155,9 @@ fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_
 	out.tinit();
 	out.append(name);
 	out.append_char('(');
-	List{CallParam} required;
-	required.tinit();
+	int tabstop = 1;
 	bool skipped = false;
+	bool first = true;
 	foreach (i, param : params)
 	{
 		if (i == 0 && is_method) continue;
@@ -195,9 +169,13 @@ fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_
 			skipped = true;
 			continue;
 		}
-		required.push({ vd.name.text, skipped });
+		if (!first) out.append(", ");
+		first = false;
+		if (skipped) out.appendf("%s: ", vd.name.text);
+		out.appendf("${%d:", tabstop++);
+		append_snippet_text(&out, vd.name.text);
+		out.append_char('}');
 	}
-	int placeholders = append_placeholders(&out, required.array_view());
 
 	BodyParamDecl* body = body_params && body_params.kind == BODY_PARAM_DECL ? body_params.as(BodyParamDecl) : null;
 	if (body)
@@ -218,7 +196,7 @@ fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_
 
 	out.append_char(')');
 	if (is_void && ctx.is_stmt) out.append_char(';');
-	if (placeholders) *format = SNIPPET;
+	if (tabstop > 1) *format = SNIPPET;
 	return out.str_view();
 }
 
@@ -364,7 +342,7 @@ fn bool may_open_cast(Context* ctx) @local
 	String text = ctx.sf.content[:ctx.offset - ctx.prefix.len].trim_right(" \t");
 	if (!text.ends_with("(")) return false;
 	text = text[:^1].trim_right(" \t");
-	return !text.len || (!lexer::is_ident(text[^1]) && text[^1] != ')' && text[^1] != ']');
+	return !text.len || (!text[^1].is_alnum() && text[^1] != '_' && text[^1] != ')' && text[^1] != ']');
 }
 
 fn bool is_type_position(Context* ctx)
@@ -397,9 +375,10 @@ fn bool is_type_position(Context* ctx)
 	{
 		if (ctx.scope == TYPE_ASSIGNMENT) return false;
 
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
 		foreach (stmt : ctx.sf.ast.statements)
 		{
-			if (stmt && stmt.range.contains(ctx.loc))
+			if (stmt && stmt.range.contains(loc))
 			{
 				return stmt.kind == TYPEDEF_DECL || stmt.kind == ALIAS_DECL;
 			}
@@ -438,12 +417,13 @@ fn bool is_type_position(Context* ctx)
 		{
 			return false;
 		}
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
 		foreach (stmt : ctx.sf.ast.statements)
 		{
-			if (stmt && stmt.range.contains(ctx.loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
+			if (stmt && stmt.range.contains(loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
 			{
 				Node* body = (stmt.kind == FN_DECL) ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
-				if (!body || !body.range.contains(ctx.loc)) return true;
+				if (!body || !body.range.contains(loc)) return true;
 			}
 		}
 		// Elsewhere `(` opens a call, a cast or a group: values fit as well as types.
@@ -651,7 +631,8 @@ fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
 		String aname = ad.name ? ad.name.text : "";
 		if (aname.len == 0) return;
 
-		if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, attr_info.node, attr_info.mod))
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+		if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, attr_info.node, attr_info.mod))
 		{
 			if (fuzzy_match(aname, ctx.prefix))
 			{
@@ -966,7 +947,8 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 fn void provide_generic_params(Context* ctx, List{CompletionItem}* items) @local
 {
 	if (ctx.access != NONE || !ctx.ws || !ctx.ws.ctx) return;
-	foreach (param : query::generic_params_at(ctx.ws.ctx, ctx.sf, ctx.loc))
+	Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+	foreach (param : query::generic_params_at(ctx.ws.ctx, ctx.sf, loc))
 	{
 		String name = query::generic_param_name(param);
 		if (!name.len || !fuzzy_match(name, ctx.prefix)) continue;
@@ -1182,7 +1164,8 @@ fn void provide_modules(Context* ctx, List{CompletionItem}* items) @local
 	if (ctx.access != NONE || !ctx.ws || !ctx.ws.ctx) return;
 	HashSet{String} seen;
 	seen.tinit();
-	foreach (name : query::visible_modules(ctx.ws.ctx, ctx.sf, ctx.loc))
+	Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+	foreach (name : query::visible_modules(ctx.ws.ctx, ctx.sf, loc))
 	{
 		String segment = name[(name.rindex_of("::") ?? -2) + 2..];
 		if (!fuzzy_match(segment, ctx.prefix) || !seen.add(segment)) continue;
@@ -1209,8 +1192,9 @@ fn bool provide_submodules(Context* ctx, List{CompletionItem}* items, String bas
 	bool matched;
 	HashSet{String} seen;
 	seen.tinit();
+	Location loc = { (int)ctx.position.line, (int)ctx.position.character };
 	String key = string::tformat("::%s::", base);
-	foreach (name : query::visible_modules(ctx.ws.ctx, ctx.sf, ctx.loc))
+	foreach (name : query::visible_modules(ctx.ws.ctx, ctx.sf, loc))
 	{
 		// Delimited on both sides so that `key` matches whole segments only.
 		String path = string::tformat("::%s::", name);
@@ -1559,10 +1543,11 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 		sz word_start = cursor_idx - 1;
 		while (word_start > 0 && lexer::is_ident(text[word_start - 1])) word_start--;
 		String word = text[word_start : cursor_idx - 1 - word_start];
+		Location loc = { (int)ctx.position.line, (int)ctx.position.character };
 		bool names_module = false;
 		if (ctx.ws && ctx.ws.ctx && word.len)
 		{
-			foreach (name : query::visible_modules(ctx.ws.ctx, sf, ctx.loc))
+			foreach (name : query::visible_modules(ctx.ws.ctx, sf, loc))
 			{
 				if (name == word || name.ends_with(string::tformat("::%s", word))) names_module = true;
 			}
@@ -1626,14 +1611,13 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 
 fn void inject_vector_swizzles(List{CompletionItem}* items, String prefix)
 {
-	List{String} comps;
-	comps.tinit();
-	foreach (set : query::SWIZZLE_SETS)
-	{
-		foreach (i, c : set) comps.push(set[i:1]);
-	}
-	comps.push_all({ "xy", "yx", "xx", "yy", "xz", "yz", "zx", "zy", "zz", "xyz", "xzy", "yxz", "yzx", "zxy", "zyx", "xyzw", "rgba" });
-	foreach (c : comps)
+	const String[*] COMPS = {
+		"x", "y", "z", "w", "r", "g", "b", "a", "u", "v",
+		"xy", "yx", "xx", "yy", "xz", "yz", "zx", "zy", "zz",
+		"xyz", "xzy", "yxz", "yzx", "zxy", "zyx",
+		"xyzw", "rgba"
+	};
+	foreach (c : COMPS)
 	{
 		if (prefix.len == 0 || c.starts_with(prefix))
 		{
@@ -1697,7 +1681,8 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem}* items, Stri
 					FnDecl* fndecl = curr.node.as(FnDecl);
 					if (fndecl.associated_type && query::is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
 					{
-						if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, curr.node, curr.mod))
+						Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+						if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, curr.node, curr.mod))
 						{
 							String mname = fndecl.name ? fndecl.name.text : "";
 							if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
@@ -1726,7 +1711,8 @@ fn void provide_methods_for_type(Context* ctx, List{CompletionItem}* items, Stri
 					{
 						if (query::is_matching_associated_type(assoc_node, clean_type, type_name))
 						{
-							if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, curr.node, curr.mod))
+							Location loc = { (int)ctx.position.line, (int)ctx.position.character };
+							if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, curr.node, curr.mod))
 							{
 								String mname = mac.name ? mac.name.text : "";
 								if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
@@ -3132,23 +3118,28 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 			String insert_text = label;
 			if (!has_lparen_ahead(&ctx))
 			{
-				List{CallParam} required;
-				required.tinit();
+				DString out;
+				out.tinit();
+				append_snippet_text(&out, label);
+				out.append_char('(');
+				int tabstop = 1;
 				foreach (param : b.params.tsplit(", "))
 				{
-					if (param.len && !param.contains("...") && !param.contains("=")) required.push({ param, false });
+					if (!param.len || param.contains("...") || param.contains("=")) continue;
+					if (tabstop > 1) out.append(", ");
+					out.appendf("${%d:", tabstop++);
+					append_snippet_text(&out, param);
+					out.append_char('}');
 				}
-				insert_text = string::tformat("%s()", label);
-				if (required.len())
+				out.append_char(')');
+				if (tabstop > 1)
 				{
-					DString out;
-					out.tinit();
-					append_snippet_text(&out, label);
-					out.append_char('(');
-					append_placeholders(&out, required.array_view());
-					out.append_char(')');
 					format = SNIPPET;
 					insert_text = out.str_view();
+				}
+				else
+				{
+					insert_text = string::tformat("%s()", label);
 				}
 			}
 			items.push({ .label = label, .kind = FUNCTION, .detail = b.signature(), .documentation = { .kind = MARKDOWN, .value = b.doc },
@@ -3235,7 +3226,7 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 			seen_cases.tinit();
 			if (in_switch && ctx.sf)
 			{
-				collect_already_handled_cases(ctx.switch_node, ctx.loc, &seen_cases);
+				collect_already_handled_cases(ctx.switch_node, { (int)ctx.position.line, (int)ctx.position.character }, &seen_cases);
 			}
 			provide_named_args(&ctx, &items);
 			provide_expected_type_completions(&ctx, &items, expected_type, in_switch ? &seen_cases : null);

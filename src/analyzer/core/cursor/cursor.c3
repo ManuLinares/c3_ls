@@ -213,45 +213,65 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 }
 
 <*
- Attributes written on `node`, or none.
+ Checks if cursor has a specific attribute
 *>
-fn NodeArray attributes(Node* node)
+fn bool has_attribute(Node* node, AttributeKind kind, Node**out_attribute)
 {
-	if (!node) return {};
+	if (!node) return false;
+	NodeArray temp;
 	switch (node.kind)
 	{
-		case STRUCT_DECL: return node.as(StructDecl).attributes;
-		case INTERFACE_DECL: return node.as(InterfaceDecl).attributes;
-		case FN_DECL: return node.as(FnDecl).attributes;
-		case IMPORT_DECL: return node.as(ImportDecl).attributes;
-		case PATH_EXPR: return node.as(PathExpr).attributes;
-		case MACRO_DECL: return node.as(MacroDecl).attributes;
-		case VAR_DECL: return node.as(VarDecl).attributes;
-		case ENUM_DECL: return node.as(EnumDecl).attributes;
-		case FAULT_DECL: return node.as(FaultDecl).attributes;
-		case ALIAS_DECL: return node.as(AliasDecl).attributes;
-		case TYPEDEF_DECL: return node.as(TypedefDecl).attributes;
-		case ATTRDEF_DECL: return node.as(AttrdefDecl).attributes;
-		case MODULE_DECL: return node.as(ModuleDecl).attributes;
-		case CT_EXPAND_DECL: return node.as(CtExpandDecl).attributes;
-		case SWITCH_STMT: return node.as(SwitchStmt).attributes;
-		case CALL_EXPR: return node.as(CallExpr).attributes;
-		case LAMBDA_EXPR: return node.as(LambdaExpr).attributes;
-		default: return {};
+		case STRUCT_DECL:
+			StructDecl* s = node.as(StructDecl);
+			temp = s.attributes;
+			break;
+		case INTERFACE_DECL:
+			InterfaceDecl* inter = node.as(InterfaceDecl);
+			temp = inter.attributes;
+			break;
+		case FN_DECL:
+			FnDecl* func = node.as(FnDecl);
+			temp = func.attributes;
+			break;
+		case IMPORT_DECL:
+			ImportDecl* imp = node.as(ImportDecl);
+			temp = imp.attributes;
+			break;
+		case PATH_EXPR:
+			PathExpr* pe = node.as(PathExpr);
+			temp = pe.attributes;
+			break;
+		case MACRO_DECL: temp = node.as(MacroDecl).attributes;
+		case VAR_DECL: temp = node.as(VarDecl).attributes;
+		case ENUM_DECL: temp = node.as(EnumDecl).attributes;
+		case FAULT_DECL: temp = node.as(FaultDecl).attributes;
+		case ALIAS_DECL: temp = node.as(AliasDecl).attributes;
+		case TYPEDEF_DECL: temp = node.as(TypedefDecl).attributes;
+		case ATTRDEF_DECL: temp = node.as(AttrdefDecl).attributes;
+		case MODULE_DECL: temp = node.as(ModuleDecl).attributes;
+		case CT_EXPAND_DECL: temp = node.as(CtExpandDecl).attributes;
+		case SWITCH_STMT: temp = node.as(SwitchStmt).attributes;
+		case CALL_EXPR: temp = node.as(CallExpr).attributes;
+		case LAMBDA_EXPR: temp = node.as(LambdaExpr).attributes;
+		default:
+			return false;
 	}
-}
 
-<*
- Whether `node` has an attribute of `kind`, stored in `out_attribute` when given.
-*>
-fn bool has_attribute(Node* node, AttributeKind kind, Node** out_attribute)
-{
-	foreach (attr : attributes(node))
+	foreach (attr : temp)
 	{
-		if (!attr || attr.kind != ATTRIBUTE_DECL || attr.as(AttributeDecl).attribute_kind != kind) continue;
-		if (out_attribute) *out_attribute = attr;
-		return true;
+		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
+		AttributeDecl* attr_decl = attr.as(AttributeDecl);
+		if (attr_decl.attribute_kind == kind)
+		{
+			if (out_attribute)
+			{
+				*out_attribute = attr;
+			}
+
+			return true;
+		}
 	}
+
 	return false;
 }
 

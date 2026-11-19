@@ -136,17 +136,12 @@ fn Node* find_local_decl_in_file(SourceFile* sf, String name, String* out_type =
 }
 
 <*
- Letters naming vector components; a swizzle takes all of its letters from one set.
-*>
-const String[2] SWIZZLE_SETS = { "xyzw", "rgba" };
-
-<*
  Whether `name` picks vector components: only letters of `xyzw`, or only of `rgba`.
 *>
 fn bool is_swizzle(String name)
 {
 	if (!name.len) return false;
-	foreach (set : SWIZZLE_SETS)
+	foreach (set : (String[2]){ "xyzw", "rgba" })
 	{
 		bool all = true;
 		foreach (c : name) all = all && @ok(set.index_of_char(c));
@@ -278,16 +273,26 @@ fn bool is_imported_as_public_at(SourceFile* sf, Location loc, String target_mod
 }
 
 <*
- Modules usable as a qualifier at `loc` of `sf`.
+ Modules usable as a qualifier at `loc` of `sf`: those imported there,
+ explicitly or implicitly (`std::core`, every ancestor and descendant of
+ the current module), each with its submodules.
 *>
 fn List{String} visible_modules(AnalyzerContext* context, SourceFile* sf, Location loc)
 {
 	List{String} visible;
 	visible.tinit();
-	if (!context) return visible;
+	if (!context || !sf) return visible;
+	List{String} roots = get_imported_modules_at_location(sf, loc);
+	String current = get_module_name_at_location(sf, loc);
 	context.modules.@each(; name, m)
 	{
-		if (is_module_visible_at(context, sf, loc, name)) visible.push(name);
+		bool seen = current.len > 0 && (name == current || current.starts_with(string::tformat("%s::", name)) || name.starts_with(string::tformat("%s::", current)));
+		foreach (root : roots)
+		{
+			if (seen) break;
+			seen = name == root || name.starts_with(string::tformat("%s::", root));
+		}
+		if (seen) visible.push(name);
 	};
 	return visible;
 }
@@ -381,17 +386,6 @@ fn bool is_symbol_accessible_at(AnalyzerContext* context, SourceFile* sf, Locati
 }
 
 <*
- Adds the module `m` that a prefix names to `candidates`; whether it ends
- the search of `resolve_module_for_prefix`: no `all` list is being filled,
- and `m` declares `symbol` or no symbol is asked for.
-*>
-fn bool settles(AnalyzerContext* context, SourceFile* sf, Location loc, Module* m, String symbol, List{Module*}* all, List{Module*}* candidates) @local
-{
-	candidates.push(m);
-	return !all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc));
-}
-
-<*
  Module the prefix `mod_prefix` names at `loc` of `sf`: an exact name, a module
  alias, an import or a sub-module of one, tried in that order. With `symbol`,
  the first of those declaring it, as c3c resolves `env::tget_var` to
@@ -407,7 +401,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 
 	if (Module* m = context.modules.get(mod_prefix) ?? null)
 	{
-		if (settles(context, sf, loc, m, symbol, all, &candidates)) return m;
+		if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
+		candidates.push(m);
 	}
 
 	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
@@ -429,7 +424,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 					String target_path = pe.path ? pe.path.text.strip_suffix("::") : "";
 					if (Module* target_mod = context.modules.get(target_path) ?? null)
 					{
-						if (settles(context, sf, loc, target_mod, symbol, all, &candidates)) return target_mod;
+						if (!all && (!symbol.len || find_symbol_in_module(context, target_mod, symbol, sf, loc))) return target_mod;
+						candidates.push(target_mod);
 					}
 				}
 			}
@@ -446,7 +442,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			{
 				if (Module* imp_mod = context.modules.get(imp) ?? null)
 				{
-					if (settles(context, sf, loc, imp_mod, symbol, all, &candidates)) return imp_mod;
+					if (!all && (!symbol.len || find_symbol_in_module(context, imp_mod, symbol, sf, loc))) return imp_mod;
+					candidates.push(imp_mod);
 				}
 			}
 		}
@@ -457,7 +454,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 		String submod_name = string::tformat("%s::%s", caller_mod, mod_prefix);
 		if (Module* submod = context.modules.get(submod_name) ?? null)
 		{
-			if (settles(context, sf, loc, submod, symbol, all, &candidates)) return submod;
+			if (!all && (!symbol.len || find_symbol_in_module(context, submod, symbol, sf, loc))) return submod;
+			candidates.push(submod);
 		}
 	}
 
@@ -470,7 +468,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			String imp_sub = string::tformat("%s::%s", imp, mod_prefix);
 			if (Module* submod = context.modules.get(imp_sub) ?? null)
 			{
-				if (settles(context, sf, loc, submod, symbol, all, &candidates)) return submod;
+				if (!all && (!symbol.len || find_symbol_in_module(context, submod, symbol, sf, loc))) return submod;
+				candidates.push(submod);
 			}
 
 			String imp_prefix = string::tformat("%s::", imp);
@@ -478,7 +477,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			{
 				if (mname.starts_with(imp_prefix) && (mname == mod_prefix || mname.ends_with(suffix)))
 				{
-					if (settles(context, sf, loc, m, symbol, all, &candidates)) return m;
+					if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
+					candidates.push(m);
 				}
 			};
 		}
@@ -492,7 +492,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 			String top_sub = string::tformat("%s::%s", top_mod, mod_prefix);
 			if (Module* top_sub_mod = context.modules.get(top_sub) ?? null)
 			{
-				if (settles(context, sf, loc, top_sub_mod, symbol, all, &candidates)) return top_sub_mod;
+				if (!all && (!symbol.len || find_symbol_in_module(context, top_sub_mod, symbol, sf, loc))) return top_sub_mod;
+				candidates.push(top_sub_mod);
 			}
 		}
 	}
@@ -502,7 +503,8 @@ fn Module* resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, L
 	{
 		if (mname == mod_prefix || mname.ends_with(suffix))
 		{
-			if (settles(context, sf, loc, m, symbol, all, &candidates)) return m;
+			if (!all && (!symbol.len || find_symbol_in_module(context, m, symbol, sf, loc))) return m;
+			candidates.push(m);
 		}
 	};
 	if (all)
@@ -2357,7 +2359,14 @@ fn OperatorMatch declared_operator_method(AnalyzerContext* context, SourceFile* 
 *>
 fn bool overloads(Node* method, OverloadKind kind, bool reverse) @local
 {
-	foreach (attr : cursor::attributes(method))
+	NodeArray attributes;
+	switch (method.kind)
+	{
+		case FN_DECL: attributes = method.as(FnDecl).attributes;
+		case MACRO_DECL: attributes = method.as(MacroDecl).attributes;
+		default: return false;
+	}
+	foreach (attr : attributes)
 	{
 		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
 		AttributeDecl* ad = attr.as(AttributeDecl);
@@ -2384,7 +2393,7 @@ fn String arithmetic_type(AnalyzerContext* context, SourceFile* sf, OperatorKind
 {
 	String left = type_of(context, sf, left_expr, loc);
 	String right = type_of(context, sf, right_expr, loc);
-	OverloadCall call = binary_overload(context, sf, op.overload, left, right, loc);
+	OverloadCall call = binary_overload(context, sf, overload_of(op), left, right, loc);
 	if (call.method) return instance_type(context, sf, call.receiver, call.method, return_type(call.method));
 
 	if (op == OP_SHL || op == OP_SHR) return promoted(context, left);
@@ -2457,15 +2466,26 @@ fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location
 				if (!be.left || !be.right || at.before(be.left.range.end) || !at.before(be.right.range.start)) continue;
 				String left = type_of(context, sf, be.left, loc);
 				String right = type_of(context, sf, be.right, loc);
-				if (be.op.assign_overload != UNKNOWN)
+				OverloadKind own = compound_overload_of(be.op);
+				if (own != UNKNOWN)
 				{
-					if (Node* method = operator_method(context, sf, left, be.op.assign_overload, false, right, loc).method)
+					if (Node* method = operator_method(context, sf, left, own, false, right, loc).method)
 					{
 						out.push({ method, left });
 						return;
 					}
 				}
-				OverloadKind[2] kinds = { be.op.overload, be.op == OP_LE || be.op == OP_GE ? OV_EQUAL : UNKNOWN };
+				OverloadKind[2] kinds = { overload_of(compound_base_of(be.op)), UNKNOWN };
+				switch (be.op)
+				{
+					case OP_EQ:
+					case OP_NE: kinds = { OV_EQUAL, UNKNOWN };
+					case OP_LT:
+					case OP_GT: kinds = { OV_LESS_THAN, UNKNOWN };
+					case OP_LE:
+					case OP_GE: kinds = { OV_LESS_THAN, OV_EQUAL };
+					default: break;
+				}
 				foreach (kind : kinds)
 				{
 					if (kind == UNKNOWN) continue;
@@ -2507,6 +2527,66 @@ fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location
 			default:
 				continue;
 		}
+	}
+}
+
+<*
+ Overload of a combined assignment itself, such as `+=`, or UNKNOWN.
+*>
+fn OverloadKind compound_overload_of(OperatorKind op) @local
+{
+	switch (op)
+	{
+		case OP_ADD_ASSIGN: return OV_PLUS_ASSIGN;
+		case OP_SUB_ASSIGN: return OV_MINUS_ASSIGN;
+		case OP_MULT_ASSIGN: return OV_MULTIPLY_ASSIGN;
+		case OP_DIV_ASSIGN: return OV_DIVIDE_ASSIGN;
+		case OP_MOD_ASSIGN: return OV_REMINDER_ASSIGN;
+		case OP_BIT_AND_ASSIGN: return OV_AND_ASSIGN;
+		case OP_BIT_OR_ASSIGN: return OV_OR_ASSIGN;
+		case OP_BIT_XOR_ASSIGN: return OV_XOR_ASSIGN;
+		case OP_SHL_ASSIGN: return OV_SHL_ASSIGN;
+		case OP_SHR_ASSIGN: return OV_SHR_ASSIGN;
+		default: return UNKNOWN;
+	}
+}
+
+<*
+ Operator a combined assignment applies, such as `+` for `+=`; `op` itself otherwise.
+*>
+fn OperatorKind compound_base_of(OperatorKind op) @local
+{
+	switch (op)
+	{
+		case OP_ADD_ASSIGN: return OP_ADD;
+		case OP_SUB_ASSIGN: return OP_SUB;
+		case OP_MULT_ASSIGN: return OP_MULT;
+		case OP_DIV_ASSIGN: return OP_DIV;
+		case OP_MOD_ASSIGN: return OP_MOD;
+		case OP_BIT_AND_ASSIGN: return OP_BIT_AND;
+		case OP_BIT_OR_ASSIGN: return OP_BIT_OR;
+		case OP_BIT_XOR_ASSIGN: return OP_BIT_XOR;
+		case OP_SHL_ASSIGN: return OP_SHL;
+		case OP_SHR_ASSIGN: return OP_SHR;
+		default: return op;
+	}
+}
+
+fn OverloadKind overload_of(OperatorKind op) @local
+{
+	switch (op)
+	{
+		case OP_MULT: return OV_MULTIPLY;
+		case OP_SUB: return OV_MINUS;
+		case OP_ADD: return OV_PLUS;
+		case OP_DIV: return OV_DIVIDE;
+		case OP_MOD: return OV_REMINDER;
+		case OP_SHR: return OV_SHR;
+		case OP_SHL: return OV_SHL;
+		case OP_BIT_OR: return OV_OR;
+		case OP_BIT_XOR: return OV_XOR;
+		case OP_BIT_AND: return OV_AND;
+		default: return UNKNOWN;
 	}
 }
 

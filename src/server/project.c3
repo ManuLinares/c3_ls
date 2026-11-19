@@ -170,6 +170,35 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	self.process_queue.push(file);
 }
 
+<*
+ Byte offset in `text` of the LSP position `pos`, whose character counts UTF-16 code units.
+*>
+fn sz byte_offset_utf16(String text, LspPosition pos) @local
+{
+	sz i = 0;
+	for (uint line = 0; line < pos.line && i < text.len; line++)
+	{
+		i += (text[i..].index_of_char('\n') ?? (text.len - i)) + 1;
+	}
+	uint units = 0;
+	while (i < text.len && units < pos.character && text[i] != '\n')
+	{
+		sz bytes = text.len - i;
+		if (try c = conv::utf8_to_char32(&text[i], &bytes))
+		{
+			units += c > 0xFFFF ? 2 : 1;
+		}
+		else
+		{
+			// An invalid byte counts as one unit.
+			bytes = 1;
+			units++;
+		}
+		i += bytes;
+	}
+	return min(i, text.len);
+}
+
 fn void LspProject.change_file(&self, DidChangeParams params)
 {
 	String raw_uri = params.document.uri;
@@ -207,8 +236,8 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 			text = change.text;
 			continue;
 		}
-		sz start = utils::compute_byte_offset(text, change.range.start.line, change.range.start.character);
-		sz end = max(start, utils::compute_byte_offset(text, change.range.end.line, change.range.end.character));
+		sz start = byte_offset_utf16(text, change.range.start);
+		sz end = max(start, byte_offset_utf16(text, change.range.end));
 		text = string::tformat("%s%s%s", text[:start], change.text, text[end..]);
 	}
 	file.set_text(self.allocator, text);

@@ -2,6 +2,28 @@ module analyzer::sema::query;
 import analyzer, std::collections::list;
 
 <*
+ Attributes written on the declaration `node`, or none.
+*>
+fn NodeArray declaration_attributes(Node* node)
+{
+	if (!node) return {};
+	switch (node.kind)
+	{
+		case FN_DECL: return node.as(FnDecl).attributes;
+		case MACRO_DECL: return node.as(MacroDecl).attributes;
+		case STRUCT_DECL: return node.as(StructDecl).attributes;
+		case ENUM_DECL: return node.as(EnumDecl).attributes;
+		case TYPEDEF_DECL: return node.as(TypedefDecl).attributes;
+		case ALIAS_DECL: return node.as(AliasDecl).attributes;
+		case INTERFACE_DECL: return node.as(InterfaceDecl).attributes;
+		case VAR_DECL: return node.as(VarDecl).attributes;
+		case FAULT_DECL: return node.as(FaultDecl).attributes;
+		case MODULE_DECL: return node.as(ModuleDecl).attributes;
+		default: return {};
+	}
+}
+
+<*
  Module section declaration of `sf` that contains `loc`, or null before the first one.
 *>
 fn Node* section_node_at(SourceFile* sf, Location loc)
@@ -16,7 +38,15 @@ fn Node* section_node_at(SourceFile* sf, Location loc)
 fn bool has_feat(AnalyzerContext* context, Node* decl)
 {
 	SourceFile* sf = source_file::file_of(context, decl);
-	return cursor::has_attribute(decl, FEAT, null) || (sf && cursor::has_attribute(section_node_at(sf, decl.range.start), FEAT, null));
+	Node* section = sf ? section_node_at(sf, decl.range.start) : null;
+	foreach (owner : (Node*[2]){ section, decl })
+	{
+		foreach (attr : declaration_attributes(owner))
+		{
+			if (attr && attr.kind == ATTRIBUTE_DECL && attr.as(AttributeDecl).attribute_kind == FEAT) return true;
+		}
+	}
+	return false;
 }
 
 <*
@@ -28,7 +58,7 @@ fn void feat_attributes(AnalyzerContext* context, Node* decl, List{AttributeDecl
 	Node* section = sf ? section_node_at(sf, decl.range.start) : null;
 	foreach (owner : (Node*[2]){ section == decl ? null : section, decl })
 	{
-		foreach (attr : cursor::attributes(owner))
+		foreach (attr : declaration_attributes(owner))
 		{
 			if (attr && attr.kind == ATTRIBUTE_DECL && attr.as(AttributeDecl).attribute_kind == FEAT) out.push(attr.as(AttributeDecl));
 		}
@@ -78,20 +108,6 @@ fn bool feature_list_holds(String[] features, SourceFile* caller, Node* expr)
 }
 
 <*
- Whether one of the feature lists `exprs`, alternatives as in `@feat(A, B)`,
- holds; true when there are none.
-*>
-fn bool any_feature_list_holds(String[] features, SourceFile* caller, NodeArray exprs)
-{
-	if (!exprs.len) return true;
-	foreach (expr : exprs)
-	{
-		if (feature_list_holds(features, caller, expr)) return true;
-	}
-	return false;
-}
-
-<*
  Whether `decl` is compiled with `features` for code in `caller`: every
  `@feat` on it and on its module section holds. Arguments of one `@feat` are
  alternatives.
@@ -103,7 +119,9 @@ fn bool feat_enabled_with(AnalyzerContext* context, String[] features, SourceFil
 	feat_attributes(context, decl, &attrs);
 	foreach (attr : attrs)
 	{
-		if (!any_feature_list_holds(features, caller, attr.exprs)) return false;
+		bool holds;
+		foreach (expr : attr.exprs) holds = holds || feature_list_holds(features, caller, expr);
+		if (attr.exprs.len && !holds) return false;
 	}
 	return true;
 }
@@ -176,7 +194,9 @@ fn bool code_holds(AnalyzerContext* context, String[] features, SourceFile* sf, 
 	if (!feat_enabled_with(context, features, sf, code)) return false;
 	foreach (branch : branches)
 	{
-		if (!any_feature_list_holds(features, sf, branch.expr_list)) return false;
+		bool holds;
+		foreach (expr : branch.expr_list) holds = holds || feature_list_holds(features, sf, expr);
+		if (branch.expr_list.len && !holds) return false;
 	}
 	return true;
 }

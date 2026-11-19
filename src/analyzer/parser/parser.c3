@@ -1,6 +1,6 @@
 module analyzer::parser;
 import std::io, std::io::path, std::collections::list;
-import analyzer::core, analyzer::cursor, analyzer::lexer;
+import analyzer::core, analyzer::lexer;
 
 struct ContextScope
 {
@@ -383,8 +383,23 @@ fn void apply_section_visibility_default(ParseContext* ctx, Node* node)
 {
 	if (!node || ctx.current_section_visibility == Visibility.PUBLIC) return;
 
+	NodeArray attrs;
+	switch (node.kind)
+	{
+		case FN_DECL: attrs = node.as(FnDecl).attributes;
+		case MACRO_DECL: attrs = node.as(MacroDecl).attributes;
+		case STRUCT_DECL: attrs = node.as(StructDecl).attributes;
+		case ENUM_DECL: attrs = node.as(EnumDecl).attributes;
+		case VAR_DECL: attrs = node.as(VarDecl).attributes;
+		case TYPEDEF_DECL: attrs = node.as(TypedefDecl).attributes;
+		case ALIAS_DECL: attrs = node.as(AliasDecl).attributes;
+		case INTERFACE_DECL: attrs = node.as(InterfaceDecl).attributes;
+		case ATTRDEF_DECL: attrs = node.as(AttrdefDecl).attributes;
+		default: break;
+	}
+
 	bool has_explicit_vis = false;
-	foreach (attr : cursor::attributes(node))
+	foreach (attr : attrs)
 	{
 		if (!attr || attr.kind != ATTRIBUTE_DECL) continue;
 		AttributeDecl* ad = attr.as(AttributeDecl);
