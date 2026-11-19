@@ -3018,3 +3018,24 @@ fn void test_macros_after_cast_and_statement_head() @test
 		assert(labels.contains(wanted[i]), "%s: %s", wanted[i], labels);
 	}
 }
+
+fn void untyped_macro_argument_has_the_type_where_it_is_expanded() @test
+{
+	// c3c types `#init` where the body uses it: as `Opts`, not as the `$Type` passed.
+	String source = "module m;\nstruct Opts { int debug_mode; }\nstruct Other { int unrelated; }\nmacro Opts make($Type, #init) @safemacro\n{\n\tOpts o = #init;\n\treturn o;\n}\nmacro set($Type, #init) @safemacro\n{\n\tOpts o;\n\to = #init;\n}\nfn void main()\n{\n\tOpts x = make(Other, { . });\n\tset(Other, { . });\n}\n";
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/init.c3", source);
+	Uri u = uri::from_file_path(tmem, "/virtual/init.c3");
+	foreach (pos : (LspPosition[2]){ { 15, 25 }, { 16, 15 } })
+	{
+		bool expected;
+		foreach (item : completion::resolve(&proj, u, pos)!!)
+		{
+			assert(item.label != "unrelated", "%d: field of $Type offered", pos.line);
+			if (item.label == "debug_mode") expected = true;
+		}
+		assert(expected, "%d: debug_mode missing", pos.line);
+	}
+}

@@ -1,6 +1,6 @@
 module lsp::platform_variants_test;
 
-import lsp, lsp::analysis::definition, lsp::analysis::completion, lsp::analysis::hover, uri;
+import lsp, lsp::analysis::definition, lsp::analysis::completion, lsp::analysis::hover, uri, analyzer::core::arch;
 
 const String POSIX = "module plat @feat(POSIX);\nstruct Mutex { int posix_field; }\nfn void Mutex.lock(&self) {}\nfn void use_posix(Mutex* mx) { mx.posix_field = 1; }\n";
 const String WIN = "module plat @feat(WIN32);\nstruct Mutex { int win_field; }\nfn void Mutex.lock(&self) {}\nfn void use_win(Mutex* mx) { mx.win_field = 1; }\n";
@@ -151,4 +151,32 @@ fn void feat_branches_narrow_the_platform() @test
 	assert(h.starts_with("```c3\nint view\n```"), "macOS branch: %s", h);
 	h = hover::hover(&proj, u, { 16, 6 })!!;
 	assert(h.starts_with("```c3\nint surface\n```"), "Wayland branch: %s", h);
+}
+
+fn void platform_code_sees_every_variant_it_can_be_built_with() @test
+{
+	// AARCH64 code is built on Linux and on macOS, which declare different `Regs`.
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	String source = "module repro;\n\nstruct Regs @feat(LINUX) { int linux_reg; }\nstruct Regs @feat(MACOS) { int mac_reg; }\nstruct Regs @feat(WIN32) { int win_reg; }\n\nfn void read_regs() @feat(AARCH64 & POSIX)\n{\n\tRegs r;\n\tr.linux_reg = 1;\n}\n";
+	proj.workspace.process_file("/virtual/arm.c3", source);
+	Uri u = uri::from_file_path(tmem, "/virtual/arm.c3");
+	bool arm = env::AARCH64 && env::POSIX;
+	if (!arm)
+	{
+		assert(completes(&proj, "/virtual/arm.c3", 9, 3, "linux_reg"), "Linux variant missing");
+		assert(completes(&proj, "/virtual/arm.c3", 9, 3, "mac_reg"), "macOS variant missing");
+		assert(!completes(&proj, "/virtual/arm.c3", 9, 3, "win_reg"), "Windows is never POSIX");
+		assert(hover::hover(&proj, u, { 9, 4 })!!.starts_with("```c3\nint linux_reg\n```"), "hover linux_reg");
+	}
+}
+
+fn void target_features_match_c3c() @test
+{
+	String[] linux_arm = arch::features(tmem, { .os = LINUX, .arch = AARCH64 });
+	foreach (f : (String[*]){ "LIBC", "NATIVE_I128", "NATIVE_F16", "POSIX", "LINUX", "AARCH64", "ARCH_64_BIT", "BACKTRACE" }) assert(array::contains(linux_arm, f), "linux-aarch64 lacks %s", f);
+	String[] wasm = arch::features(tmem, { .os = UNKNOWN, .arch = WASM32 });
+	assert(array::contains(wasm, "NO_LIBC") && array::contains(wasm, "FREESTANDING_WASM") && !array::contains(wasm, "LIBC"), "wasm32");
+	assert(!array::contains(arch::features(tmem, { .os = LINUX, .arch = X86_64 }), "NATIVE_I128"), "linux-x64 has no native int128");
 }

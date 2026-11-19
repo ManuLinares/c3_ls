@@ -1184,6 +1184,22 @@ fn Node* find_member_in_type(AnalyzerContext* context, String type_name, String 
 	}
 	if (!type_node) return null;
 
+	List{Node*} variants;
+	variants.tinit();
+	usable_variants(context, sf, loc, type_node, &variants);
+	foreach (variant : variants)
+	{
+		if (Node* member = member_of_type_node(context, variant, type_name, clean_type, member_name, sf, loc)) return member;
+	}
+	return null;
+}
+
+<*
+ Member `member_name` of the type declaration `type_node`, named `type_name`
+ and `clean_type` without generic arguments, including those it embeds.
+*>
+fn Node* member_of_type_node(AnalyzerContext* context, Node* type_node, String type_name, String clean_type, String member_name, SourceFile* sf, Location loc) @local
+{
 	Node* field = cursor::find_member_in_type(type_node, member_name);
 	if (field) return field;
 
@@ -1828,23 +1844,66 @@ fn GenericBinding call_binding(AnalyzerContext* context, SourceFile* sf, Node* d
 }
 
 <*
- Declared type of the parameter `param` of `target` called as `call`.
- An untyped macro parameter, as `#init` of `mem::new($Type, #init)`, is
- taken to have the type passed to the macro's first `$Type` parameter.
+ Where a macro body first gives a type to its untyped parameter `name`:
+ the variable declared as `T x = #init`, or the left side of `x = #init`.
+*>
+struct ExpansionSearch
+{
+	String name;
+	Node* declared_type;
+	Node* assigned_to;
+}
+
+fn ChildVisitResult find_expansion_callback(Node* c, Node* p, void* user_data) @local
+{
+	ExpansionSearch* search = user_data;
+	switch (c.kind)
+	{
+		case VAR_DECL:
+			VarDecl* vd = c.as(VarDecl);
+			if (vd.type && names_param(vd.init_expr, search.name)) search.declared_type = vd.type;
+		case BINARY_EXPR:
+			BinaryExpr* be = c.as(BinaryExpr);
+			if (be.op == OP_ASSIGN && be.left && names_param(be.right, search.name)) search.assigned_to = be.left;
+		default:
+			break;
+	}
+	return search.declared_type || search.assigned_to ? BREAK : RECURSE;
+}
+
+fn bool names_param(Node* expr, String name) @local
+{
+	return expr && expr.kind == IDENT_EXPR && expr.as(IdentExpr).ident && expr.as(IdentExpr).ident.text == name;
+}
+
+<*
+ Declared type of the parameter `param` of `target` called as `call`. An
+ untyped macro parameter, as `#init` of `mem::new($Type, #init)`, has the
+ type c3c gives the argument where the body expands it, as `$Type` in
+ `*val = #init` for a `$Type* val`, with the macro's `$` type parameters
+ bound to the call's arguments.
 *>
 fn String param_type(AnalyzerContext* context, SourceFile* sf, CallTarget target, CallExpr* call, VarDecl* param) @local
 {
 	if (param.type) return bound_type(context, sf, cursor::instance_name(param.type), target.binding);
+	if (!param.name || !target.decl || target.decl.kind != MACRO_DECL || !target.decl.as(MacroDecl).body) return "";
+	ExpansionSearch search = { .name = param.name.text };
+	cursor::visit(target.decl.as(MacroDecl).body, null, { .on_enter = &find_expansion_callback }, &search);
+	SourceFile* macro_sf = source_file::file_of(context, target.decl) ?: sf;
+	String type;
+	if (search.declared_type) type = cursor::instance_name(search.declared_type);
+	if (search.assigned_to) type = type_of(context, macro_sf, search.assigned_to, search.assigned_to.range.start);
+	if (!type.len) return "";
 	foreach (pi, p : target.params)
 	{
-		if (!p || p.kind != VAR_DECL || !p.as(VarDecl).name) continue;
+		if (!p || p.kind != VAR_DECL || !p.as(VarDecl).name || pi < target.first_param) continue;
 		String name = p.as(VarDecl).name.text;
-		if (name.len < 2 || name[0] != '$' || !name[1].is_upper()) continue;
 		sz ai = pi - target.first_param;
-		if (pi < target.first_param || ai >= call.args.len || !call.args[ai] || call.args[ai].kind != TYPE_EXPR) return "";
-		return cursor::instance_name(call.args[ai]);
+		if (!name.starts_with("$") || ai >= call.args.len || !call.args[ai] || call.args[ai].kind != TYPE_EXPR) continue;
+		if (!type.starts_with(name) || (type.len > name.len && lexer::is_ident(type[name.len]))) continue;
+		return string::tformat("%s%s", cursor::instance_name(call.args[ai]), type[name.len..]);
 	}
-	return "";
+	return type.starts_with("$") ? "" : type;
 }
 
 <*
