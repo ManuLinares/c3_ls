@@ -62,3 +62,38 @@ fn void replacement_character_is_one_unit() @test
 	String after = text_after("module app;\n\"\uFFFDab\";\n", { { .range = range(1, 2, 1, 3), .text = "X" } });
 	test::eq(after, "module app;\n\"\uFFFDXb\";\n");
 }
+
+fn void client_version_zero_first_change_not_dropped() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	Uri u = uri::from_file_path(tmem, "/virtual/helix.c3");
+	DocumentUri raw = (DocumentUri)u.to_raw_string(tmem);
+	proj.open_file({ .uri = raw, .language_id = "c3", .version = 0, .text = "module app;\nfn void f() {}\n" });
+	proj.change_file({ .document = { .uri = raw, .version = 1 }, .content_changes = (TextDocumentContentChangeEvent[]){
+		{ .range = range(1, 14, 1, 14), .text = "\n" },
+	}});
+	String text = proj.files.get(u.path)!!.text.tcopy();
+	test::eq(text, "module app;\nfn void f() {}\n\n");
+}
+
+fn void insert_line_keeps_later_lines_in_sync() @test
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	Uri u = uri::from_file_path(tmem, "/virtual/desync.c3");
+	DocumentUri raw = (DocumentUri)u.to_raw_string(tmem);
+	proj.open_file({ .uri = raw, .language_id = "c3", .version = 0, .text = "module app;\nfn void f() {}\nfn void g() {}\n" });
+	// Insert a blank line after line 1
+	proj.change_file({ .document = { .uri = raw, .version = 1 }, .content_changes = (TextDocumentContentChangeEvent[]){
+		{ .range = range(1, 14, 1, 14), .text = "\n" },
+	}});
+	// Edit on the line that shifted from 2 to 3
+	proj.change_file({ .document = { .uri = raw, .version = 2 }, .content_changes = (TextDocumentContentChangeEvent[]){
+		{ .range = range(3, 8, 3, 9), .text = "k" },
+	}});
+	String text = proj.files.get(u.path)!!.text.tcopy();
+	test::eq(text, "module app;\nfn void f() {}\n\nfn void k() {}\n");
+}

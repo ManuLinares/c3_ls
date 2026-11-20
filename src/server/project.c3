@@ -135,7 +135,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 		}
 
 		tracked.set_text(self.allocator, document.text);
-		tracked.version = 1;
+		tracked.version = document.version;
 		tracked.is_library = false; // User opened this file in editor; publish diagnostics on edit!
 
 		// lookup_key points into the Uri freed above; the tracked file owns
@@ -153,7 +153,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	LspFile* lsp_file = alloc::new(self.allocator, LspFile);
 	*lsp_file = {
 		.uri = file_uri,
-		.version = 1,
+		.version = document.version,
 		.is_library = from_disk,
 	};
 	lsp_file.set_text(self.allocator, document.text);
