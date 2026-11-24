@@ -45,7 +45,7 @@ fn void test_semantic_tokens_delta_invariants()
 		uint token_type = res.data[i + 3];
 
 		assert(len > 0);
-		assert(token_type < 21);
+		assert(token_type < SemanticTokenType::values.len);
 	}
 }
 
@@ -68,8 +68,8 @@ fn void test_semantic_tokens_operators_and_comments()
 	bool found_num = false;
 	for (sz i = 0; i < res.data.len; i += 5)
 	{
-		if (res.data[i + 3] == 20) found_op = true;
-		if (res.data[i + 3] == 19) found_num = true;
+		if (res.data[i + 3] == SemanticTokenType.OPERATOR.ordinal) found_op = true;
+		if (res.data[i + 3] == SemanticTokenType.NUMBER.ordinal) found_num = true;
 	}
 	assert(found_op);
 	assert(found_num);
@@ -96,7 +96,7 @@ fn void test_semantic_tokens_readonly_modifier_on_constants()
 		uint token_type = res.data[i + 3];
 		uint token_mods = res.data[i + 4];
 
-		if (token_type == 10 && (token_mods & (1 << 2)) != 0)  // enumMember / constant with readonly bit
+		if (token_type == SemanticTokenType.ENUM_MEMBER.ordinal && (token_mods & (1 << SemanticTokenModifier.READONLY.ordinal)) != 0)
 		{
 			found_readonly_const = true;
 		}
@@ -136,22 +136,22 @@ fn void test_semantic_tokens_base_types_and_numbers()
 		col += res.data[k + 1];
 		String text = lines[line][col : res.data[k + 2]];
 		uint kind = res.data[k + 3];
-		if (text == "fn") assert(kind == 15, "fn: %d", kind);
+		if (text == "fn") assert(kind == SemanticTokenType.KEYWORD.ordinal, "fn: %d", kind);
 		if (text == "untypedlist")
 		{
-			assert(kind == 1, "untypedlist: %d", kind);
+			assert(kind == SemanticTokenType.TYPE.ordinal, "untypedlist: %d", kind);
 			untyped_list_seen = true;
 		}
 		if (text[0].is_digit())
 		{
-			assert(kind == 19, "%s: %d", text, kind);
+			assert(kind == SemanticTokenType.NUMBER.ordinal, "%s: %d", text, kind);
 			numbers++;
 		}
 		foreach (p : PrimitiveType::values)
 		{
 			if (text == p.name)
 			{
-				assert(kind == 1, "%s: %d", text, kind);
+				assert(kind == SemanticTokenType.TYPE.ordinal, "%s: %d", text, kind);
 				types++;
 			}
 		}
@@ -159,4 +159,54 @@ fn void test_semantic_tokens_base_types_and_numbers()
 	assert(untyped_list_seen);
 	assert(numbers == 8, "%d numbers", numbers);
 	assert(types == PrimitiveType::values.len + 6, "%d types", types);
+}
+
+fn void test_semantic_tokens_builtin_is_one_token()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module b;\nfn void f()\n{\n\tint x;\n\t$$volatile_load(&x);\n\tString s = $$FILE;\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/builtin.c3");
+	defer doc_uri.free();
+
+	proj.workspace.process_file("/virtual/builtin.c3", source);
+
+	SemanticTokensResult res = semantic_tokens::compute_semantic_tokens(&proj, doc_uri)!!;
+
+	uint line;
+	uint col;
+	int found;
+	for (sz i = 0; i < res.data.len; i += 5)
+	{
+		line += res.data[i];
+		col = res.data[i] == 0 ? col + res.data[i + 1] : res.data[i + 1];
+		if (line == 4 && col == 1)
+		{
+			test::eq(res.data[i + 2], 15u);
+			test::eq(res.data[i + 3], SemanticTokenType.FUNCTION.ordinal);
+			assert(res.data[i + 4] & (1 << SemanticTokenModifier.DEFAULT_LIBRARY.ordinal));
+			found++;
+		}
+		if (line == 5 && col == 12)
+		{
+			test::eq(res.data[i + 2], 6u);
+			test::eq(res.data[i + 3], SemanticTokenType.ENUM_MEMBER.ordinal);
+			assert(res.data[i + 4] & (1 << SemanticTokenModifier.DEFAULT_LIBRARY.ordinal));
+			found++;
+		}
+		assert(!(line == 4 && col == 3) && !(line == 5 && col == 14));
+	}
+	test::eq(found, 2);
+}
+
+fn void test_semantic_tokens_legend_order()
+{
+	String[] types = { "namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "operator" };
+	String[] modifiers = { "declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary" };
+	test::eq(semantic_tokens::get_token_types().len, types.len);
+	foreach (i, t : types) test::eq(semantic_tokens::get_token_types()[i], t);
+	test::eq(semantic_tokens::get_token_modifiers().len, modifiers.len);
+	foreach (i, m : modifiers) test::eq(semantic_tokens::get_token_modifiers()[i], m);
 }

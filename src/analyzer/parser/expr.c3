@@ -143,7 +143,7 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 			case ASTERISK:
 				advance(ctx);
 
-				TypeExpr* ptr_node = ctx.ast.alloc_node(TypeExpr, { start.start, ctx.current.range.end });
+				TypeExpr* ptr_node = ctx.ast.alloc_node(TypeExpr, { start.start, t.range.end });
 				ptr_node.type_kind = TYPE_POINTER;
 				ptr_node.modify.base = current_type;
 

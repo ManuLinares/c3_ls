@@ -1,6 +1,6 @@
 module lsp::server;
 
-import lsp, uri, std::io, std::thread, std::time, std::os::process, std::collections::object, std::collections::list;
+import lsp, uri, std::io, std::thread, std::time, std::os::process, std::collections::object, std::collections::list, std::encoding::json;
 
 bool is_ready;
 bool cli_std_path_set;
@@ -115,6 +115,7 @@ struct ServerInfo
 struct HoverResult
 {
 	MarkupContent contents;
+	LspRange range @JsonOmitEmpty;
 }
 
 struct CompletionResult
@@ -483,12 +484,13 @@ fn void? on_completion_resolve(LspMessage* message, CompletionItem* params)
 fn void? on_hover(LspMessage* message, HoverParams* params)
 {
 	Document doc = open_document(params.document.uri)!;
-	String? h = hover::hover(doc.project, doc.uri, params.position);
+	String text = hover::hover(doc.project, doc.uri, params.position) ?? "";
 	respond{HoverResult}(message, {
 		.contents = {
 			.kind = MARKDOWN,
-			.value = h ?? "",
+			.value = text,
 		},
+		.range = text.len ? hover::hover_range(doc.project, doc.uri, params.position) ?? {} : {},
 	});
 }
 

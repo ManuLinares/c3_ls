@@ -1128,3 +1128,89 @@ fn void test_hover_on_vector_swizzles()
 	h = hover::hover(&proj, u, { 7, 19 })!!;
 	assert(h.starts_with("```c3\nfloat[<3>] rgb\n```"), "rgb: %s", h);
 }
+
+fn void test_hover_range_covers_builtin()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module b;\nfn void f()\n{\n\tint x;\n\t$$volatile_load(&x);\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/builtin_hover.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/builtin_hover.c3", source);
+
+	foreach (uint c : { 1, 2, 3, 10 })
+	{
+		LspRange r = hover::hover_range(&proj, doc_uri, { .line = 4, .character = c })!!;
+		test::eq(r.start.line, 4u);
+		test::eq(r.start.character, 1u);
+		test::eq(r.end.line, 4u);
+		test::eq(r.end.character, 16u);
+	}
+}
+
+fn void test_hover_range_covers_vector_type_and_names()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String line = "macro bool[<*>] ulong[<*>].cmp_lt(ulong[<*>] x, ulong[<*>] y) => $$veccomplt(x, y);";
+	String source = string::tformat("module v;\n%s\n", line);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/vector_hover.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/vector_hover.c3", source);
+
+	foreach (uint[3] c : (uint[3][]){ { 11, 6, 15 }, { 22, 16, 26 }, { 28, 27, 33 }, { 45, 45, 46 }, { 0, 0, 5 }, { 70, 65, 76 } })
+	{
+		LspRange r = hover::hover_range(&proj, doc_uri, { .line = 1, .character = c[0] })!!;
+		test::eq(line[r.start.character..r.end.character - 1], line[c[1]..c[2] - 1]);
+	}
+}
+
+struct SuffixHoverCase
+{
+	uint line;
+	uint character;
+	String text;
+	String range;
+}
+
+fn void test_hover_on_type_suffix_describes_whole_type()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String[] lines = { "\tulong[<4>] a;", "\tint[] b;", "\tchar[4] c;", "\tvoid* d;", "\tint? e;", "\tint[]? g;", "\tint*[] h;" };
+	String source = string::tformat("module v;\nfn void f()\n{\n%s\n}\n", string::tjoin(lines, "\n"));
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/type_suffix.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/type_suffix.c3", source);
+
+	SuffixHoverCase[] cases = {
+		{ 0, 6, "```c3\nulong[<4>]\n```\n\nVector of `ulong`.", "ulong[<4>]" },
+		{ 0, 7, "```c3\nulong[<4>]\n```\n\nVector of `ulong`.", "ulong[<4>]" },
+		{ 0, 10, "```c3\nulong[<4>]\n```\n\nVector of `ulong`.", "ulong[<4>]" },
+		{ 1, 4, "```c3\nint[]\n```\n\nSlice of `int`.", "int[]" },
+		{ 1, 5, "```c3\nint[]\n```\n\nSlice of `int`.", "int[]" },
+		{ 2, 5, "```c3\nchar[4]\n```\n\nArray of `char`.", "char[4]" },
+		{ 3, 5, "```c3\nvoid*\n```\n\nPointer to `void`.", "void*" },
+		{ 4, 4, "```c3\nint?\n```\n\nOptional `int`.", "int?" },
+		{ 5, 4, "```c3\nint[]\n```\n\nSlice of `int`.", "int[]?" },
+		{ 5, 6, "```c3\nint[]?\n```\n\nOptional `int[]`.", "int[]?" },
+		{ 6, 4, "```c3\nint*\n```\n\nPointer to `int`.", "int*" },
+		{ 6, 5, "```c3\nint*[]\n```\n\nSlice of `int*`.", "int*[]" },
+	};
+	foreach (c : cases)
+	{
+		LspPosition pos = { .line = c.line + 3, .character = c.character };
+		test::eq(hover::hover(&proj, doc_uri, pos)!!, c.text);
+		LspRange r = hover::hover_range(&proj, doc_uri, pos)!!;
+		test::eq(lines[c.line][r.start.character..r.end.character - 1], c.range);
+	}
+	assert(hover::hover(&proj, doc_uri, { .line = 3, .character = 2 })!!.starts_with("```c3\nulong\n```"));
+	LspRange base = hover::hover_range(&proj, doc_uri, { .line = 3, .character = 2 })!!;
+	test::eq(lines[0][base.start.character..base.end.character - 1], "ulong");
+}

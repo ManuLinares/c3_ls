@@ -62,6 +62,73 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	return string::tformat("```c3\n%s\n```\n\n%s", kw.syntax(), kw.docs);
 }
 
+struct TypeAtContext
+{
+	Location loc;
+	TypeExpr* found;
+}
+
+fn ChildVisitResult find_type_at_callback(Node* c, Node* p, void* user_data)
+{
+	if (!c || c.kind == ERROR || !c.range.contains(((TypeAtContext*)user_data).loc)) return CONTINUE;
+	if (c.kind == TYPE_EXPR) ((TypeAtContext*)user_data).found = c.as(TypeExpr);
+	return RECURSE;
+}
+
+<*
+ The type whose suffix, such as `*`, `[]`, `[N]`, a vector or `?`, is under the mouse at `loc`.
+ Unlike the caret lookup, which gives the base type on the suffix's first character,
+ it matches only the type that holds the character at `loc`.
+*>
+fn TypeExpr* suffix_type_at(SourceFile* sf, Location loc) @local
+{
+	Node* top = query::enclosing_top_level(sf, loc);
+	if (!top) return null;
+	TypeAtContext ctx = { .loc = loc };
+	cursor::visit(top, null, {.on_enter = &find_type_at_callback }, &ctx);
+	TypeExpr* t = ctx.found;
+	if (!t) return null;
+	switch (t.type_kind)
+	{
+		case TYPE_POINTER:
+		case TYPE_SLICE:
+			return t;
+		case TYPE_ARRAY:
+		case TYPE_VECTOR:
+			return t.array.len_expr && t.array.len_expr.range.contains(loc) ? null : t;
+		default:
+			return t.optional && on_question(sf, loc) ? t : null;
+	}
+}
+
+fn bool on_question(SourceFile* sf, Location loc) @local
+{
+	if (!sf.lexer) return false;
+	sz i = sf.lexer.token_at(loc);
+	return i >= 0 && sf.lexer.tokens[i].kind == QUESTION;
+}
+
+<*
+ Range of what is hovered at `pos`: a declared name, or the whole expression or type there,
+ such as a vector type or `$$name`. Clients that get no range pick the hovered word themselves
+ and split such names.
+*>
+fn LspRange? hover_range(LspProject* project, Uri uri, LspPosition pos)
+{
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
+	if (!sf || !sf.lexer) return NOT_FOUND~;
+	Location loc = { .line = (int)pos.line, .column = (int)pos.character };
+	if (TypeExpr* t = suffix_type_at(sf, loc)) return analysis::to_lsp_range(t.range);
+	Node* n = query::node_at(sf, loc);
+	if (!n || n.kind == ERROR) return NOT_FOUND~;
+	Ident* name = references::decl_name(n);
+	if (!name) return analysis::to_lsp_range(n.range);
+	if (name.range.touches(loc)) return analysis::to_lsp_range(name.range);
+	sz i = sf.lexer.token_at(loc);
+	if (i < 0) return NOT_FOUND~;
+	return analysis::to_lsp_range(sf.lexer.tokens[i].range);
+}
+
 fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 {
 	// A tag of a doc contract, such as `@param`.
@@ -108,6 +175,24 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 			doc = c.doc;
 		}
 		return doc.len ? string::tformat("```c3\n%s\n```\n\n%s", label, doc) : string::tformat("```c3\n%s\n```", label);
+	}
+
+	if (TypeExpr* t = suffix_type_at(sf, loc))
+	{
+		String full = cursor::spelling(t, tmem);
+		String type = full.strip_suffix("?");
+		if (t.optional && on_question(sf, loc)) return string::tformat("```c3\n%s\n```\n\nOptional `%s`.", full, type);
+		String kind;
+		Node* base;
+		switch (t.type_kind)
+		{
+			case TYPE_POINTER: kind = "Pointer to"; base = t.modify.base;
+			case TYPE_SLICE: kind = "Slice of"; base = t.modify.base;
+			case TYPE_ARRAY: kind = "Array of"; base = t.array.base;
+			case TYPE_VECTOR: kind = "Vector of"; base = t.array.base;
+			default: break;
+		}
+		if (base) return string::tformat("```c3\n%s\n```\n\n%s `%s`.", type, kind, cursor::spelling(base, tmem));
 	}
 
 	// An overloaded operator shows the method it calls.

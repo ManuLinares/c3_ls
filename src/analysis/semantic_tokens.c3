@@ -10,42 +10,59 @@ import lsp::core;
 import lsp;
 import uri;
 
-const String[] TOKEN_TYPES = {
-	"namespace",  // 0
-	"type",  // 1
-	"class",  // 2
-	"enum",  // 3
-	"interface",  // 4
-	"struct",  // 5
-	"typeParameter",  // 6
-	"parameter",  // 7
-	"variable",  // 8
-	"property",  // 9
-	"enumMember",  // 10
-	"event",  // 11
-	"function",  // 12
-	"method",  // 13
-	"macro",  // 14
-	"keyword",  // 15
-	"modifier",  // 16
-	"comment",  // 17
-	"string",  // 18
-	"number",  // 19
-	"operator"  // 20
-};
+enum SemanticTokenType : uint
+{
+	NAMESPACE,
+	TYPE,
+	CLASS,
+	ENUM,
+	INTERFACE,
+	STRUCT,
+	TYPE_PARAMETER,
+	PARAMETER,
+	VARIABLE,
+	PROPERTY,
+	ENUM_MEMBER,
+	EVENT,
+	FUNCTION,
+	METHOD,
+	MACRO,
+	KEYWORD,
+	MODIFIER,
+	COMMENT,
+	STRING,
+	NUMBER,
+	OPERATOR,
+}
 
-const String[] TOKEN_MODIFIERS = {
-	"declaration",  // 1 << 0
-	"definition",  // 1 << 1
-	"readonly",  // 1 << 2
-	"static",  // 1 << 3
-	"deprecated",  // 1 << 4
-	"abstract",  // 1 << 5
-	"async",  // 1 << 6
-	"modification",  // 1 << 7
-	"documentation",  // 1 << 8
-	"defaultLibrary"  // 1 << 9
-};
+<*
+ Each value is sent as the bit `1 << ordinal`.
+*>
+enum SemanticTokenModifier : uint
+{
+	DECLARATION,
+	DEFINITION,
+	READONLY,
+	STATIC,
+	DEPRECATED,
+	ABSTRACT,
+	ASYNC,
+	MODIFICATION,
+	DOCUMENTATION,
+	DEFAULT_LIBRARY,
+}
+
+macro String[] @legend($Enum)
+{
+	var $names = {};
+	$foreach $v : $Enum::values:
+		$names +++= @str_camelcase($v.description);
+	$endforeach
+	return $names;
+}
+
+const String[] TOKEN_TYPES = @legend(SemanticTokenType);
+const String[] TOKEN_MODIFIERS = @legend(SemanticTokenModifier);
 
 fn String[] get_token_types() => TOKEN_TYPES;
 fn String[] get_token_modifiers() => TOKEN_MODIFIERS;
@@ -71,7 +88,7 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 		uint len = (uint)tok.value.len;
 		if (len == 0) continue;
 
-		uint t_type = 15;  // default keyword
+		SemanticTokenType t_type = KEYWORD;
 		uint t_mods = 0;
 
 		switch (tok.kind)
@@ -81,47 +98,64 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 			case DOCS_START:
 			case DOCS_END:
 			case DOCS_TEXT:
-				t_type = 17;  // comment
+				t_type = COMMENT;
 				break;
 
 			case STRING_LITERAL:
 			case CHAR_LITERAL:
 			case BYTES_LITERAL:
-				t_type = 18;  // string
+				t_type = STRING;
 				break;
 
 			case TYPE_IDENT:
 			case AT_TYPE_IDENT:
 			case CT_TYPE_IDENT:
-				t_type = 1;  // type
+				t_type = TYPE;
 				break;
 
 			case CONST_IDENT:
 			case AT_CONST_IDENT:
 			case CT_CONST_IDENT:
 			case HASH_CONST_IDENT:
-				t_type = 10;  // enumMember / constant
-				t_mods |= (1 << 2);  // readonly
+				t_type = ENUM_MEMBER;
+				t_mods |= 1 << SemanticTokenModifier.READONLY.ordinal;
 				break;
 
 			case HASH_IDENT:
 			case HASH_TYPE_IDENT:
-				t_type = 7;  // parameter
+				t_type = PARAMETER;
 				break;
 
 			case AT_IDENT:
-				t_type = 14;  // macro / attribute
+				t_type = MACRO;
 				break;
 
+			case BUILTIN:
+				{
+					if (i + 1 >= sf.lexer.tokens.len()) continue;
+					Token name = sf.lexer.tokens[i + 1];
+					if (name.range.start.line != tok.range.start.line || name.range.start.column != tok.range.start.column + 2) continue;
+					switch (name.kind)
+					{
+						case IDENT: t_type = FUNCTION;
+						case CONST_IDENT: t_type = ENUM_MEMBER;
+						default: continue;
+					}
+					len += (uint)name.value.len;
+					t_mods |= 1 << SemanticTokenModifier.DEFAULT_LIBRARY.ordinal;
+					i++;
+					break;
+				}
+
 			case CT_IDENT:
-				t_type = 8;  // variable
+				t_type = VARIABLE;
 				break;
 
 			case INLINE:
 			case STATIC:
 			case EXTERN:
 			case TLOCAL:
-				t_type = 15;  // keyword
+				t_type = KEYWORD;
 				break;
 
 			case IDENT:
@@ -131,15 +165,15 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 
 					if (next_tok.kind == LPAREN)
 					{
-						t_type = 12;  // function
+						t_type = FUNCTION;
 					}
 					else if (prev_tok.kind == DOT)
 					{
-						t_type = 9;  // property
+						t_type = PROPERTY;
 					}
 					else
 					{
-						t_type = 8;  // variable
+						t_type = VARIABLE;
 					}
 					break;
 				}
@@ -171,7 +205,7 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 			case CT_CONCAT_OP:
 			case CT_AND_OP:
 			case CT_OR_OP:
-				t_type = 20;  // operator
+				t_type = OPERATOR;
 				break;
 
 			default:
@@ -179,11 +213,11 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 				{
 					case tok.kind.is_int_literal():
 					case tok.kind.is_float_literal():
-						t_type = 19;  // number
+						t_type = NUMBER;
 					case tok.kind.is_base_type():
-						t_type = 1;  // type
+						t_type = TYPE;
 					case tok.kind.is_keyword():
-						t_type = 15;  // keyword
+						t_type = KEYWORD;
 					default:
 						continue;
 				}
@@ -195,7 +229,7 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 		encoded_data.push(delta_line);
 		encoded_data.push(delta_col);
 		encoded_data.push(len);
-		encoded_data.push(t_type);
+		encoded_data.push(t_type.ordinal);
 		encoded_data.push(t_mods);
 
 		prev_line = line;
