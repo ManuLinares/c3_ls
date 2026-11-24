@@ -65,7 +65,7 @@ fn ClangOutput? run_clang_raw(Allocator allocator, BindgenOptions options, Strin
 
 	cmd.push(options.header_path);
 
-	Process? proc = process::spawn(cmd.array_view(), options: ASYNC_OUTPUT);
+	Process? proc = process::spawn(cmd.array_view(), options: ASYNC_OUTPUT | INHERIT_ENV);
 	if (catch proc)
 	{
 		return CLANG_NOT_FOUND~;

@@ -4213,6 +4213,25 @@ fn void test_translation_unit_init_and_free_every_container()
 	tu.free();
 }
 
+fn void test_clang_inherits_environment() => @pool()
+{
+	$if env::POSIX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_clang_env_test")!!;
+		(void)path::mkdir(dir, true);
+		defer (void)path::rmtree(dir);
+		String script = (String)dir.tappend("fake_clang")!!;
+		file::save(script, "#!/bin/sh\nprintf '%s' \"$CPATH\"\n")!!;
+		file::chmod(script, USER_READ | USER_WRITE | USER_EXEC)!!;
+
+		env::set_var("CPATH", "/custom/include");
+		defer env::clear_var("CPATH");
+
+		BindgenOptions options = { .clang_path = script, .header_path = "x.h" };
+		ClangOutput out = bindgen::run_clang_raw(tmem, options, {})!!;
+		test::eq(out.stdout_str, "/custom/include");
+	$endif
+}
+
 module lsp::bindgen_test::posix_signal;
 
 extern fn uint alarm(uint seconds) @cname("alarm");

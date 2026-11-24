@@ -704,7 +704,7 @@ fn void setup_stdlib_path() => @pool()
 	String comp = compiler_path.len > 0 ? compiler_path : "c3c";
 
 	// stdlib path from `c3c compile --build-env`
-	if (try out = process::run_capture_stdout(&buf, { comp, "compile", "--build-env" }))
+	if (try out = process::run_capture_stdout(&buf, { comp, "compile", "--build-env" }, INHERIT_ENV))
 	{
 		foreach (line : out.trim().tsplit("\n"))
 		{
@@ -725,7 +725,7 @@ fn void setup_stdlib_path() => @pool()
 	}
 
 	// Fallback to `c3c --version`
-	if (try out = process::run_capture_stdout(&buf, { comp, "--version" }))
+	if (try out = process::run_capture_stdout(&buf, { comp, "--version" }, INHERIT_ENV))
 	{
 		String[] split_lines = out.trim().tsplit("\n");
 		if (split_lines.len >= 2)

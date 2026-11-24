@@ -437,7 +437,7 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 	cmd.push("--lsp");
 	cmd.push("--warn-builtin=no");
 
-	Process? proc = process::spawn(cmd.array_view(), options: STDERR_TO_STDOUT);
+	Process? proc = process::spawn(cmd.array_view(), options: STDERR_TO_STDOUT | INHERIT_ENV);
 	if (catch proc) return;
 
 	DString output_buf;

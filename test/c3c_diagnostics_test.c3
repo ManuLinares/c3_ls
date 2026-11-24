@@ -7,6 +7,8 @@ import std::io;
 import std::collections::list;
 import std::collections::maybe;
 import uri;
+import lsp::server;
+import std::os::env;
 
 fn void test_c3c_lsp_output_parsing()
 {
@@ -170,4 +172,35 @@ fn void test_c3c_diagnostics_pool_lifetime()
 	LspDiagnostic[] diags = ws.get_diagnostics("/home/mb/project/src/foo.c3");
 	test::eq(diags.len, 1);
 	test::eq(diags[0].message, "error message");
+}
+
+fn void test_c3c_inherits_environment() => @pool()
+{
+	$if env::POSIX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_env_test")!!;
+		(void)path::mkdir(dir, true);
+		String root = (String)dir;
+		String script = (String)dir.tappend("fake_c3c")!!;
+		String main_file = string::tformat("%s/src/main.c3", root);
+		file::save(script, string::tformat("#!/bin/sh\necho '> BEGINLSP'\necho \"> LSPERR|error|\\\"%s\\\"|1|1|\\\"$C3C_LIB\\\"\"\necho '> ENDLSP-OK'\n", main_file))!!;
+		file::chmod(script, USER_READ | USER_WRITE | USER_EXEC)!!;
+		defer (void)path::rmtree(dir);
+
+		env::set_var("C3C_LIB", "/custom/lib");
+		defer env::clear_var("C3C_LIB");
+		String old_compiler = server::compiler_path.copy(tmem);
+		server::set_compiler_path(script);
+		defer server::set_compiler_path(old_compiler);
+
+		LspProject proj;
+		proj.init(mem);
+		defer proj.free();
+		proj.config.root_path = root.copy(mem);
+
+		proj.run_c3c_diagnostics(main_file);
+
+		LspDiagnostic[] diags = proj.workspace.get_diagnostics(main_file);
+		test::eq(diags.len, 1);
+		test::eq(diags[0].message, "/custom/lib");
+	$endif
 }
