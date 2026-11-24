@@ -3295,6 +3295,11 @@ fn Node* resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_nod
 		if (Node* value = find_enum_argument_value(context, sf, enclosing_decl.as(EnumDecl), symbol_name, loc)) return value;
 	}
 
+	foreach (param : generic_params_at(context, sf, loc))
+	{
+		if (generic_param_name(param) == symbol_name) return param;
+	}
+
 	if (!symbol_name.starts_with("@"))
 	{
 		Node* local_decl = null;

@@ -1214,3 +1214,21 @@ fn void test_hover_on_type_suffix_describes_whole_type()
 	LspRange base = hover::hover_range(&proj, doc_uri, { .line = 3, .character = 2 })!!;
 	test::eq(lines[0][base.start.character..base.end.character - 1], "ulong");
 }
+
+fn void test_definition_of_receiver_generic_param()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/slice2d.c3", "module std::core::array;\nstruct Slice2d <Type>\n{\n\tType* ptr;\n}\n");
+	proj.workspace.process_file("/virtual/atomic.c3", "module std::atomic::types;\nstruct Atomic <Type>\n{\n\tType data;\n}\nmacro Type Atomic.load(&self)\n{\n\treturn self.data;\n}\n");
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/atomic.c3");
+	defer doc_uri.free();
+
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, { .line = 5, .character = 7 })!!;
+	test::eq(locs.len, 1);
+	assert(locs[0].uri.ends_with("atomic.c3"), "%s", locs[0].uri);
+	test::eq(locs[0].range.start.line, 1u);
+	test::eq(locs[0].range.start.character, 15u);
+}
