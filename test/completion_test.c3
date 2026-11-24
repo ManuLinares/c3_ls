@@ -3039,3 +3039,25 @@ fn void untyped_macro_argument_has_the_type_where_it_is_expanded() @test
 		assert(expected, "%d: debug_mode missing", pos.line);
 	}
 }
+
+fn void test_import_attribute_completion_excludes_private()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/imp_attr.c3", "module app;\nimport std::io @\n");
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/imp_attr.c3");
+	defer doc_uri.free();
+
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, { .line = 1, .character = 16 })!!;
+	bool has_public;
+	bool has_norecurse;
+	foreach (item : items)
+	{
+		assert(!item.label.ends_with("private"), "%s", item.label);
+		if (item.label.ends_with("public")) has_public = true;
+		if (item.label.ends_with("norecurse")) has_norecurse = true;
+	}
+	assert(has_public && has_norecurse);
+}

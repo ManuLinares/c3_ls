@@ -1232,3 +1232,23 @@ fn void test_definition_of_receiver_generic_param()
 	test::eq(locs[0].range.start.line, 1u);
 	test::eq(locs[0].range.start.character, 15u);
 }
+
+fn void test_hover_on_import_attributes()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.workspace.process_file("/virtual/lib.c3", "module lib;\nfn void f() {}\n");
+	proj.workspace.process_file("/virtual/imp.c3", "module app;\nimport lib @norecurse @public;\n");
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/imp.c3");
+	defer doc_uri.free();
+
+	String norecurse = hover::hover(&proj, doc_uri, { .line = 1, .character = 13 })!!;
+	assert(norecurse.contains("without recursively importing its submodules"), "%s", norecurse);
+	LspRange r = hover::hover_range(&proj, doc_uri, { .line = 1, .character = 13 })!!;
+	test::eq(r.start.character, 11u);
+	test::eq(r.end.character, 21u);
+	String public = hover::hover(&proj, doc_uri, { .line = 1, .character = 24 })!!;
+	assert(public.contains("`@private`"), "%s", public);
+}

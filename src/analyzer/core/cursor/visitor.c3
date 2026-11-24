@@ -144,6 +144,14 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				foreach (path : id.paths)
 				{
 					if (!visit(path, parent, hooks, data)) return false;
+					// Each path's attributes follow it, outside its range.
+					if (path && path.kind == PATH_EXPR)
+					{
+						foreach (attr : path.as(PathExpr).attributes)
+						{
+							if (!visit(attr, parent, hooks, data)) return false;
+						}
+					}
 				}
 				break;
 			}
