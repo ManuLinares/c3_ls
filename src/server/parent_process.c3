@@ -33,18 +33,23 @@ fn bool open_failed_on_missing_process() @feat(WIN32) @local
 }
 
 <*
+ The new thread reads its start function from here after `create` returns, so it may not be on
+ the stack of `watch_parent_process`.
+*>
+Thread parent_watcher @local;
+
+<*
  Exits the server once the editor process `pid`, from `initialize`, has exited, as LSP asks of a
  server whose stdin may outlive its editor.
 *>
 fn void watch_parent_process(int pid)
 {
-	Thread watcher;
-	if (catch err = watcher.create(&wait_for_parent_exit, (void*)(iptr)pid))
+	if (catch err = parent_watcher.create(&wait_for_parent_exit, (void*)(iptr)pid))
 	{
 		log::error("Could not watch the editor process %d: %s", pid, err);
 		return;
 	}
-	(void)watcher.detach();
+	(void)parent_watcher.detach();
 }
 
 fn int wait_for_parent_exit(void* arg) @local
