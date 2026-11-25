@@ -392,6 +392,30 @@ fn bool LspProject.is_test_source_file(&self, String file_path)
 	return file_path.contains("/test/") || file_path.contains("\\test\\");
 }
 
+<*
+ Whether the project's c3c build compiles `file_path`: one of its sources or test sources,
+ a library on its dependency search paths, or the stdlib.
+*>
+fn bool LspProject.builds_file(&self, String file_path)
+{
+	switch
+	{
+		case server::is_stdlib_file(file_path):
+		case self.is_test_source_file(file_path):
+		case self.file_matches_patterns(file_path, self.config.sources):
+		case self.file_matches_patterns(file_path, self.all_dependency_search_paths()):
+			return true;
+	}
+	if (self.config.targets.is_initialized())
+	{
+		self.config.targets.@each(; target_name, target_conf)
+		{
+			if (self.file_matches_patterns(file_path, target_conf.own_sources())) return true;
+		};
+	}
+	return false;
+}
+
 fn String LspProject.get_c3c_target(&self, String file_path)
 {
 	if (self.config.targets.is_initialized())
@@ -491,6 +515,7 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 		case stdlib_only:
 			cmd.push_all({ "compile", "-C", "-" });
 		case self.config.root_path.len == 0:
+		case !self.builds_file(user_file_path):
 			cmd.push_all({ "compile", "-C", user_file_path });
 		default:
 			cmd.push_all({ "--path", self.config.root_path });

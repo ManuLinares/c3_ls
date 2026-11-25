@@ -233,7 +233,7 @@ fn void test_c3c_diagnostic_covers_token()
  Runs `run_c3c_diagnostics` for `file` in a project rooted at `root`, with a compiler that
  reports its own arguments as an error on `file`, and returns that message.
 *>
-macro String @c3c_args_for(String dir, String root, String file)
+macro String @c3c_args_for(String dir, String root, String file, String[] sources = {})
 {
 	String script = string::tformat("%s/fake_c3c", dir);
 	file::save(script, string::tformat("#!/bin/sh\necho '> BEGINLSP'\necho \"> LSPERR|error|\\\"%s\\\"|1|1|\\\"$*\\\"\"\necho '> ENDLSP-OK'\n", file))!!;
@@ -246,6 +246,11 @@ macro String @c3c_args_for(String dir, String root, String file)
 	proj.init(mem);
 	defer proj.free();
 	if (root.len) proj.config.root_path = root.copy(mem);
+	if (sources.len)
+	{
+		proj.config.sources = alloc::alloc_array(mem, String, sources.len);
+		foreach (i, source : sources) proj.config.sources[i] = source.copy(mem);
+	}
 	proj.run_c3c_diagnostics(file);
 	LspDiagnostic[] diags = proj.workspace.get_diagnostics(file);
 	return diags.len == 1 ? diags[0].message.copy(tmem) : "";
@@ -268,8 +273,15 @@ fn void test_c3c_checks_stdlib_and_standalone_files() => @pool()
 		String lone = string::tformat("%s/lone.c3", d);
 		test::eq(@c3c_args_for(d, "", lone), string::tformat("compile -C %s --lsp --warn-builtin=no", lone));
 
-		String in_project = string::tformat("%s/src/main.c3", d);
-		test::eq(@c3c_args_for(d, d, in_project), string::tformat("--path %s build --lsp --warn-builtin=no", d));
+		String project_build = string::tformat("--path %s build --lsp --warn-builtin=no", d);
+		String[] sources = { "src/**" };
+		test::eq(@c3c_args_for(d, d, string::tformat("%s/src/main.c3", d), sources), project_build);
+		test::eq(@c3c_args_for(d, d, string::tformat("%s/lib/dep.c3l/dep.c3", d), sources), project_build);
+		test::eq(@c3c_args_for(d, d, string::tformat("%s/lib/std/io/formatter.c3", d), sources), project_build);
+
+		// A file in the project folder that its build does not compile is checked alone.
+		String stray = string::tformat("%s/ahh.c3", d);
+		test::eq(@c3c_args_for(d, d, stray, sources), string::tformat("compile -C %s --lsp --warn-builtin=no", stray));
 	$endif
 }
 
