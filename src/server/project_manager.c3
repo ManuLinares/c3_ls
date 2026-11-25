@@ -36,6 +36,18 @@ fn void ProjectManager.free(&self)
 }
 
 <*
+ Runs `body` for the default project and then every project with a root.
+*>
+macro void ProjectManager.@each_project(&self; @body(LspProject* project))
+{
+	@body(&self.default_project);
+	self.projects.@each(; root, proj)
+	{
+		if (proj) @body(proj);
+	};
+}
+
+<*
  Checks if a directory contains project.json or manifest.json.
 *>
 fn bool is_project_root_dir(Path dir)

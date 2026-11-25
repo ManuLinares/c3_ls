@@ -4,19 +4,15 @@ import std::io;
 import std::collections::map;
 import std::collections::list;
 import std::collections::set;
-import std::collections::object;
 import std::compression::zip;
 import std::encoding::json;
-import std::io::file;
 import std::os::process;
+import std::os::win32;
+import libc;
 
-import lsp::analysis;
-import lsp::server;
-import lsp::core::config;
-import analyzer::core;
+import lsp::server, lsp::utils;
 import analyzer::core::source_file;
 import uri;
-import lsp::utils;
 
 struct LspFile
 {
@@ -193,7 +189,12 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	LspFile* file = self.files.get(lookup_key) ?? null;
 	if (!file) return;
 
+	// Other projects' builds also report on the files they use, as on a stdlib file.
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
+	server::project_manager.@each_project(; LspProject* p)
+	{
+		p.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
+	};
 
 	if (params.document.version <= file.version) return;
 	file.version = params.document.version;
@@ -327,7 +328,7 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 		self.update();
 	}
 
-	if (self.config.root_path.len == 0 || lookup_key.starts_with("/virtual/")) return;
+	if (lookup_key.starts_with("/virtual/")) return;
 
 	SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
 	if (sf)
@@ -341,38 +342,39 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 		}
 	}
 
-	List{String} prev_c3c_files;
-	prev_c3c_files.tinit();
-	self.workspace.c3c_diagnostics.@each(; path, list)
+	List{LspProject*} runs;
+	runs.tinit();
+	runs.push(self);
+	// Each project's build also checks the stdlib's generic modules, which c3c checks only where used.
+	if (server::is_stdlib_file(lookup_key))
 	{
-		prev_c3c_files.push(path.copy(tmem));
-	};
-
-	self.run_c3c_diagnostics(lookup_key);
-
-	HashSet{String} published_paths;
-	published_paths.tinit();
-
-	if (published_paths.add(lookup_key))
-	{
-		server::publish_diagnostics_for_path(lookup_key, &self.workspace);
+		server::project_manager.@each_project(; LspProject* p)
+		{
+			if (p != self && p.config.root_path.len > 0) runs.push(p);
+		};
 	}
 
-	foreach (p : prev_c3c_files)
+	// Files with c3c diagnostics before or after the runs; published once each.
+	List{String} paths;
+	paths.tinit();
+	HashSet{String} seen;
+	seen.tinit();
+	if (seen.add(lookup_key)) paths.push(lookup_key);
+	foreach (p : runs)
 	{
-		if (published_paths.add(p))
+		p.workspace.c3c_diagnostics.@each(; path, list)
 		{
-			server::publish_diagnostics_for_path(p, &self.workspace);
-		}
+			String copy = path.copy(tmem);
+			if (seen.add(copy)) paths.push(copy);
+		};
+		p.run_c3c_diagnostics(lookup_key);
+		p.workspace.c3c_diagnostics.@each(; path, list)
+		{
+			String copy = path.copy(tmem);
+			if (seen.add(copy)) paths.push(copy);
+		};
 	}
-
-	self.workspace.c3c_diagnostics.@each(; path, list)
-	{
-		if (published_paths.add(path))
-		{
-			server::publish_diagnostics_for_path(path, &self.workspace);
-		}
-	};
+	foreach (path : paths) server::publish_diagnostics_for_path(path, &self.workspace);
 }
 
 fn bool LspProject.is_test_source_file(&self, String file_path)
@@ -409,9 +411,32 @@ fn String LspProject.get_c3c_target(&self, String file_path)
 	return "";
 }
 
+<*
+ Closes the child's stdin, so it reads end of input, as `join` does before waiting.
+*>
+fn void Process.close_stdin(&self)
+{
+	if (self.stdin_file)
+	{
+		libc::fclose(self.stdin_file);
+		self.stdin_file = null;
+	}
+	$if env::WIN32:
+		if (self.hStdInput)
+		{
+			win32::closeHandle(self.hStdInput);
+			self.hStdInput = null;
+		}
+	$endif
+}
+
+<*
+ Runs c3c on what `user_file_path` belongs to and keeps its diagnostics: the project's build,
+ the whole stdlib for a stdlib file, or the file alone outside a project.
+*>
 fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 {
-	if (self.config.root_path.len == 0 || user_file_path.len == 0) return;
+	if (user_file_path.len == 0) return;
 
 	List{String} cmd;
 	cmd.tinit();
@@ -419,19 +444,25 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 	String comp = server::compiler_path.len > 0 ? server::compiler_path : "c3c";
 	cmd.push(comp);
 
-	if (self.config.root_path.len > 0)
+	// Without a project, c3c checks the whole stdlib even for empty source, read here from the closed stdin.
+	bool stdlib_only = self.config.root_path.len == 0 && server::is_stdlib_file(user_file_path);
+	switch
 	{
-		cmd.push("--path");
-		cmd.push(self.config.root_path);
-	}
+		case stdlib_only:
+			cmd.push_all({ "compile", "-C", "-" });
+		case self.config.root_path.len == 0:
+			cmd.push_all({ "compile", "-C", user_file_path });
+		default:
+			cmd.push_all({ "--path", self.config.root_path });
 
-	bool is_test = self.is_test_source_file(user_file_path);
-	cmd.push(is_test ? "test" : "build");
+			bool is_test = self.is_test_source_file(user_file_path);
+			cmd.push(is_test ? "test" : "build");
 
-	String target = self.get_c3c_target(user_file_path);
-	if (target.len > 0)
-	{
-		cmd.push(target);
+			String target = self.get_c3c_target(user_file_path);
+			if (target.len > 0)
+			{
+				cmd.push(target);
+			}
 	}
 
 	cmd.push("--lsp");
@@ -439,6 +470,8 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 
 	Process? proc = process::spawn(cmd.array_view(), options: STDERR_TO_STDOUT | INHERIT_ENV);
 	if (catch proc) return;
+	defer (void)proc.destroy();
+	if (stdlib_only) proc.close_stdin();
 
 	DString output_buf;
 	output_buf.tinit();

@@ -137,6 +137,43 @@ struct PublishDiagnosticsResult
 	LspDiagnostic[] diagnostics;
 }
 
+<*
+ Diagnostics shown for `file_path`: all of the project that owns it, or of `ws` when none does,
+ and c3c's from every other project, whose build also reports on the files it uses.
+*>
+fn LspDiagnostic[] diagnostics_for_path(String file_path, LspWorkspace* ws)
+{
+	String norm_path = uri::normalize_path(tmem, file_path);
+	LspWorkspace* owner = ws;
+	project_manager.@each_project(; LspProject* p)
+	{
+		if (try f = p.files.get(norm_path))
+		{
+			if (f && !f.is_library) owner = &p.workspace;
+		}
+	};
+
+	List{LspDiagnostic} all;
+	all.tinit();
+	all.push_all(owner.get_diagnostics(file_path));
+	project_manager.@each_project(; LspProject* p)
+	{
+		if (&p.workspace != owner)
+		{
+			if (try list = p.workspace.c3c_diagnostics.get_ref(norm_path))
+			{
+				foreach (d : *list)
+				{
+					bool seen;
+					foreach (a : all) seen = seen || (mem::equals(&a.range, &d.range, 1) && a.severity == d.severity && a.message == d.message);
+					if (!seen) all.push(d);
+				}
+			}
+		}
+	};
+	return all.array_view();
+}
+
 fn void publish_diagnostics_for_path(String file_path, LspWorkspace* ws) => @pool()
 {
 	if (!ws || file_path.len == 0) return;
@@ -144,7 +181,7 @@ fn void publish_diagnostics_for_path(String file_path, LspWorkspace* ws) => @poo
 	Uri file_uri = uri::from_file_path(tmem, file_path);
 	DocumentUri formatted_uri = (DocumentUri)file_uri.to_raw_string(tmem);
 
-	LspDiagnostic[] diags = ws.get_diagnostics(file_path);
+	LspDiagnostic[] diags = diagnostics_for_path(file_path, ws);
 
 	LspPublishDiagnosticsNotification notif = {
 		.jsonrpc = "2.0",

@@ -228,3 +228,107 @@ fn void test_c3c_diagnostic_covers_token()
 	test::eq(other[0].range.start.character, 4u);
 	test::eq(other[0].range.end.character, 5u);
 }
+
+<*
+ Runs `run_c3c_diagnostics` for `file` in a project rooted at `root`, with a compiler that
+ reports its own arguments as an error on `file`, and returns that message.
+*>
+macro String @c3c_args_for(String dir, String root, String file)
+{
+	String script = string::tformat("%s/fake_c3c", dir);
+	file::save(script, string::tformat("#!/bin/sh\necho '> BEGINLSP'\necho \"> LSPERR|error|\\\"%s\\\"|1|1|\\\"$*\\\"\"\necho '> ENDLSP-OK'\n", file))!!;
+	file::chmod(script, USER_READ | USER_WRITE | USER_EXEC)!!;
+	String old_compiler = server::compiler_path.copy(tmem);
+	server::set_compiler_path(script);
+	defer server::set_compiler_path(old_compiler);
+
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	if (root.len) proj.config.root_path = root.copy(mem);
+	proj.run_c3c_diagnostics(file);
+	LspDiagnostic[] diags = proj.workspace.get_diagnostics(file);
+	return diags.len == 1 ? diags[0].message.copy(tmem) : "";
+}
+
+fn void test_c3c_checks_stdlib_and_standalone_files() => @pool()
+{
+	$if env::POSIX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_check_test")!!;
+		(void)path::mkdir(dir.tappend("lib/std/io")!!, true);
+		defer (void)path::rmtree(dir);
+		String d = (String)dir;
+		String old_std = server::std_path.copy(tmem);
+		server::set_std_path(string::tformat("%s/lib/std", d));
+		defer server::set_std_path(old_std);
+
+		String stdlib_args = @c3c_args_for(d, "", string::tformat("%s/lib/std/io/formatter.c3", d));
+		test::eq(stdlib_args, "compile -C - --lsp --warn-builtin=no");
+
+		String lone = string::tformat("%s/lone.c3", d);
+		test::eq(@c3c_args_for(d, "", lone), string::tformat("compile -C %s --lsp --warn-builtin=no", lone));
+
+		String in_project = string::tformat("%s/src/main.c3", d);
+		test::eq(@c3c_args_for(d, d, in_project), string::tformat("--path %s build --lsp --warn-builtin=no", d));
+	$endif
+}
+
+fn void test_c3c_run_closes_handles() => @pool()
+{
+	$if env::LINUX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_handle_test")!!;
+		(void)path::mkdir(dir, true);
+		defer (void)path::rmtree(dir);
+		String file = string::tformat("%s/lone.c3", (String)dir);
+		sz before = path::ls(tmem, path::tnew("/proc/self/fd")!!)!!.len();
+		for (int i = 0; i < 3; i++) (void)@c3c_args_for((String)dir, "", file);
+		test::eq(path::ls(tmem, path::tnew("/proc/self/fd")!!)!!.len(), before);
+	$endif
+}
+
+fn void test_stdlib_save_shows_project_build_errors() => @pool()
+{
+	$if env::POSIX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_stdlib_save_test")!!;
+		(void)path::rmtree(dir);
+		(void)path::mkdir(dir.tappend("lib/std")!!, true);
+		(void)path::mkdir(dir.tappend("proj/src")!!, true);
+		defer (void)path::rmtree(dir);
+		String d = (String)dir;
+		String lib_file = string::tformat("%s/lib/std/set.c3", d);
+		String main_file = string::tformat("%s/proj/src/main.c3", d);
+		file::save(lib_file, "module std::set <Value>;\nstruct Set { Value v; }\n")!!;
+		file::save(main_file, "module app;\nfn void main() {}\n")!!;
+		file::save(string::tformat("%s/proj/project.json", d), `{ "sources": [ "src/**" ] }`)!!;
+
+		// Only a project build reports the generic stdlib module, as c3c checks it only where used.
+		String script = string::tformat("%s/fake_c3c", d);
+		file::save(script, string::tformat("#!/bin/sh\necho '> BEGINLSP'\ncase \"$*\" in *--path*)\necho '> LSPERR|error|\"%s\"|2|21|\"Bad generic.\"'\necho '> LSPERR|note|\"%s\"|2|1|\"Instantiated here.\"';;\nesac\necho '> ENDLSP-OK'\n", lib_file, main_file))!!;
+		file::chmod(script, USER_READ | USER_WRITE | USER_EXEC)!!;
+		String old_compiler = server::compiler_path.copy(tmem);
+		server::set_compiler_path(script);
+		defer server::set_compiler_path(old_compiler);
+		String old_std = server::std_path.copy(tmem);
+		server::set_std_path(string::tformat("%s/lib/std", d));
+		defer server::set_std_path(old_std);
+
+		server::project_manager.init(mem);
+		defer server::project_manager.free();
+		server::project_manager.add_workspace_folder({ .uri = (LspUri)uri::from_file_path(tmem, string::tformat("%s/proj", d)).to_raw_string(tmem) });
+		LspProject* lib_owner = &server::project_manager.default_project;
+		String lib_uri = uri::from_file_path(tmem, lib_file).to_raw_string(tmem);
+		lib_owner.open_file({ .uri = lib_uri, .language_id = "c3", .version = 1, .text = (String)file::load_temp(lib_file)!! });
+		lib_owner.save_file(lib_uri);
+
+		LspDiagnostic[] lib_diags = server::diagnostics_for_path(lib_file, &lib_owner.workspace);
+		test::eq(lib_diags.len, 1);
+		test::eq(lib_diags[0].message, "Bad generic.");
+		LspDiagnostic[] main_diags = server::diagnostics_for_path(main_file, &lib_owner.workspace);
+		test::eq(main_diags.len, 1);
+		test::eq(main_diags[0].message, "Instantiated here.");
+
+		// Editing the file drops c3c's errors on it, whichever project's build reported them.
+		lib_owner.change_file({ .document = { .uri = lib_uri, .version = 2 }, .content_changes = { { .text = "module std::set <Value>;\nstruct Set { Value w; }\n" } } });
+		test::eq(server::diagnostics_for_path(lib_file, &lib_owner.workspace).len, 0);
+	$endif
+}
