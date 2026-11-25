@@ -203,10 +203,41 @@ fn void test_semantic_tokens_builtin_is_one_token()
 
 fn void test_semantic_tokens_legend_order()
 {
-	String[] types = { "namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "operator" };
+	String[] types = { "namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "operator", "regexp" };
 	String[] modifiers = { "declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary" };
 	test::eq(semantic_tokens::get_token_types().len, types.len);
 	foreach (i, t : types) test::eq(semantic_tokens::get_token_types()[i], t);
 	test::eq(semantic_tokens::get_token_modifiers().len, modifiers.len);
 	foreach (i, m : modifiers) test::eq(semantic_tokens::get_token_modifiers()[i], m);
+}
+
+fn void test_semantic_tokens_module_names_are_namespaces()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module app;\nimport std::io, std::math @norecurse;\nfn void main()\n{\n\tio::printn(\"x\");\n\tstd::io::File* f;\n\tint x = std::math::abs(-1);\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/namespaces.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/namespaces.c3", source);
+
+	SemanticTokensResult res = semantic_tokens::compute_semantic_tokens(&proj, doc_uri)!!;
+	String[] lines = source.tsplit("\n");
+	String[] namespaces = { "app", "std", "io", "math" };
+	uint line;
+	uint col;
+	int found;
+	for (sz i = 0; i < res.data.len; i += 5)
+	{
+		line += res.data[i];
+		col = res.data[i] == 0 ? col + res.data[i + 1] : res.data[i + 1];
+		String text = lines[line][col : res.data[i + 2]];
+		bool is_namespace = res.data[i + 3] == SemanticTokenType.REGEXP.ordinal;
+		bool should_be;
+		foreach (n : namespaces) if (text == n) should_be = true;
+		assert(is_namespace == should_be, "%s at %d:%d", text, line, col);
+		if (is_namespace) found++;
+	}
+	test::eq(found, 10);
 }

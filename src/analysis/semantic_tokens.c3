@@ -33,6 +33,7 @@ enum SemanticTokenType : uint
 	STRING,
 	NUMBER,
 	OPERATOR,
+	REGEXP,
 }
 
 <*
@@ -77,11 +78,21 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 
 	uint prev_line = 0;
 	uint prev_col = 0;
+	// Inside the module path of a `module` or `import` statement, before its attributes.
+	bool in_module_path;
 
 	for (sz i = 0; i < sf.lexer.tokens.len(); i++)
 	{
 		Token tok = sf.lexer.tokens[i];
 		if (tok.kind == EOF || tok.kind == ERROR) continue;
+		switch (tok.kind)
+		{
+			case MODULE:
+			case IMPORT: in_module_path = true;
+			case EOS:
+			case AT_IDENT: in_module_path = false;
+			default: break;
+		}
 
 		uint line = tok.range.start.line >= 0 ? (uint)tok.range.start.line : 0;
 		uint col = tok.range.start.column >= 0 ? (uint)tok.range.start.column : 0;
@@ -163,7 +174,14 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 					Token next_tok = (i + 1 < sf.lexer.tokens.len()) ? sf.lexer.tokens[i + 1] : tok;
 					Token prev_tok = (i > 0) ? sf.lexer.tokens[i - 1] : tok;
 
-					if (next_tok.kind == LPAREN)
+					// A module name is sent as `regexp`, not `namespace` or something proper.
+					// default VS Code themes colour `namespace` like types, and `regexp` is the only standard type with a colour of its own.
+					// Seems nicer
+					if (in_module_path || next_tok.kind == SCOPE)
+					{
+						t_type = REGEXP;
+					}
+					else if (next_tok.kind == LPAREN)
 					{
 						t_type = FUNCTION;
 					}
