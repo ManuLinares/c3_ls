@@ -1,19 +1,5 @@
 module lsp::core;
-
-import analyzer::core;
-import analyzer::core::context;
-import analyzer::core::diagnostics;
-import analyzer::core::source_file;
-import analyzer::cursor;
-import analyzer::sema;
-import analyzer::sema::registry;
-import analyzer::sema::query;
-import analyzer::lexer;
-
-import std::collections::list;
-import std::collections::map;
-import std::io;
-import uri;
+import lsp, analyzer, uri, std::collections::list, std::collections::map, std::io;
 
 struct SymbolEntry
 {
@@ -497,11 +483,18 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 			}
 		}
 
+		// TODO: c3c's `--lsp` output gives only where the error starts, so the range is the
+		// token there; if c3c adds the span length, use that instead.
+		LspRange range = { .start = { .line = l_0, .character = c_0 }, .end = { .line = l_0, .character = c_0 + 1 } };
+		SourceFile* sf = self.get_source_file_by_path(norm_file);
+		if (sf && sf.lexer)
+		{
+			sz i = sf.lexer.token_at({ .line = (int)l_0, .column = (int)c_0 });
+			if (i >= 0) range = analysis::to_lsp_range(sf.lexer.tokens[i].range);
+		}
+
 		LspDiagnostic diag = {
-			.range = {
-				.start = { .line = l_0, .character = c_0 },
-				.end = { .line = l_0, .character = c_0 + 1 }
-			},
+			.range = range,
 			.severity = severity,
 			.message = raw_msg.copy(self.allocator),
 			.source = "c3c"

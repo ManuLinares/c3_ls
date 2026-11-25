@@ -204,3 +204,27 @@ fn void test_c3c_inherits_environment() => @pool()
 		test::eq(diags[0].message, "/custom/lib");
 	$endif
 }
+
+fn void test_c3c_diagnostic_covers_token()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	ws.process_file("/home/mb/project/src/main.c3", "module t;\nfn void main()\n{\n\t\tint x = undefined_thing;\n}\n");
+	ws.parse_c3c_lsp_output(`> BEGINLSP
+> LSPERR|error|"/home/mb/project/src/main.c3"|4|11|"'undefined_thing' could not be found."
+> LSPERR|error|"/home/mb/project/src/other.c3"|2|5|"Not loaded."
+> ENDLSP-OK
+`, "/home/mb/project");
+
+	LspDiagnostic[] diags = ws.get_diagnostics("/home/mb/project/src/main.c3");
+	test::eq(diags.len, 1);
+	test::eq(diags[0].range.start.character, 10u);
+	test::eq(diags[0].range.end.character, 25u);
+
+	LspDiagnostic[] other = ws.get_diagnostics("/home/mb/project/src/other.c3");
+	test::eq(other.len, 1);
+	test::eq(other[0].range.start.character, 4u);
+	test::eq(other[0].range.end.character, 5u);
+}
