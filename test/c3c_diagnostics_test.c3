@@ -332,3 +332,46 @@ fn void test_stdlib_save_shows_project_build_errors() => @pool()
 		test::eq(server::diagnostics_for_path(lib_file, &lib_owner.workspace).len, 0);
 	$endif
 }
+
+fn void test_c3c_lsp2_span()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	ws.parse_c3c_lsp_output(`> BEGINLSP
+> LSPERR|error|"/home/mb/project/src/main.c3"|5|2|11|"'io::prinatn' could not be found."
+> ENDLSP-ERROR
+`, "/home/mb/project");
+
+	LspDiagnostic[] diags = ws.get_diagnostics("/home/mb/project/src/main.c3");
+	test::eq(diags.len, 1);
+	test::eq(diags[0].message, "'io::prinatn' could not be found.");
+	test::eq(diags[0].range.start.character, 1u);
+	test::eq(diags[0].range.end.character, 12u);
+}
+
+fn void test_c3c_uses_lsp2_when_supported() => @pool()
+{
+	$if env::POSIX:
+		Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_lsp2_test")!!;
+		(void)path::rmtree(dir);
+		(void)path::mkdir(dir, true);
+		defer (void)path::rmtree(dir);
+		String file = string::tformat("%s/lone.c3", (String)dir);
+		String script = string::tformat("%s/fake_c3c", (String)dir);
+		file::save(script, string::tformat("#!/bin/sh\ncase \"$1\" in --help) echo '  --lsp2   Like --lsp.';; *) echo '> BEGINLSP'\necho \"> LSPERR|error|\\\"%s\\\"|1|1|\\\"$*\\\"\"\necho '> ENDLSP-OK';; esac\n", file))!!;
+		file::chmod(script, USER_READ | USER_WRITE | USER_EXEC)!!;
+		String old_compiler = server::compiler_path.copy(tmem);
+		server::set_compiler_path(script);
+		defer server::set_compiler_path(old_compiler);
+
+		LspProject proj;
+		proj.init(mem);
+		defer proj.free();
+		proj.run_c3c_diagnostics(file);
+		LspDiagnostic[] diags = proj.workspace.get_diagnostics(file);
+		test::eq(diags.len, 1);
+		test::eq(diags[0].message, string::tformat("compile -C %s --lsp2 --warn-builtin=no", file));
+	$endif
+}

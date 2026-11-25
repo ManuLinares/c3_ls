@@ -453,6 +453,16 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 		if (catch p4) continue;
 		String col_str = rem[:p4].trim();
 		String raw_msg = rem[p4 + 1..].trim();
+		// `--lsp2` puts the span's length before the message, which is always quoted.
+		uint span_len;
+		if (raw_msg.len && raw_msg[0].is_digit())
+		{
+			if (try p5 = raw_msg.index_of_char('|'))
+			{
+				span_len = raw_msg[:p5].trim().to_uint() ?? 0;
+				raw_msg = raw_msg[p5 + 1..].trim();
+			}
+		}
 		if (raw_msg.starts_with("\"") && raw_msg.ends_with("\"") && raw_msg.len >= 2)
 		{
 			raw_msg = raw_msg[1 : ^2];
@@ -483,11 +493,10 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 			}
 		}
 
-		// TODO: c3c's `--lsp` output gives only where the error starts, so the range is the
-		// token there; if c3c adds the span length, use that instead.
-		LspRange range = { .start = { .line = l_0, .character = c_0 }, .end = { .line = l_0, .character = c_0 + 1 } };
+		LspRange range = { .start = { .line = l_0, .character = c_0 }, .end = { .line = l_0, .character = c_0 + (span_len ?: 1) } };
+		// Without a length, as from a c3c without `--lsp2`, the range is the token where the error starts.
 		SourceFile* sf = self.get_source_file_by_path(norm_file);
-		if (sf && sf.lexer)
+		if (!span_len && sf && sf.lexer)
 		{
 			sz i = sf.lexer.token_at({ .line = (int)l_0, .column = (int)c_0 });
 			if (i >= 0) range = analysis::to_lsp_range(sf.lexer.tokens[i].range);

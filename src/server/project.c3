@@ -412,6 +412,46 @@ fn String LspProject.get_c3c_target(&self, String file_path)
 }
 
 <*
+ Output of `cmd`, stderr included, read while it runs so a full pipe cannot block it;
+ empty when it cannot start.
+*>
+fn String capture_output(String[] cmd, bool close_stdin) @local
+{
+	Process? proc = process::spawn(cmd, options: STDERR_TO_STDOUT | INHERIT_ENV);
+	if (catch proc) return "";
+	defer (void)proc.destroy();
+	if (close_stdin) proc.close_stdin();
+
+	DString output;
+	output.tinit();
+	char[4096] chunk;
+	while (try n = proc.read_stdout(&chunk, chunk.len))
+	{
+		if (n <= 0) break;
+		output.append((String)chunk[:n]);
+	}
+	(void)proc.join();
+	return output.str_view();
+}
+
+ulong lsp2_checked_compiler @local;
+bool lsp2_supported @local;
+
+<*
+ Whether `compiler` gives each error's span length with `--lsp2`, checked once per compiler.
+*>
+fn bool has_lsp2(String compiler) @local => @pool()
+{
+	ulong id = compiler.hash();
+	if (id != lsp2_checked_compiler)
+	{
+		lsp2_supported = capture_output({ compiler, "--help" }, false).contains("--lsp2");
+		lsp2_checked_compiler = id;
+	}
+	return lsp2_supported;
+}
+
+<*
  Closes the child's stdin, so it reads end of input, as `join` does before waiting.
 *>
 fn void Process.close_stdin(&self)
@@ -465,30 +505,10 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 			}
 	}
 
-	cmd.push("--lsp");
+	cmd.push(has_lsp2(comp) ? "--lsp2" : "--lsp");
 	cmd.push("--warn-builtin=no");
 
-	Process? proc = process::spawn(cmd.array_view(), options: STDERR_TO_STDOUT | INHERIT_ENV);
-	if (catch proc) return;
-	defer (void)proc.destroy();
-	if (stdlib_only) proc.close_stdin();
-
-	DString output_buf;
-	output_buf.tinit();
-
-	char[4096] chunk;
-	while (true)
-	{
-		long? bytes_read = proc.read_stdout(&chunk, 4096);
-		if (catch bytes_read) break;
-		long n = bytes_read;
-		if (n <= 0) break;
-		output_buf.append((String)chunk[:n]);
-	}
-
-	(void)proc.join();
-
-	self.workspace.parse_c3c_lsp_output(output_buf.str_view(), self.config.root_path);
+	self.workspace.parse_c3c_lsp_output(capture_output(cmd.array_view(), stdlib_only), self.config.root_path);
 }
 
 fn void LspProject.update(&self)
