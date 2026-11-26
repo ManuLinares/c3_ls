@@ -46,16 +46,7 @@ fn bool node_to_location(LspProject* project, Uri fallback_uri, Node* node, LspL
 
 	*out_loc = {
 		.uri = target_uri,
-		.range = {
-			.start = {
-				.line = (uint)target_range.start.line,
-				.character = (uint)target_range.start.column
-			},
-			.end = {
-				.line = (uint)target_range.end.line,
-				.character = (uint)target_range.end.column
-			}
-		}
+		.range = analysis::to_lsp_range(target_range)
 	};
 	return true;
 }

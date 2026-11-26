@@ -672,7 +672,7 @@ fn void? on_execute_command(LspMessage* message, ExecuteCommandParams* params)
 				}
 			}
 
-			bindgen::BindgenOptions opts = {
+			BindgenOptions opts = {
 				.header_path = header_path,
 				.output_path = output_path,
 				.module_name = module_name,
@@ -690,18 +690,7 @@ fn void? on_execute_command(LspMessage* message, ExecuteCommandParams* params)
 				proj.open_file({ .uri = out_uri }, from_disk: true);
 
 				// Queue all open user documents for re-analysis so the new module clears diagnostics
-				proj.files.@each(; path_key, lsp_f)
-				{
-					if (lsp_f && !lsp_f.is_library)
-					{
-						proj.process_queue.push({
-							.source_text = lsp_f.text,
-							.uri = lsp_f.uri.path,
-							.path = lsp_f.uri.path,
-							.is_library = false
-						});
-					}
-				};
+				proj.requeue_user_files();
 
 				proj.update();
 			}
@@ -719,18 +708,7 @@ fn void? on_did_change_watched(LspMessage* message, DidChangeWatchedFilesParams*
 		{
 			LspProject* proj = get_project_for_raw_uri(ev.uri);
 			proj.close_file(ev.uri);
-			proj.files.@each(; path_key, lsp_f)
-			{
-				if (lsp_f && !lsp_f.is_library)
-				{
-					proj.process_queue.push({
-						.source_text = lsp_f.text,
-						.uri = lsp_f.uri.path,
-						.path = lsp_f.uri.path,
-						.is_library = false
-					});
-				}
-			};
+			proj.requeue_user_files();
 			proj.update();
 		}
 	}

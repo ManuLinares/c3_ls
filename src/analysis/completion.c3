@@ -70,6 +70,7 @@ struct LocalCollectorContext
 	Location loc;
 	List{CompletionItem}* items;
 	HashSet{String} seen;
+	bool skip_try_bindings;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +435,7 @@ fn bool is_type_position(Context* ctx)
 		}
 		foreach (stmt : ctx.sf.ast.statements)
 		{
-			if (stmt && stmt.range.contains(ctx.loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
+			if (stmt && stmt.range.touches(ctx.loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
 			{
 				NullableNode body = stmt.kind == FN_DECL ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
 				if (!body.contains(ctx.loc)) return true;
@@ -489,7 +490,7 @@ fn void provide_keywords(Context* ctx, List{CompletionItem}* items)
 {
 	if (ctx.access != NONE) return;
 
-	foreach (kw : constants::Keyword::values)
+	foreach (kw : Keyword::values)
 	{
 		switch (ctx.scope)
 		{
@@ -565,7 +566,7 @@ fn void provide_builtin_types(Context* ctx, List{CompletionItem}* items)
 
 	String sort_prefix = is_type_position(ctx) || may_open_cast(ctx) ? "0001" : "0020";
 
-	foreach (pt : constants::PrimitiveType::values)
+	foreach (pt : PrimitiveType::values)
 	{
 		if (fuzzy_match(pt.name, ctx.prefix))
 		{
@@ -729,7 +730,7 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFi
 		String doc_text = "";
 		if (mod && mod.module_decls.len() > 0)
 		{
-			doc_text = cursor::docs((Node*)mod.module_decls.get(0)) ?? "";
+			doc_text = cursor::docs((Node*)mod.module_decls.get(0));
 		}
 
 		if (base_path.len == 0)
@@ -796,6 +797,25 @@ fn void provide_module_paths(Context* ctx, List{CompletionItem}* items, SourceFi
 	};
 }
 
+<*
+ Offers the local `name` of `type`, once, ranked first when `type` is the expected one.
+*>
+fn void add_local(LocalCollectorContext* lctx, String name, String type) @local
+{
+	if (name.len == 0 || !fuzzy_match(name, lctx.ctx.prefix) || !lctx.seen.add(name)) return;
+	String sort_prefix = "0001";
+	if (lctx.ctx.expected_type.len > 0) sort_prefix = type == lctx.ctx.expected_type ? "0000" : "0003";
+	lctx.items.push({
+		.label = name,
+		.kind = VARIABLE,
+		.detail = type,
+		.insertText = name,
+		.filterText = name,
+		.sortText = string::tformat("%s_%s", sort_prefix, name),
+		.data = string::tformat("local:%s", name)
+	});
+}
+
 fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
@@ -804,149 +824,46 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 	// Parameters are in scope in the whole declaration, its contract included.
 	bool is_param = c.kind == VAR_DECL && c.as(VarDecl).var_kind >= VAR_PARAM;
 	if (!is_param && lctx.loc.before(c.range.start)) return CONTINUE;
+	if (query::opens_scope(c.kind) && !c.range.contains(lctx.loc)) return CONTINUE;
+	if (c.kind == IF_STMT && c.as(IfStmt).else_body.contains(lctx.loc))
+	{
+		// The `else` branch sees `catch` bindings of the condition, not `try` ones.
+		IfStmt* if_stmt = c.as(IfStmt);
+		lctx.skip_try_bindings = true;
+		cursor::visit(if_stmt.condition, c, {.on_enter = &collect_locals_callback }, lctx);
+		lctx.skip_try_bindings = false;
+		cursor::visit(if_stmt.else_body.get()!!, c, {.on_enter = &collect_locals_callback }, lctx);
+		return CONTINUE;
+	}
 
 	switch (c.kind)
 	{
 		case VAR_DECL:
-			{
-				VarDecl* vd = c.as(VarDecl);
-				String vname = vd.name.text();
-				if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
-				{
-					String vtype = declaration::type_text(lctx.ctx.ws.ctx, vd.type) ?: "var";
-					if (lctx.seen.add(vname))
-					{
-						String sort_prefix = "0001";
-						if (lctx.ctx.expected_type.len > 0)
-						{
-							sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
-						}
-						lctx.items.push(
-						{
-							.label = vname,
-							.kind = VARIABLE,
-							.detail = vtype,
-							.insertText = vname,
-							.filterText = vname,
-							.sortText = string::tformat("%s_%s", sort_prefix, vname),
-							.data = string::tformat("local:%s", vname)
-						}
-						);
-					}
-				}
-			}
+			VarDecl* vd = c.as(VarDecl);
+			add_local(lctx, vd.name.text(), declaration::type_text(lctx.ctx.ws.ctx, vd.type) ?: "var");
 		case TRY_EXPR:
+			TryExpr* te = c.as(TryExpr);
+			if (lctx.skip_try_bindings || te.variable.kind != IDENT_EXPR) break;
+			String vtype = declaration::type_text(lctx.ctx.ws.ctx, te.type) ?: "var";
+			if (try init = te.init.get() && vtype == "var" && lctx.ctx.ws && lctx.ctx.ws.ctx)
 			{
-				TryExpr* te = c.as(TryExpr);
-				if (te.variable.kind != IDENT_EXPR) break;
-				IdentExpr* ie = te.variable.as(IdentExpr);
-				String vname = ie.ident.text;
-				if (vname.len == 0 || !fuzzy_match(vname, lctx.ctx.prefix)) break;
-				if (!lctx.seen.add(vname)) break;
-
-				String vtype = declaration::type_text(lctx.ctx.ws.ctx, te.type) ?: "var";
-				if (try init = te.init.get() && vtype == "var" && lctx.ctx.ws && lctx.ctx.ws.ctx)
-				{
-					String itype = query::type_of(lctx.ctx.ws.ctx, lctx.ctx.sf, init, lctx.loc);
-					itype = itype.trim_right("?*& \t");
-					if (itype.len > 0) vtype = itype;
-				}
-				String sort_prefix = "0001";
-				if (lctx.ctx.expected_type.len > 0)
-				{
-					sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
-				}
-				lctx.items.push(
-				{
-					.label = vname,
-					.kind = VARIABLE,
-					.detail = vtype,
-					.insertText = vname,
-					.filterText = vname,
-					.sortText = string::tformat("%s_%s", sort_prefix, vname),
-					.data = string::tformat("local:%s", vname)
-				}
-				);
+				String itype = query::type_of(lctx.ctx.ws.ctx, lctx.ctx.sf, init, lctx.loc).trim_right("?*& \t");
+				if (itype.len > 0) vtype = itype;
 			}
+			add_local(lctx, te.variable.as(IdentExpr).ident.text, vtype);
 		case CATCH_EXPR:
+			CatchExpr* ce = c.as(CatchExpr);
+			if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR)
 			{
-				CatchExpr* ce = c.as(CatchExpr);
-				if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR)
-				{
-					String vname = variable.as(IdentExpr).ident.text;
-					if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
-					{
-						if (lctx.seen.add(vname))
-						{
-							String vtype = declaration::type_text(lctx.ctx.ws.ctx, ce.type) ?: "fault";
-							String sort_prefix = "0001";
-							if (lctx.ctx.expected_type.len > 0)
-							{
-								sort_prefix = (vtype == lctx.ctx.expected_type) ? "0000" : "0003";
-							}
-							lctx.items.push(
-							{
-								.label = vname,
-								.kind = VARIABLE,
-								.detail = vtype,
-								.insertText = vname,
-								.filterText = vname,
-								.sortText = string::tformat("%s_%s", sort_prefix, vname),
-								.data = string::tformat("local:%s", vname)
-							}
-							);
-						}
-					}
-				}
+				add_local(lctx, variable.as(IdentExpr).ident.text, declaration::type_text(lctx.ctx.ws.ctx, ce.type) ?: "fault");
 			}
 		case FOREACH_STMT:
+			ForeachStmt* fst = c.as(ForeachStmt);
+			if (try index = fst.index.get() && index.kind == VAR_DECL) add_local(lctx, index.as(VarDecl).name.text(), "sz");
+			if (fst.variable.kind == VAR_DECL)
 			{
-				ForeachStmt* fst = c.as(ForeachStmt);
-				if (try index = fst.index.get() && index.kind == VAR_DECL)
-				{
-					VarDecl* ivd = index.as(VarDecl);
-					String iname = ivd.name.text();
-					if (iname.len > 0 && fuzzy_match(iname, lctx.ctx.prefix))
-					{
-						if (lctx.seen.add(iname))
-						{
-							lctx.items.push(
-							{
-								.label = iname,
-								.kind = VARIABLE,
-								.detail = "sz",
-								.insertText = iname,
-								.filterText = iname,
-								.sortText = string::tformat("0001_%s", iname),
-								.data = string::tformat("local:%s", iname)
-							}
-							);
-						}
-					}
-				}
-				if (fst.variable.kind == VAR_DECL)
-				{
-					VarDecl* vvd = fst.variable.as(VarDecl);
-					String vname = vvd.name.text();
-					if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
-					{
-						if (lctx.seen.add(vname))
-						{
-							String vtype = declaration::type_text(lctx.ctx.ws.ctx, vvd.type) ?: "var";
-							lctx.items.push(
-							{
-								.label = vname,
-								.kind = VARIABLE,
-								.detail = vtype,
-								.insertText = vname,
-								.filterText = vname,
-								.sortText = string::tformat("0001_%s", vname),
-								.data = string::tformat("local:%s", vname)
-							}
-							);
-						}
-					}
-				}
+				VarDecl* value = fst.variable.as(VarDecl);
+				add_local(lctx, value.name.text(), declaration::type_text(lctx.ctx.ws.ctx, value.type) ?: "var");
 			}
 		default:
 			break;
@@ -1007,27 +924,6 @@ fn void provide_locals(Context* ctx, List{CompletionItem}* items)
 	cursor::visit(enclosing_fn, null, {.on_enter = &collect_locals_callback }, &lctx);
 }
 
-fn String extract_named_arg_identifier(String arg_str) @local
-{
-	String s = arg_str.trim();
-	if (s.len == 0) return "";
-	if (s.starts_with("#") || s.starts_with("$")) s = s[1..];
-	if (s.len == 0 || (!s[0].is_alpha() && s[0] != '_')) return "";
-
-	sz i = 0;
-	while (i < s.len && lexer::is_ident(s[i])) i++;
-
-	String name = s[:i];
-	while (i < s.len && (s[i] == ' ' || s[i] == '\t')) i++;
-
-	if (i < s.len && s[i] == ':' && (i + 1 == s.len || s[i + 1] != ':'))
-	{
-		return name;
-	}
-
-	return "";
-}
-
 fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 {
 	if (!ctx.sf || ctx.offset == 0 || !ctx.ws || !ctx.ws.ctx) return;
@@ -1041,79 +937,43 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 
 	sz start_idx = target.first_param;
 
-	String args_text = "";
-	if (ctx.offset > target_info.open_paren_idx + 1)
-	{
-		args_text = ctx.sf.content[target_info.open_paren_idx + 1 : ctx.offset - (target_info.open_paren_idx + 1)];
-	}
-
 	sz positional_count = 0;
 	List{String} used_names;
 	used_names.tinit();
 
-	if (args_text.len > 0)
+	// Arguments before the cursor, split at top-level commas: `name: value` is named.
+	Token[] tokens = ctx.sf.lexer.tokens.array_view();
+	sz end = utils::tokens_before(ctx.sf, ctx.offset);
+	sz arg_first = utils::tokens_before(ctx.sf, target_info.open_paren_idx) + 1;
+	int depth = 0;
+	for (sz i = arg_first; i < end; i++)
 	{
-		int depth = 0;
-		bool in_str = false;
-		bool in_char = false;
-		bool in_raw = false;
-		sz arg_start = 0;
-
-		for (sz i = 0; i < args_text.len; i++)
+		switch (tokens[i].kind)
 		{
-			char c = args_text[i];
-			if (in_raw)
-			{
-				if (c == '`') in_raw = false;
-				continue;
-			}
-			if (in_str)
-			{
-				if (c == '\\' && i + 1 < args_text.len) { i++; continue; }
-				if (c == '"') in_str = false;
-				continue;
-			}
-			if (in_char)
-			{
-				if (c == '\\' && i + 1 < args_text.len) { i++; continue; }
-				if (c == '\'') in_char = false;
-				continue;
-			}
-
-			switch (c)
-			{
-				case '`': in_raw = true;
-				case '"': in_str = true;
-				case '\'': in_char = true;
-				case '(':
-				case '[':
-				case '{':
-					depth++;
-				case ')':
-				case ']':
-				case '}':
-					if (depth > 0) depth--;
-				case ',':
-					if (depth == 0)
+			case LPAREN:
+			case LBRACKET:
+			case LBRACE:
+				depth++;
+			case RPAREN:
+			case RBRACKET:
+			case RBRACE:
+				if (depth > 0) depth--;
+			case COMMA:
+				if (depth != 0) break;
+				if (i > arg_first)
+				{
+					if (i > arg_first + 1 && tokens[arg_first].kind.is_identifier() && tokens[arg_first + 1].kind == COLON)
 					{
-						String completed_arg = args_text[arg_start : i - arg_start].trim();
-						if (completed_arg.len > 0)
-						{
-							String named = extract_named_arg_identifier(completed_arg);
-							if (named.len > 0)
-							{
-								used_names.push(named);
-							}
-							else
-							{
-								positional_count++;
-							}
-						}
-						arg_start = i + 1;
+						used_names.push(tokens[arg_first].value.strip_prefix("#").strip_prefix("$"));
 					}
-				default:
-					break;
-			}
+					else
+					{
+						positional_count++;
+					}
+				}
+				arg_first = i + 1;
+			default:
+				break;
 		}
 	}
 
@@ -1250,7 +1110,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 			if (fn_info && fn_info.node && fn_info.node.kind == FN_DECL)
 			{
 				FnDecl* fndecl = fn_info.node.as(FnDecl);
-				if (!fndecl.associated_type)
+				if (!@ok(fndecl.associated_type.get()))
 				{
 					String fname = fndecl.name.text();
 					if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
@@ -1310,7 +1170,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 					String stmt_mod = query::get_module_name_at_location(sf, stmt.range.start);
 					String mod_ident = stmt_mod.len > 0 ? stmt_mod : "global";
 					if (stmt.kind == ATTRDEF_DECL) continue;
-					if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
+					if (stmt.kind == FN_DECL && @ok(stmt.as(FnDecl).associated_type.get())) continue;
 					if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
 
 					if (stmt.kind == FAULTDEF_DECL)
@@ -1391,41 +1251,6 @@ fn void provide_global_types_only(Context* ctx, List{CompletionItem}* items)
 			}
 		};
 	}
-
-	ctx.ws.ctx.files.@each(; file_path, sf)
-	{
-		if (sf)
-		{
-			String file_mod = query::get_source_file_module_name(sf);
-			String mod_ident = file_mod.len > 0 ? file_mod : "global";
-			foreach (stmt : sf.ast.statements)
-			{
-				if (stmt)
-				{
-					switch (stmt.kind)
-					{
-						case STRUCT_DECL:
-						case ENUM_DECL:
-						case TYPEDEF_DECL:
-						case ALIAS_DECL:
-						case INTERFACE_DECL:
-							{
-								String sname = cursor::spelling(stmt, tmem);
-								if (sname.len > 0 && fuzzy_match(sname, ctx.prefix))
-								{
-									if (seen_symbols.add(sname))
-									{
-										add_symbol_completion(ctx, items, sname, stmt, mod_ident, ctx.prefix);
-									}
-								}
-							}
-						default:
-							break;
-					}
-				}
-			}
-		}
-	};
 }
 
 // ---------------------------------------------------------------------------
@@ -1606,7 +1431,7 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	while (cursor_idx > 0 && text[cursor_idx - 1].is_space()) cursor_idx--;
 
 	sz base_end = cursor_idx;
-	sz base_start = utils::scan_base_expression_start(text, base_end);
+	sz base_start = utils::scan_base_expression_start(sf, base_end);
 
 	if (base_end > base_start)
 	{
@@ -1861,6 +1686,37 @@ fn void collect_already_set_fields(SourceFile* sf, sz offset, HashSet{String}* o
 	}
 }
 
+<*
+ Offers the field `name` of `type_name`; in a designated initializer it inserts `.name = `.
+*>
+fn void add_field(Context* ctx, List{CompletionItem}* items, String type_name, String name, String detail) @local
+{
+	String insert_str = name;
+	InsertTextFormat format = PLAIN_TEXT;
+	if (ctx.is_designated_initializer)
+	{
+		if (ctx.designated_has_dot)
+		{
+			insert_str = string::tformat("%s = $1", name);
+		}
+		else
+		{
+			insert_str = string::tformat(".%s = $1", name);
+		}
+		format = SNIPPET;
+	}
+	items.push({
+		.label = name,
+		.kind = FIELD,
+		.detail = detail,
+		.insertText = insert_str,
+		.insertTextFormat = format,
+		.filterText = name,
+		.sortText = string::tformat("0001_%s", name),
+		.data = string::tformat("field:%s:%s", type_name, name)
+	});
+}
+
 fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* items, Node* struct_node, String type_name, HashSet{String}* seen_fields)
 {
 	if (!struct_node || struct_node.kind != STRUCT_DECL) return;
@@ -1877,36 +1733,7 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* item
 				String fname = fdecl.name.text();
 				if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 				{
-					if (seen_fields.add(fname))
-					{
-						String ftype = declaration::type_text(ctx.ws.ctx, fdecl.type);
-						String insert_str = fname;
-						InsertTextFormat format = PLAIN_TEXT;
-						if (ctx.is_designated_initializer)
-						{
-							if (ctx.designated_has_dot)
-							{
-								insert_str = string::tformat("%s = $1", fname);
-							}
-							else
-							{
-								insert_str = string::tformat(".%s = $1", fname);
-							}
-							format = SNIPPET;
-						}
-						items.push(
-						{
-							.label = fname,
-							.kind = FIELD,
-							.detail = ftype,
-							.insertText = insert_str,
-							.insertTextFormat = format,
-							.filterText = fname,
-							.sortText = string::tformat("0001_%s", fname),
-							.data = string::tformat("field:%s:%s", type_name, fname)
-						}
-						);
-					}
+					if (seen_fields.add(fname)) add_field(ctx, items, type_name, fname, declaration::type_text(ctx.ws.ctx, fdecl.type));
 				}
 				if (try sub_type = cursor::inline_type(fdecl))
 				{
@@ -1927,32 +1754,7 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* item
 				if (sname.len > 0 && fuzzy_match(sname, ctx.prefix) && seen_fields.add(sname))
 				{
 					String kind_str = sub.is_union ? "union" : (sub.is_bitstruct ? "bitstruct" : "struct");
-					String insert_str = sname;
-					InsertTextFormat format = PLAIN_TEXT;
-					if (ctx.is_designated_initializer)
-					{
-						if (ctx.designated_has_dot)
-						{
-							insert_str = string::tformat("%s = $1", sname);
-						}
-						else
-						{
-							insert_str = string::tformat(".%s = $1", sname);
-						}
-						format = SNIPPET;
-					}
-					items.push(
-					{
-						.label = sname,
-						.kind = FIELD,
-						.detail = string::tformat("%s %s", kind_str, sname),
-						.insertText = insert_str,
-						.insertTextFormat = format,
-						.filterText = sname,
-						.sortText = string::tformat("0001_%s", sname),
-						.data = string::tformat("field:%s:%s", type_name, sname)
-					}
-					);
+					add_field(ctx, items, type_name, sname, string::tformat("%s %s", kind_str, sname));
 				}
 			}
 			else
@@ -1983,21 +1785,32 @@ macro void @add_prop(items, String label, CompletionItemKind kind, String detail
 	);
 }
 
+<*
+ Offers each of the type properties `props`; the ones taking arguments as methods.
+*>
+macro void @add_type_props(items, props, bool missing_colon)
+{
+	foreach (p : props)
+	{
+		bool is_method = p == IS_GENERIC || p == GET_TAG || p == HAS_TAG || p == FROM_ORDINAL || p == LOOKUP_FIELD;
+		@add_prop(items, p.name, is_method ? METHOD : PROPERTY, p.type_desc, p.doc, missing_colon);
+	}
+}
+
 fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, String type_name = "", bool missing_second_colon = false)
 {
-	const constants::TypeProperty[*] COMMON_PROPS = {
+	const TypeProperty[*] COMMON_PROPS = {
 		ALIGNMENT, KIND, NAME, QNAME, CNAME, SIZE, TYPEID, METHODS,
 		HAS_EQUALS, IS_ORDERED, INNER, GENERIC_ARGS, GENERIC_QNAME, IS_GENERIC
 	};
-	foreach (p : COMMON_PROPS)
-	{
-		CompletionItemKind k = (p == IS_GENERIC) ? METHOD : PROPERTY;
-		@add_prop(items, p.name, k, p.type_desc, p.doc, missing_second_colon);
-	}
+	const TypeProperty[*] STRUCT_PROPS = { MEMBERS, GET_TAG, HAS_TAG, IS_SUBSTRUCT, PARENT };
+	const TypeProperty[*] ENUM_PROPS = { VALUES, LEN, NAMES, MEMBERS, FROM_ORDINAL, LOOKUP_FIELD };
+	const TypeProperty[*] FN_PROPS = { PARAMS, RETURNS, PARAM_STRUCT };
+	@add_type_props(items, COMMON_PROPS, missing_second_colon);
 
 	bool is_float = false;
 	bool is_int = false;
-	if (try pt = constants::PrimitiveType::lookup_field(name, type_name))
+	if (try pt = PrimitiveType::lookup_field(name, type_name))
 	{
 		is_float = pt.is_float();
 		is_int = pt.is_int();
@@ -2006,35 +1819,21 @@ fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, 
 	if (is_float || is_int || type_kind == VAR_DECL)
 	{
 		String t_label = type_name.len > 0 ? type_name : "any";
-		@add_prop(items, constants::TypeProperty.MAX.name, PROPERTY, t_label, constants::TypeProperty.MAX.doc, missing_second_colon);
-		@add_prop(items, constants::TypeProperty.MIN.name, PROPERTY, t_label, constants::TypeProperty.MIN.doc, missing_second_colon);
+		@add_prop(items, TypeProperty.MAX.name, PROPERTY, t_label, TypeProperty.MAX.doc, missing_second_colon);
+		@add_prop(items, TypeProperty.MIN.name, PROPERTY, t_label, TypeProperty.MIN.doc, missing_second_colon);
 	}
 
 	if (is_float)
 	{
-		@add_prop(items, constants::TypeProperty.NAN.name, PROPERTY, type_name, constants::TypeProperty.NAN.doc, missing_second_colon);
-		@add_prop(items, constants::TypeProperty.INF.name, PROPERTY, type_name, constants::TypeProperty.INF.doc, missing_second_colon);
+		@add_prop(items, TypeProperty.NAN.name, PROPERTY, type_name, TypeProperty.NAN.doc, missing_second_colon);
+		@add_prop(items, TypeProperty.INF.name, PROPERTY, type_name, TypeProperty.INF.doc, missing_second_colon);
 	}
 
 	switch (type_kind)
 	{
-		case STRUCT_DECL:
-			@add_prop(items, constants::TypeProperty.MEMBERS.name, PROPERTY, constants::TypeProperty.MEMBERS.type_desc, constants::TypeProperty.MEMBERS.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.GET_TAG.name, METHOD, constants::TypeProperty.GET_TAG.type_desc, constants::TypeProperty.GET_TAG.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.HAS_TAG.name, METHOD, constants::TypeProperty.HAS_TAG.type_desc, constants::TypeProperty.HAS_TAG.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.IS_SUBSTRUCT.name, PROPERTY, constants::TypeProperty.IS_SUBSTRUCT.type_desc, constants::TypeProperty.IS_SUBSTRUCT.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.PARENT.name, PROPERTY, constants::TypeProperty.PARENT.type_desc, constants::TypeProperty.PARENT.doc, missing_second_colon);
-		case ENUM_DECL:
-			@add_prop(items, constants::TypeProperty.VALUES.name, PROPERTY, constants::TypeProperty.VALUES.type_desc, constants::TypeProperty.VALUES.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.LEN.name, PROPERTY, constants::TypeProperty.LEN.type_desc, constants::TypeProperty.LEN.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.NAMES.name, PROPERTY, constants::TypeProperty.NAMES.type_desc, constants::TypeProperty.NAMES.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.MEMBERS.name, PROPERTY, constants::TypeProperty.MEMBERS.type_desc, constants::TypeProperty.MEMBERS.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.FROM_ORDINAL.name, METHOD, constants::TypeProperty.FROM_ORDINAL.type_desc, constants::TypeProperty.FROM_ORDINAL.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.LOOKUP_FIELD.name, METHOD, constants::TypeProperty.LOOKUP_FIELD.type_desc, constants::TypeProperty.LOOKUP_FIELD.doc, missing_second_colon);
-		case FN_DECL:
-			@add_prop(items, constants::TypeProperty.PARAMS.name, PROPERTY, constants::TypeProperty.PARAMS.type_desc, constants::TypeProperty.PARAMS.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.RETURNS.name, PROPERTY, constants::TypeProperty.RETURNS.type_desc, constants::TypeProperty.RETURNS.doc, missing_second_colon);
-			@add_prop(items, constants::TypeProperty.PARAM_STRUCT.name, PROPERTY, constants::TypeProperty.PARAM_STRUCT.type_desc, constants::TypeProperty.PARAM_STRUCT.doc, missing_second_colon);
+		case STRUCT_DECL: @add_type_props(items, STRUCT_PROPS, missing_second_colon);
+		case ENUM_DECL: @add_type_props(items, ENUM_PROPS, missing_second_colon);
+		case FN_DECL: @add_type_props(items, FN_PROPS, missing_second_colon);
 		default:
 			break;
 	}
@@ -2042,7 +1841,7 @@ fn void inject_type_properties(List{CompletionItem}* items, NodeKind type_kind, 
 
 fn void inject_reflect_properties(List{CompletionItem}* items, String prefix = "")
 {
-	foreach (p : constants::ReflectProperty::values)
+	foreach (p : ReflectProperty::values)
 	{
 		if (prefix.len == 0 || p.name.starts_with(prefix))
 		{
@@ -2108,7 +1907,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 						foreach (node : mod.nodes)
 						{
 							if (!node || node.kind == ERROR) continue;
-							if (node.kind == FN_DECL && node.as(FnDecl).associated_type != null) continue;
+							if (node.kind == FN_DECL && @ok(node.as(FnDecl).associated_type.get())) continue;
 							if (node.kind == MACRO_DECL && @ok(node.as(MacroDecl).associated_type.get())) continue;
 
 							if (node.kind == FAULTDEF_DECL)
@@ -2150,7 +1949,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 				}
 				if (any_type)
 				{
-					foreach (p : constants::TypeProperty::values)
+					foreach (p : TypeProperty::values)
 					{
 						@add_prop(items, p.name, p.type_desc.starts_with("fn") ? METHOD : PROPERTY, p.type_desc, p.doc, ctx.missing_second_colon);
 					}
@@ -2434,34 +2233,6 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 		return true;
 	}
 
-	if (before_at.len == 0)
-	{
-		bool inside_fn = false;
-		if (loc.line >= 0)
-		{
-			foreach (stmt : ctx.sf.ast.statements)
-			{
-				if (stmt && stmt.range.contains(loc))
-				{
-					if (stmt.kind == FN_DECL && stmt.as(FnDecl).body.contains(loc))
-					{
-						inside_fn = true;
-						break;
-					}
-					if (stmt.kind == MACRO_DECL && stmt.as(MacroDecl).body.contains(loc))
-					{
-						inside_fn = true;
-						break;
-					}
-				}
-			}
-		}
-		if (!inside_fn)
-		{
-			return false;
-		}
-	}
-
 	return false;
 }
 
@@ -2479,6 +2250,58 @@ fn void collect_already_handled_cases(Node* switch_node, Location loc, HashSet{S
 		if (try v = value && v.kind == ACCESS_EXPR) value = v.as(AccessExpr).member.get();
 		if (try v = value && v.kind == IDENT_EXPR) out_set.add(v.as(IdentExpr).ident.text);
 	}
+}
+
+<*
+ Words left of the last `=` before `offset`, on its line and in its clause: each a run of adjacent
+ tokens, as a view into the source, so comments between them are skipped. `Color c = ` gives
+ `Color`, `c`.
+*>
+fn String[] assignment_words(SourceFile* sf, sz offset) @local
+{
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz eq = utils::tokens_before(sf, offset);
+	while (eq > 0 && tokens[eq - 1].kind != EQ) eq--;
+	if (eq == 0) return {};
+	eq--;
+
+	int line = tokens[eq].range.start.line;
+	sz first = eq;
+	int depth = 0;
+	while LOOP: (first > 0 && tokens[first - 1].range.start.line == line)
+	{
+		switch (tokens[first - 1].kind)
+		{
+			case RPAREN:
+			case RBRACKET:
+			case RBRACE:
+				depth++;
+			case LPAREN:
+			case LBRACKET:
+			case LBRACE:
+				if (depth == 0) break LOOP;
+				depth--;
+			case COMMA:
+			case EOS:
+				if (depth == 0) break LOOP;
+			default:
+				break;
+		}
+		first--;
+	}
+
+	List{String} words;
+	words.tinit();
+	for (sz i = first; i < eq;)
+	{
+		sz start = utils::token_offset(sf.content, tokens[i]);
+		sz j = i + 1;
+		while (j < eq && utils::token_offset(sf.content, tokens[j]) == utils::token_offset(sf.content, tokens[j - 1]) + tokens[j - 1].value.len) j++;
+		Token last = tokens[j - 1];
+		words.push(sf.content[start : utils::token_offset(sf.content, last) + last.value.len - start]);
+		i = j;
+	}
+	return words.array_view();
 }
 
 fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Location loc = { -1, -1 })
@@ -2557,10 +2380,11 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 	if (text_before_cmp.ends_with("==") || text_before_cmp.ends_with("!="))
 	{
 		String lhs_part = text_before_cmp[:text_before_cmp.len - 2].trim_right();
-		sz expr_start = utils::scan_base_expression_start(lhs_part, lhs_part.len);
-		if (lhs_part.len > expr_start)
+		sz lhs_end = lhs_part.ptr - ctx.sf.content.ptr + lhs_part.len;
+		sz expr_start = utils::scan_base_expression_start(ctx.sf, lhs_end);
+		if (lhs_end > expr_start)
 		{
-			String lhs_expr = lhs_part[expr_start..].trim();
+			String lhs_expr = ctx.sf.content[expr_start : lhs_end - expr_start];
 			if (lhs_expr.len > 0)
 			{
 				String resolved_type = type_of_text(ctx, ctx.sf, lhs_expr);
@@ -2585,36 +2409,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 				return TYPE_ASSIGNMENT;
 			}
 
-			String lhs = line_prefix[:eq_idx].trim();
-			sz clause_start = 0;
-			int depth = 0;
-			for (sz i = lhs.len; i > 0; i--)
-			{
-				char c = lhs[i - 1];
-				if (c == ')' || c == ']' || c == '}')
-				{
-					depth++;
-				}
-				else if (c == '(' || c == '[' || c == '{')
-				{
-					if (depth > 0)
-					{
-						depth--;
-					}
-					else
-					{
-						clause_start = i;
-						break;
-					}
-				}
-				else if (depth == 0 && (c == ',' || c == ';'))
-				{
-					clause_start = i;
-					break;
-				}
-			}
-			String clause = lhs[clause_start..].trim();
-			String[] words = clause.tsplit(" ");
+			String[] words = assignment_words(ctx.sf, ctx.offset);
 			if (words.len >= 2)
 			{
 				String candidate_type = words[^2].trim().trim_right("*& \t");
@@ -2626,7 +2421,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 			}
 			if (words.len >= 1)
 			{
-				String resolved_type = type_of_text(ctx, ctx.sf, words[^1].trim());
+				String resolved_type = type_of_text(ctx, ctx.sf, words[^1]);
 				if (resolved_type.len > 0)
 				{
 					if (out_expected_type) *out_expected_type = resolved_type;
@@ -2999,7 +2794,7 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 	// After `$$` only the compiler's builtins fit.
 	if (ctx.prefix.starts_with("$$"))
 	{
-		foreach (b : constants::Builtin::values)
+		foreach (b : Builtin::values)
 		{
 			String label = string::tformat("$$%s", b.name);
 			if (!fuzzy_match(label, ctx.prefix)) continue;
@@ -3030,7 +2825,7 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 				.insertText = insert_text, .insertTextFormat = format, .filterText = label, .sortText = string::tformat("0001_%s", b.name),
 				.textEdit = replace_typed(&ctx, insert_text) });
 		}
-		foreach (c : constants::BuiltinConstant::values)
+		foreach (c : BuiltinConstant::values)
 		{
 			String label = string::tformat("$$%s", c.name);
 			if (!fuzzy_match(label, ctx.prefix)) continue;

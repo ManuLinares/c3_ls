@@ -112,50 +112,24 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 		switch (root_node.kind)
 		{
 			case STRUCT_DECL:
-				{
-					StructDecl* sd = root_node.as(StructDecl);
-					String sname = sd.name.text();
-					if (sname.len > 0 && ctx.context.lookup)
-					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, sname);
-					}
-					foreach (f : sd.fields)
-					{
-						if (f && f.kind == VAR_DECL)
-						{
-							VarDecl* vd = f.as(VarDecl);
-							if (try type = vd.type.get())
-							{
-								vd.node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
-							}
-						}
-					}
-				}
 			case ENUM_DECL:
-				{
-					EnumDecl* ed = root_node.as(EnumDecl);
-					String ename = ed.name.text();
-					if (ename.len > 0 && ctx.context.lookup)
-					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, ename);
-					}
-				}
 			case TYPEDEF_DECL:
-				{
-					TypedefDecl* td = root_node.as(TypedefDecl);
-					String tname = td.name.text();
-					if (tname.len > 0 && ctx.context.lookup)
-					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname);
-					}
-				}
 			case ALIAS_DECL:
+				String type_name = cursor::decl_name(root_node).text ?? "";
+				if (type_name.len > 0 && ctx.context.lookup)
 				{
-					AliasDecl* ad = root_node.as(AliasDecl);
-					String aname = ad.name.text();
-					if (aname.len > 0 && ctx.context.lookup)
+					lookup::register_type(ctx.context.lookup, ctx.context.allocator, type_name);
+				}
+				if (root_node.kind != STRUCT_DECL) break;
+				foreach (f : root_node.as(StructDecl).fields)
+				{
+					if (f && f.kind == VAR_DECL)
 					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, aname);
+						VarDecl* vd = f.as(VarDecl);
+						if (try type = vd.type.get())
+						{
+							vd.node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
+						}
 					}
 				}
 			case CT_IF_STMT:

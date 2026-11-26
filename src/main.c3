@@ -157,7 +157,7 @@ fn int main(String[] args)
 
 		mod_name = bindgen::sanitize_module_name(tmem, mod_name);
 
-		bindgen::BindgenOptions opts = {
+		BindgenOptions opts = {
 			.header_path = cli.bindgen,
 			.output_path = cli.bindgen_out,
 			.module_name = mod_name,

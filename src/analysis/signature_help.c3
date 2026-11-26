@@ -13,7 +13,7 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 
 	if (target_info.callee_name.starts_with("$$"))
 	{
-		constants::Builtin? builtin = constants::Builtin::lookup_field(name, target_info.callee_name[2..]);
+		Builtin? builtin = Builtin::lookup_field(name, target_info.callee_name[2..]);
 		if (catch builtin) return {.signatures = {} };
 		List{ParameterInformation} params;
 		params.tinit();

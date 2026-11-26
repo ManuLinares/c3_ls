@@ -244,3 +244,141 @@ fn void designator_ignores_comments_and_strings()
 		test::eq(labels.str_view().trim(), "b c");
 	}
 }
+
+fn void named_argument_completion_ignores_comments()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void show(String a, int b, int c) {}\nfn void main()\n{\n\tshow(\"x\" /* , */, );\n}\n";
+	proj.workspace.process_file("/virtual/named_args.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/named_args.c3");
+	defer doc_uri.free();
+
+	DString labels;
+	labels.tinit();
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 4, .character = 19 })!!) labels.appendf("%s ", item.label);
+	assert(labels.str_view().contains("b:"), "b: missing from: %s", labels.str_view());
+}
+
+fn void assignment_expected_type_ignores_comments()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nenum Color { RED, GREEN }\nfn void f()\n{\n\tColor c /* note */ = \n}\n";
+	proj.workspace.process_file("/virtual/assign_comment.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/assign_comment.c3");
+	defer doc_uri.free();
+
+	CompletionItem[] items = completion::resolve(&proj, doc_uri, { .line = 4, .character = 22 })!!;
+	assert(items.len > 1 && items[0].label == "RED" && items[1].label == "GREEN", "%s %s", items[0].label, items[1].label);
+}
+
+fn void locals_of_closed_blocks_not_offered()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void f()\n{\n\t{\n\t\tint closed_value = 1;\n\t}\n\tclosed\n}\n";
+	proj.workspace.process_file("/virtual/closed_block.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/closed_block.c3");
+	defer doc_uri.free();
+
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 6, .character = 7 })!!)
+	{
+		assert(item.label != "closed_value", "local of a closed block offered");
+	}
+}
+
+fn void try_binding_not_offered_in_else()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn int? g() => 1;\nfn void f()\n{\n\tif (try unwrapped = g())\n\t{\n\t}\n\telse\n\t{\n\t\tunwr\n\t}\n}\n";
+	proj.workspace.process_file("/virtual/try_else_completion.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/try_else_completion.c3");
+	defer doc_uri.free();
+
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 9, .character = 6 })!!)
+	{
+		assert(item.label != "unwrapped", "try binding offered in else");
+	}
+}
+
+fn void catch_binding_offered_in_else()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn int? g() => 1;\nfn void f()\n{\n\tif (catch caught = g())\n\t{\n\t}\n\telse\n\t{\n\t\tcaug\n\t}\n}\n";
+	proj.workspace.process_file("/virtual/catch_else_completion.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/catch_else_completion.c3");
+	defer doc_uri.free();
+
+	bool found;
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 9, .character = 6 })!!) found |= item.label == "caught";
+	assert(found, "catch binding missing in else");
+}
+
+fn void foreach_binding_ranked_by_expected_type()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void f(int[] arr)\n{\n\tforeach (int each_value : arr)\n\t{\n\t\tint x = \n\t}\n}\n";
+	proj.workspace.process_file("/virtual/foreach_rank.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/foreach_rank.c3");
+	defer doc_uri.free();
+
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 5, .character = 10 })!!)
+	{
+		if (item.label == "each_value")
+		{
+			test::eq(item.sortText, "0000_each_value");
+			return;
+		}
+	}
+	unreachable("each_value not offered");
+}
+
+fn void unclosed_parameter_list_offers_types_only()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nint my_global_var;\nstruct MyStruct { int x; }\nfn void f(My\n";
+	proj.workspace.process_file("/virtual/unclosed_params.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/unclosed_params.c3");
+	defer doc_uri.free();
+
+	DString labels;
+	labels.tinit();
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 3, .character = 12 })!!) labels.appendf("%s ", item.label);
+	test::eq(labels.str_view().trim(), "MyStruct");
+}
+
+fn void member_completion_after_call_with_bracket_in_string()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nstruct Point { int px; int py; }\nfn Point make(String s) => {};\nfn void f()\n{\n\tint v = make(\")\").\n}\n";
+	proj.workspace.process_file("/virtual/base_string.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/base_string.c3");
+	defer doc_uri.free();
+
+	DString labels;
+	labels.tinit();
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 5, .character = 19 })!!) labels.appendf("%s ", item.label);
+	test::eq(labels.str_view().trim(), "px py");
+}

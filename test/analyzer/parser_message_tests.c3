@@ -22,3 +22,12 @@ fn void ct_if_missing_colon() @test
 {
 	test::eq(first_error("module t;\nfn void f()\n{\n\t$if true\n\t$endif\n}\n"), "Expected ':' after $if expression");
 }
+
+fn void label_missing_colon() @test
+{
+	foreach (stmt : (String[]){ "switch FOO (x) { default: }", "if FOO (x) {}", "while FOO (x) {}", "for FOO (;;) {}", "do FOO {} while (false);", "foreach FOO (y : z) {}" })
+	{
+		String src = string::tformat("module t;\nfn void f(int x, int[] z)\n{\n\t%s\n}\n", stmt);
+		test::eq(first_error(src), "The name must be followed by a ':', did you forget it?");
+	}
+}

@@ -257,7 +257,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 
 					if (member_name == "min" || member_name == "max")
 					{
-						if (try pt = constants::PrimitiveType::lookup_field(name, left_name))
+						if (try pt = PrimitiveType::lookup_field(name, left_name))
 						{
 							Type*? ty = ctx && ctx.lookup ? lookup::get_type_by_name(ctx.lookup, left_name) : NOT_FOUND~;
 							if (try ty && pt.kind == INT)

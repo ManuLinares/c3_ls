@@ -42,7 +42,7 @@ fn SymbolKind to_symbol_kind(Node* node)
 		case FN_DECL:
 			{
 				FnDecl* fd = node.as(FnDecl);
-				return fd.associated_type ? METHOD : FUNCTION;
+				return @ok(fd.associated_type.get()) ? METHOD : FUNCTION;
 			}
 		case MACRO_DECL: return FUNCTION;
 		case STRUCT_DECL: return STRUCT;
@@ -73,7 +73,7 @@ fn CompletionItemKind to_completion_kind(Node* node)
 		case FN_DECL:
 			{
 				FnDecl* fd = node.as(FnDecl);
-				return fd.associated_type ? METHOD : FUNCTION;
+				return @ok(fd.associated_type.get()) ? METHOD : FUNCTION;
 			}
 		case MACRO_DECL: return FUNCTION;
 		case STRUCT_DECL: return STRUCT;
@@ -128,6 +128,15 @@ fn LspRange to_lsp_range(Range r)
 	};
 }
 
+<*
+ Adds the symbol `name` when it contains `query_lower`, ignoring case; nothing for an empty name.
+*>
+fn void add_symbol(List{SymbolInformation}* out, String query_lower, String file_uri, String name, SymbolKind kind, Range range, String container) @local
+{
+	if (name.len == 0 || (query_lower.len > 0 && !name.to_lower_tcopy().contains(query_lower))) return;
+	out.push({ .name = name, .kind = kind, .location = { .uri = file_uri, .range = to_lsp_range(range) }, .containerName = container });
+}
+
 fn void collect_file_symbols(
 	SourceFile* sf,
 	String file_uri,
@@ -150,19 +159,7 @@ fn void collect_file_symbols(
 			{
 				if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 				if (!f || f.kind != FAULT_DECL) continue;
-				FaultDecl* fdecl = f.as(FaultDecl);
-				String fname = fdecl.name.text();
-				if (fname.len > 0 && (query_lower.len == 0 || fname.to_lower_tcopy().contains(query_lower)))
-				{
-					out_symbols.push(
-					{
-						.name = fname,
-						.kind = CONSTANT,
-						.location = { .uri = file_uri, .range = to_lsp_range(f.range) },
-						.containerName = ""
-					}
-					);
-				}
+				add_symbol(out_symbols, query_lower, file_uri, f.as(FaultDecl).name.text(), CONSTANT, f.range, "");
 			}
 			continue;
 		}
@@ -181,9 +178,9 @@ fn void collect_file_symbols(
 				{
 					FnDecl* fd = stmt.as(FnDecl);
 					sname = fd.name.text();
-					if (fd.associated_type)
+					if (try assoc_node = fd.associated_type.get())
 					{
-						container = cursor::raw_type_identifier(fd.associated_type.get()) ?? "";
+						container = cursor::raw_type_identifier(assoc_node) ?? "";
 					}
 				}
 			case MACRO_DECL:
@@ -201,18 +198,7 @@ fn void collect_file_symbols(
 		}
 
 		if (sname.len == 0) continue;
-
-		if (query_lower.len == 0 || sname.to_lower_tcopy().contains(query_lower))
-		{
-			out_symbols.push(
-			{
-				.name = sname,
-				.kind = to_symbol_kind(stmt),
-				.location = { .uri = file_uri, .range = to_lsp_range(stmt.range) },
-				.containerName = container
-			}
-			);
-		}
+		add_symbol(out_symbols, query_lower, file_uri, sname, to_symbol_kind(stmt), stmt.range, container);
 
 		switch (stmt.kind)
 		{
@@ -223,19 +209,7 @@ fn void collect_file_symbols(
 					{
 						if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 						if (!f || f.kind != VAR_DECL) continue;
-						VarDecl* vd = f.as(VarDecl);
-						String fname = vd.name.text();
-						if (fname.len > 0 && (query_lower.len == 0 || fname.to_lower_tcopy().contains(query_lower)))
-						{
-							out_symbols.push(
-							{
-								.name = fname,
-								.kind = FIELD,
-								.location = { .uri = file_uri, .range = to_lsp_range(vd.node.range) },
-								.containerName = sname
-							}
-							);
-						}
+						add_symbol(out_symbols, query_lower, file_uri, f.as(VarDecl).name.text(), FIELD, f.range, sname);
 					}
 				}
 			case ENUM_DECL:
@@ -245,19 +219,7 @@ fn void collect_file_symbols(
 					{
 						if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 						if (!v || v.kind != VAR_DECL) continue;
-						VarDecl* vd = v.as(VarDecl);
-						String vname = vd.name.text();
-						if (vname.len > 0 && (query_lower.len == 0 || vname.to_lower_tcopy().contains(query_lower)))
-						{
-							out_symbols.push(
-							{
-								.name = vname,
-								.kind = ENUMMEMBER,
-								.location = { .uri = file_uri, .range = to_lsp_range(vd.node.range) },
-								.containerName = sname
-							}
-							);
-						}
+						add_symbol(out_symbols, query_lower, file_uri, v.as(VarDecl).name.text(), ENUMMEMBER, v.range, sname);
 					}
 				}
 			default:

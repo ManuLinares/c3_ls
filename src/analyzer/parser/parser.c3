@@ -91,6 +91,19 @@ fn bool is_token_start_of_stmt(TokenKind kind)
 		case ASSERT:
 		case CT_EXPAND:
 		case ASM:
+			return true;
+		default:
+			return starts_expression_statement(kind);
+	}
+}
+
+<*
+ Tokens that begin an expression or declaration statement.
+*>
+fn bool starts_expression_statement(TokenKind kind)
+{
+	switch (kind)
+	{
 		case HASH_IDENT:
 		case IDENT:
 		case CONST_IDENT:
@@ -587,6 +600,19 @@ fn bool attach_contract(ParseContext* ctx, Node* node, Node* contract)
 			return false;
 	}
 	return true;
+}
+
+<*
+ An optional `NAME:` label before a statement, stored in `label`.
+*>
+fn void parse_label(ParseContext* ctx, Node* node, NullableIdent* label)
+{
+	if (!ctx.is(CONST_IDENT)) return;
+	label.set(ctx.ident(ctx.current));
+	advance(ctx);
+	if (consume(ctx, COLON)) return;
+	diagnostics::error(ctx.context, ctx.current.range, "The name must be followed by a ':', did you forget it?");
+	error_node(ctx, node);
 }
 
 fn void error_node(ParseContext* ctx, Node* node)

@@ -82,6 +82,21 @@ fn void register_and_dispatch(AnalyzerContext* context, Module* mod, Node* node)
 	}
 }
 
+<*
+ Adds `node` of `mod` to the front of its `mod::name` list in `#map`.
+ @return "The qualified name, or \"\" when the declaration has no name"
+*>
+macro String @register(#map, $Info, AnalyzerContext* context, Module* mod, Node* node) @local
+{
+	Ident*? name = cursor::decl_name(node);
+	if (catch name) return "";
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
+	$Info* info = alloc::new(&context.registry.arena, $Info);
+	*info = { .next = #map.get(qname) ?? null, .mod = mod.name, .node = node };
+	#map.set(qname, info);
+	return qname;
+}
+
 fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 {
 	switch (node.kind)
@@ -91,83 +106,25 @@ fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 		case TYPEDEF_DECL:
 		case ALIAS_DECL:
 		case INTERFACE_DECL:
-		case VAR_DECL:
 			break;
 		default:
 			return;
 	}
 
-	Ident*? name = cursor::decl_name(node);
-
-	if (catch name)
-	{
-		diagnostics::log_error("registry::register_type - name is null");
-		return;
-	}
-
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
-
-	TypeInfo* type_info = alloc::new(&context.registry.arena, TypeInfo);
-	type_info.mod = mod.name;
-	type_info.node = node;
-
-	TypeInfo* existing_head = context.registry.types.get(qname) ?? null;
-	type_info.next = existing_head;
-
-	diagnostics::log_debug("[Registry]: registered type: %s", qname);
-
-	context.registry.types.set(qname, type_info);
-	lookup::register_type(context.lookup, context.allocator, qname);
+	String qname = @register(context.registry.types, TypeInfo, context, mod, node);
+	if (qname.len) lookup::register_type(context.lookup, context.allocator, qname);
 }
 
 fn void register_function(AnalyzerContext* context, Module* mod, Node* node)
 {
-	FnDecl* decl = node.as(FnDecl);
-	Ident*? name = decl.name.get();
-	if (catch name)
-	{
-		diagnostics::log_error("registry::register_function - function name is null");
-		return;
-	}
-
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
-
-	FunctionInfo* function_info = alloc::new(&context.registry.arena, FunctionInfo);
-	function_info.mod = mod.name;
-	function_info.node = node;
-
-	FunctionInfo* existing_head = context.registry.functions.get(qname) ?? null;
-	function_info.next = existing_head;
-
-	diagnostics::log_debug("[Registry]: registered fn: %s", qname);
-
-	context.registry.functions.set(qname, function_info);
-	if (try receiver = decl.associated_type.get()) register_method(context, mod, node, receiver);
+	@register(context.registry.functions, FunctionInfo, context, mod, node);
+	if (try receiver = node.as(FnDecl).associated_type.get()) register_method(context, mod, node, receiver);
 }
 
 fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 {
-	MacroDecl* decl = node.as(MacroDecl);
-	Ident*? name = decl.name.get();
-	if (catch name)
-	{
-		diagnostics::log_error("registry::register_macro - macro name is null");
-		return;
-	}
-
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
-
-	MacroInfo* macros_info = alloc::new(&context.registry.arena, MacroInfo);
-	macros_info.mod = mod.name;
-	macros_info.node = node;
-
-	MacroInfo* existing_head = context.registry.macros.get(qname) ?? null;
-	macros_info.next = existing_head;
-
-	diagnostics::log_debug("[Registry]: registered macro: %s", qname);
-
-	context.registry.macros.set(qname, macros_info);
-	if (try receiver = decl.associated_type.get()) register_method(context, mod, node, receiver);
+	@register(context.registry.macros, MacroInfo, context, mod, node);
+	if (try receiver = node.as(MacroDecl).associated_type.get()) register_method(context, mod, node, receiver);
 }
 
 <*
@@ -191,29 +148,5 @@ fn void index_method(AnalyzerContext* context, Module* mod, Node* node, String k
 
 fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)
 {
-	AttrdefDecl* decl = node.as(AttrdefDecl);
-	Ident*? name = decl.name.get();
-	if (catch name)
-	{
-		diagnostics::log_error("registry::register_attrdef - attrdef name is null");
-		return;
-	}
-
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
-
-	AttrdefInfo* attr_info = alloc::new(&context.registry.arena, AttrdefInfo);
-	attr_info.mod = mod.name;
-	attr_info.node = node;
-
-	AttrdefInfo* existing_head = context.registry.attrmacros.get(qname) ?? null;
-	attr_info.next = existing_head;
-
-	diagnostics::log_debug("[Registry]: registered attrdef: %s", qname);
-
-	context.registry.attrmacros.set(qname, attr_info);
-}
-
-fn FunctionInfo*? get_function(AnalyzerContext* context, String name)
-{
-	return context.registry.functions.get(name);
+	@register(context.registry.attrmacros, AttrdefInfo, context, mod, node);
 }

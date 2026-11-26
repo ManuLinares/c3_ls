@@ -76,7 +76,7 @@ fn String header(AnalyzerContext* ctx, Node* node, String name, GenericBinding b
 *>
 fn String docs(Node* node)
 {
-	String doc = cursor::docs(node) ?? "";
+	String doc = cursor::docs(node);
 	return doc.trim().treplace("\"", "");
 }
 

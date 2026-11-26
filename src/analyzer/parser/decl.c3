@@ -72,7 +72,7 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 
 		if (consume(ctx, AT_IDENT))
 		{
-			constants::DocTag? tag = constants::DocTag::lookup_field(name, attr[1..]);
+			DocTag? tag = DocTag::lookup_field(name, attr[1..]);
 			if (catch tag)
 			{
 				advance(ctx);
@@ -100,11 +100,9 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 					}
 					if (ctx.is(STRING_LITERAL))
 					{
-						List{Node*} exprs;
-						exprs.tinit(1);
-						exprs.push(parse_expr(scope));
+						n.exprs = alloc::alloc_array(ctx.allocator, Node*, 1);
+						n.exprs[0] = parse_expr(scope);
 						diagnostics::log_debug("parser @deprecated string");
-						n.exprs = alloc::clone_slice(ctx.allocator, exprs.array_view());
 					}
 				case PURE:
 					node.is_pure = true;
@@ -1197,6 +1195,23 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 }
 
 <*
+ One fault of a faultdef, with its doc contract and attributes, or null when no name follows.
+*>
+fn Node* parse_fault(ContextScope scope)
+{
+	ParseContext* ctx = scope.ctx;
+	Node* contract = ctx.is(DOCS_START) ? parse_contract_decl(scope) : null;
+	if (!ctx.is(CONST_IDENT)) return null;
+	FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
+	fault_node.name.set(ctx.ident(ctx.current));
+	fault_node.contract.set(contract);
+	advance(ctx);
+	fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
+	fault_node.range.end = ctx.peek(-1).range.end;
+	return (Node*)fault_node;
+}
+
+<*
  faultdef_decl ::= (FAULTDEF CONST_IDENT (',' CONST_IDENT)* ','? ';')
                  | (FAULTDEF '{' CONST_IDENT (',' CONST_IDENT)* ','? '}')
  @require scope.ctx.current.kind == FAULTDEF
@@ -1225,13 +1240,8 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 	{
 		while (!ctx.eof() && !ctx.is(RBRACE))
 		{
-			Node* contract = null;
-			if (ctx.is(DOCS_START))
-			{
-				contract = parse_contract_decl(scope);
-			}
-
-			if (!ctx.is(CONST_IDENT))
+			Node* fault_node = parse_fault(scope);
+			if (!fault_node)
 			{
 				diagnostics::error(ctx.context, ctx.current.range, "Expected constant identifier for fault");
 				error_node(ctx, (Node*)node);
@@ -1239,19 +1249,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 				if (consume(ctx, COMMA)) continue;
 				break;
 			}
-
-			FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-			fault_node.name.set(ctx.ident(ctx.current));
-			fault_node.contract.set(contract);
-			advance(ctx);
-
-			if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
-			{
-				fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
-			}
-			fault_node.range.end = ctx.peek(-1).range.end;
-
-			faults.push((Node*)fault_node);
+			faults.push(fault_node);
 			if (!consume(ctx, COMMA))
 			{
 				if (!ctx.is(RBRACE))
@@ -1279,32 +1277,16 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 	// 2. Inline syntax: FAULT_A, FAULT_B;
 	while (!ctx.eof() && !ctx.is(EOS))
 	{
-		Node* contract = null;
-		if (ctx.is(DOCS_START))
-		{
-			contract = parse_contract_decl(scope);
-		}
-
-		if (!ctx.is(CONST_IDENT))
+		Node* fault_node = parse_fault(scope);
+		if (!fault_node)
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected constant identifier for fault");
 			error_node(ctx, (Node*)node);
 			skip_until(ctx, { COMMA, EOS });
-
 			if (consume(ctx, COMMA)) continue;
 			break;
 		}
-
-		FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-		fault_node.contract.set(contract);
-		fault_node.name.set(ctx.ident(ctx.current));
-
-		advance(ctx);
-
-		fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
-		fault_node.range.end = ctx.peek(-1).range.end;
-
-		faults.push((Node*)fault_node);
+		faults.push(fault_node);
 
 		if (!consume(ctx, COMMA)) break;
 	}

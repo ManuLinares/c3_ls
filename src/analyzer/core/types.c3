@@ -32,14 +32,12 @@ fn bool SourceFile.contains_node(&self, Node* node) @inline
 }
 
 <*
- -`node_map`: a fast lookup table
  -`nodes`: all nodes in this module with order preserved
  -`module_decls`: a index table for fast lookup of all modules/sections in this module
 *>
 struct Module
 {
 	String name;
-	HashMap{NodeID, Node*} node_map;
 	List{Node*} nodes;
 	List{ModuleDecl*} module_decls;
 }
@@ -125,7 +123,6 @@ struct TypeInfo
 struct VariableInfo
 {
 	String name;
-	String mod;
 	Node* node;
 }
 
@@ -158,9 +155,7 @@ struct Scope
 	Scope* parent;
 	Range range;
 	List{Scope*} children;
-	HashMap{String, FunctionInfo*} functions;
 	HashMap{String, VariableInfo*} variables;
-	HashMap{String, TypeInfo*} types;
 }
 
 enum ResolveStatus : char

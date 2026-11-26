@@ -38,6 +38,20 @@ fn ChildVisitResult find_enclosing_access_callback(Node* c, Node* p, void* user_
 }
 
 <*
+ Hover for a compile-time property: its signature, its evaluated value when known, then `doc`.
+*>
+fn String property_hover(String signature, String ct_eval, String doc) @local
+{
+	DString text;
+	text.tinit();
+	text.appendf("```c3\n%s\n", signature);
+	if (ct_eval.len > 0) text.appendf("// Compile-Time Evaluation:\n%s\n", ct_eval);
+	text.append("```");
+	if (doc.len > 0) text.appendf("\n\n%s", doc);
+	return text.str_view();
+}
+
+<*
  Hover text at `pos`. On a documented keyword its doc follows whatever the code there shows,
  such as the declaration it starts or the value it evaluates to; alone it comes after the keyword's syntax.
 *>
@@ -55,7 +69,7 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 	if (!sf.lexer) return shown;
 	sz i = sf.lexer.token_at(loc);
 	if (i < 0) return shown;
-	constants::Keyword? kw = constants::Keyword::lookup_field(name, sf.lexer.tokens[i].value);
+	Keyword? kw = Keyword::lookup_field(name, sf.lexer.tokens[i].value);
 	if (catch kw) return shown;
 	if (!kw.docs.len) return shown;
 	if (shown.len) return string::tformat("%s\n\n%s", shown, kw.docs);
@@ -144,7 +158,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 				String tag = tokens[i].value.strip_prefix("@");
 				bool optional = i + 1 < tokens.len && tokens[i + 1].kind == QUESTION && tokens[i + 1].range.start == tokens[i].range.end;
 				if (optional) tag = string::tformat("%s?", tag);
-				if (try t = constants::DocTag::lookup_field(name, tag)) return string::tformat("```c3\n%s\n```\n\n%s", t.syntax, t.doc);
+				if (try t = DocTag::lookup_field(name, tag)) return string::tformat("```c3\n%s\n```\n\n%s", t.syntax, t.doc);
 			}
 		}
 	}
@@ -163,13 +177,13 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 		String doc;
 		if (try target_node && target_node.kind == BUILTIN_EXPR)
 		{
-			if (try b = constants::Builtin::lookup_field(name, text))
+			if (try b = Builtin::lookup_field(name, text))
 			{
 				label = b.signature();
 				doc = b.doc;
 			}
 		}
-		else if (try c = constants::BuiltinConstant::lookup_field(name, text))
+		else if (try c = BuiltinConstant::lookup_field(name, text))
 		{
 			doc = c.doc;
 		}
@@ -220,23 +234,11 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 			String mem_name = acc.member.spelling();
 			if (acc.access_kind == STATIC)
 			{
-				if (try tp = constants::TypeProperty::lookup_field(name, mem_name))
+				if (try tp = TypeProperty::lookup_field(name, mem_name))
 				{
 					String left_name = cursor::spelling(acc.left, tmem);
 					String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
-					DString h_buf;
-					h_buf.tinit();
-					h_buf.appendf("```c3\n%s::%s : %s\n", left_name, tp.name, tp.type_desc);
-					if (ct_eval.len > 0)
-					{
-						h_buf.appendf("// Compile-Time Evaluation:\n%s\n", ct_eval);
-					}
-					h_buf.append("```");
-					if (tp.doc.len > 0)
-					{
-						h_buf.appendf("\n\n%s", tp.doc);
-					}
-					return h_buf.str_view();
+					return property_hover(string::tformat("%s::%s : %s", left_name, tp.name, tp.type_desc), ct_eval, tp.doc);
 				}
 			}
 			else
@@ -260,22 +262,10 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 				bool is_reflect = ((acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
 				if (is_reflect)
 				{
-					if (try rp = constants::ReflectProperty::lookup_field(name, mem_name))
+					if (try rp = ReflectProperty::lookup_field(name, mem_name))
 					{
 						String ct_eval = macro_expand::evaluate_compile_time(project.workspace.ctx, sf, ct_node);
-						DString h_buf;
-						h_buf.tinit();
-						h_buf.appendf("```c3\n%s.%s : %s\n", left_str, rp.name, rp.type_desc);
-						if (ct_eval.len > 0)
-						{
-							h_buf.appendf("// Compile-Time Evaluation:\n%s\n", ct_eval);
-						}
-						h_buf.append("```");
-						if (rp.doc.len > 0)
-						{
-							h_buf.appendf("\n\n%s", rp.doc);
-						}
-						return h_buf.str_view();
+						return property_hover(string::tformat("%s.%s : %s", left_str, rp.name, rp.type_desc), ct_eval, rp.doc);
 					}
 				}
 			}
@@ -302,7 +292,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 	if (decl_node.kind == TYPE_EXPR)
 	{
-		if (try pt = constants::PrimitiveType::lookup_field(name, cursor::raw_type_identifier(decl_node) ?? ""))
+		if (try pt = PrimitiveType::lookup_field(name, cursor::raw_type_identifier(decl_node) ?? ""))
 		{
 			return string::tformat("```c3\n%s\n```\n\n%s", pt.name, pt.doc);
 		}

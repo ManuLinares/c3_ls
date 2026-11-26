@@ -394,95 +394,32 @@ fn Node*? find_at(Node*[] slice, Range range)
 	return ctx.best_match ?: NOT_FOUND~;
 }
 
+<*
+ Doc contract attached to a declaration.
+*>
 fn Node*? contract(Node* node)
 {
 	if (!node) return NOT_FOUND~;
+	NullableNode contract;
 	switch (node.kind)
 	{
-		case MODULE_DECL:
-			{
-				ModuleDecl* decl = node.as(ModuleDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case FN_DECL:
-			{
-				FnDecl* decl = node.as(FnDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case MACRO_DECL:
-			{
-				MacroDecl* decl = node.as(MacroDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case STRUCT_DECL:
-			{
-				StructDecl* decl = node.as(StructDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case INTERFACE_DECL:
-			{
-				InterfaceDecl* decl = node.as(InterfaceDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case VAR_DECL:
-			{
-				VarDecl* decl = node.as(VarDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case FAULTDEF_DECL:
-			{
-				FaultdefDecl* decl = node.as(FaultdefDecl);
-				if (try val = decl.contract.get())
-				{
-					return val;
-				}
-			}
-		case FAULT_DECL:
-			{
-				FaultDecl* decl = node.as(FaultDecl);
-				if (try val = decl.contract.get()) return val;
-			}
-		case ENUM_DECL:
-			{
-				EnumDecl* decl = node.as(EnumDecl);
-				if (try val = decl.contract.get()) return val;
-			}
-		case ALIAS_DECL:
-			{
-				AliasDecl* decl = node.as(AliasDecl);
-				if (try val = decl.contract.get()) return val;
-			}
-		case TYPEDEF_DECL:
-			{
-				TypedefDecl* decl = node.as(TypedefDecl);
-				if (try val = decl.contract.get()) return val;
-			}
-		default:
-			break;
+		case MODULE_DECL: contract = node.as(ModuleDecl).contract;
+		case FN_DECL: contract = node.as(FnDecl).contract;
+		case MACRO_DECL: contract = node.as(MacroDecl).contract;
+		case STRUCT_DECL: contract = node.as(StructDecl).contract;
+		case INTERFACE_DECL: contract = node.as(InterfaceDecl).contract;
+		case FAULTDEF_DECL: contract = node.as(FaultdefDecl).contract;
+		case FAULT_DECL: contract = node.as(FaultDecl).contract;
+		case VAR_DECL: contract = node.as(VarDecl).contract;
+		case ENUM_DECL: contract = node.as(EnumDecl).contract;
+		case ALIAS_DECL: contract = node.as(AliasDecl).contract;
+		case TYPEDEF_DECL: contract = node.as(TypedefDecl).contract;
+		default: return NOT_FOUND~;
 	}
-
-	return NOT_FOUND~;
+	return contract.get();
 }
 
-fn String? docs(Node* node)
+fn String docs(Node* node)
 {
 	if (!node) return "";
 

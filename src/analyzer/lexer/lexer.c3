@@ -131,6 +131,14 @@ fn char Lexer.peek(&self, sz ahead = 1) @inline
 	return self.buffer[self.index + ahead];
 }
 
+<*
+ Token of `kind` spanning from `start_index`/`start` to the current position.
+*>
+fn Token Lexer.token_since(&self, TokenKind kind, int start_index, Location start)
+{
+	return { .kind = kind, .value = self.get_string(start_index, self.index - start_index), .range = { start, self.location } };
+}
+
 fn String Lexer.get_string(&self, int start, int len)
 {
 	return self.buffer[start : len];
@@ -154,11 +162,7 @@ fn Token lex_line_comment(Lexer* self)
 		advance(self);
 	}
 
-	return {
-		.kind = LINE_COMMENT,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(LINE_COMMENT, start_index, start);
 }
 
 fn Token lex_block_comment(Lexer* self)
@@ -185,11 +189,7 @@ fn Token lex_block_comment(Lexer* self)
 		}
 	}
 
-	return {
-		.kind = BLOCK_COMMENT,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(BLOCK_COMMENT, start_index, start);
 }
 
 fn Token lex_char(Lexer* self)
@@ -205,11 +205,7 @@ fn Token lex_char(Lexer* self)
 		if (c == '\'')
 		{
 			advance(self);
-			return {
-				.kind = CHAR_LITERAL,
-				.value = self.get_string(start_index, self.index - start_index),
-				.range = {.start = start,.end = self.location }
-			};
+			return self.token_since(CHAR_LITERAL, start_index, start);
 		}
 
 		if (c == '\\')
@@ -221,11 +217,7 @@ fn Token lex_char(Lexer* self)
 		advance(self);
 	}
 
-	return {
-		.kind = ERROR,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(ERROR, start_index, start);
 }
 
 fn Token lex_string(Lexer* self)
@@ -241,11 +233,7 @@ fn Token lex_string(Lexer* self)
 		if (c == '"')
 		{
 			advance(self);
-			return {
-				.kind = STRING_LITERAL,
-				.value = self.get_string(start_index, self.index - start_index),
-				.range = {.start = start,.end = self.location }
-			};
+			return self.token_since(STRING_LITERAL, start_index, start);
 		}
 
 		if (c == '\\')
@@ -257,11 +245,7 @@ fn Token lex_string(Lexer* self)
 		advance(self);
 	}
 
-	return {
-		.kind = ERROR,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(ERROR, start_index, start);
 }
 
 fn Token lex_raw_string(Lexer* self)
@@ -280,32 +264,21 @@ fn Token lex_raw_string(Lexer* self)
 				continue;
 			}
 			advance(self);
-			return {
-				.kind = STRING_LITERAL,
-				.value = self.get_string(start_index, self.index - start_index),
-				.range = {
-					.start = start,
-					.end = self.location
-				}
-			};
+			return self.token_since(STRING_LITERAL, start_index, start);
 		}
 		advance(self);
 	}
 
-	return {
-		.kind = ERROR,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(ERROR, start_index, start);
 }
 
 fn TokenKind lookup_keyword(String text)
 {
-	if (try kw = constants::Keyword::lookup_field(name, text))
+	if (try kw = Keyword::lookup_field(name, text))
 	{
 		return kw.token;
 	}
-	if (try pt = constants::PrimitiveType::lookup_field(name, text))
+	if (try pt = PrimitiveType::lookup_field(name, text))
 	{
 		return pt.token;
 	}
@@ -466,11 +439,7 @@ fn Token lex_number(Lexer* self)
 		diagnostics::error(self.ctx, { start, self.location }, "This doesn't seem to be a valid literal.");
 	}
 
-	return {
-		.kind = kind,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(kind, start_index, start);
 }
 
 fn Token lex_hex_array(Lexer* self)
@@ -488,11 +457,7 @@ fn Token lex_hex_array(Lexer* self)
 		if (closing) break;
 	}
 
-	return {
-		.kind = BYTES_LITERAL,
-		.value = self.get_string(start_index, self.index - start_index),
-		.range = {.start = start,.end = self.location }
-	};
+	return self.token_since(BYTES_LITERAL, start_index, start);
 }
 
 fn void lex_contract(Lexer* self)
@@ -534,11 +499,7 @@ fn void lex_contract(Lexer* self)
 
 	if (self.index > start_index)
 	{
-		Token t = {
-			.kind = DOCS_TEXT,
-			.value = self.get_string(start_index, self.index - start_index),
-			.range = {.start = start_loc,.end = self.location }
-		};
+		Token t = self.token_since(DOCS_TEXT, start_index, start_loc);
 		self.tokens.push(t);
 		// Only the prose is a comment; contract clauses are code.
 		self.comments.push({ t.range, DOCS_TEXT });

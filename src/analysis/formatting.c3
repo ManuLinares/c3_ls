@@ -1732,16 +1732,7 @@ fn TextEdit[]? format_range(LspProject* project, Uri uri, LspRange range, Format
 
 	TextEdit[] edits = alloc::alloc_array(tmem, TextEdit, 1);
 	edits[0] = {
-		.range = {
-			.start = {
-				.line = (uint)first_tok.range.start.line,
-				.character = (uint)first_tok.range.start.column
-			},
-			.end = {
-				.line = (uint)last_tok.range.end.line,
-				.character = (uint)last_tok.range.end.column
-			}
-		},
+		.range = analysis::to_lsp_range({ first_tok.range.start, last_tok.range.end }),
 		.newText = formatted_range.trim_right("\n")
 	};
 

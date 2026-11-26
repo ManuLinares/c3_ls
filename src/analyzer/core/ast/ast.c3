@@ -72,7 +72,6 @@ macro Node* Ast.error(&self, Range range)
 {
 	Node* node = (Node*)self.alloc_node(Error, range);
 	node.flags.has_error = true;
-	self.nodes.push(node);
 	return node;
 }
 

@@ -59,6 +59,9 @@ fn SourceFile*? file_of(AnalyzerContext* context, Node* node)
 *>
 fn int starts_after(SourceFile* file, SourceFile* unused, NodeID* id) @local => file.min_node_id <= *id ? -1 : 1;
 
+fn bool node_in_file(Node** node, any sf) @local => anycast(sf, SourceFile)!!.contains_node(*node);
+fn bool decl_in_file(ModuleDecl** decl, any sf) @local => anycast(sf, SourceFile)!!.contains_node((Node*)*decl);
+
 <*
  Removes from the registry map `#map` the entries declared in `sf`, and the
  names left without entries.
@@ -111,47 +114,8 @@ fn void unregister_source_file(AnalyzerContext* context, SourceFile* sf)
 	{
 		if (mod)
 		{
-			sz write_idx = 0;
-			for (sz i = 0; i < mod.nodes.len(); i++)
-			{
-				Node* n = mod.nodes.get(i);
-				switch (sf.contains_node(n))
-				{
-					case true:
-						(void)mod.node_map.remove(n.id);
-					case false:
-						if (write_idx != i)
-						{
-							mod.nodes.set(write_idx, n);
-						}
-						write_idx++;
-				}
-			}
-			while (mod.nodes.len() > write_idx)
-			{
-				(void)mod.nodes.pop();
-			}
-
-			write_idx = 0;
-			for (sz i = 0; i < mod.module_decls.len(); i++)
-			{
-				ModuleDecl* md = mod.module_decls.get(i);
-				switch (sf.contains_node((Node*)md))
-				{
-					case true:
-						break;
-					case false:
-						if (write_idx != i)
-						{
-							mod.module_decls.set(write_idx, md);
-						}
-						write_idx++;
-				}
-			}
-			while (mod.module_decls.len() > write_idx)
-			{
-				(void)mod.module_decls.pop();
-			}
+			mod.nodes.remove_using_test(&node_in_file, sf);
+			mod.module_decls.remove_using_test(&decl_in_file, sf);
 		}
 	};
 

@@ -114,16 +114,7 @@ fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_dat
 
 	LspLocation loc = {
 		.uri = ctx.file_uri,
-		.range = {
-			.start = {
-				.line = (uint)name.range.start.line,
-				.character = (uint)name.range.start.column
-			},
-			.end = {
-				.line = (uint)name.range.end.line,
-				.character = (uint)name.range.end.column
-			}
-		}
+		.range = analysis::to_lsp_range(name.range)
 	};
 
 	ctx.locations.push(loc);

@@ -119,165 +119,86 @@ fn String extract_line_prefix(String text, sz offset)
 	return text[line_start : offset - line_start].trim_left();
 }
 
-fn bool is_designator_delimiter(char c) @local
+<*
+ Whether `token` is written only with name characters: a name, keyword or number.
+*>
+fn bool is_name_token(Token token) @local
 {
-	return c == '{' || c == ',' || c == '=' || c == ';' || c == '(';
+	if (token.value.len == 0) return false;
+	foreach (c : token.value)
+	{
+		if (!lexer::is_name(c)) return false;
+	}
+	return true;
 }
 
-fn sz scan_base_expression_start(String text, sz end_idx)
+<*
+ Offset in `sf` where the expression ending at `end` starts, such as `a.b(x)[i]` or `mod::f()`,
+ found from the file's tokens; `end` when no expression ends there, or when the `.` before it
+ starts a designator.
+*>
+fn sz scan_base_expression_start(SourceFile* sf, sz end)
 {
-	sz idx = end_idx;
-	while (idx > 0 && (text[idx - 1] == ' ' || text[idx - 1] == '\t'))
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz i = tokens_before(sf, end);
+	sz first = i;
+	while (i > 0)
 	{
-		idx--;
-	}
+		TokenKind kind = tokens[i - 1].kind;
+		if (kind == RPAREN || kind == RBRACKET || kind == RBRACE)
+		{
+			while (i > 0 && (tokens[i - 1].kind == RPAREN || tokens[i - 1].kind == RBRACKET || tokens[i - 1].kind == RBRACE))
+			{
+				TokenKind close = tokens[i - 1].kind;
+				TokenKind open = close == RPAREN ? LPAREN : close == RBRACKET ? LBRACKET : LBRACE;
+				int depth = 0;
+				while (i > 0)
+				{
+					i--;
+					if (tokens[i].kind == close) depth++;
+					if (tokens[i].kind == open && --depth == 0) break;
+				}
+			}
+			if (i > 0 && is_name_token(tokens[i - 1])) i--;
+			if (tokens[i].kind == LBRACKET) return end;
+		}
+		else if (kind == STRING_LITERAL || kind == CHAR_LITERAL || kind == BYTES_LITERAL || is_name_token(tokens[i - 1]))
+		{
+			i--;
+		}
+		else
+		{
+			break;
+		}
+		first = i;
 
-	while (idx > 0)
-	{
-		if (text[idx - 1] == ')' || text[idx - 1] == ']' || text[idx - 1] == '}')
+		// The separator before a piece must be on the piece's line.
+		if (i == 0 || tokens[i - 1].range.end.line != tokens[i].range.start.line) break;
+		if (tokens[i - 1].kind == SCOPE)
 		{
-			while (idx > 0 && (text[idx - 1] == ')' || text[idx - 1] == ']' || text[idx - 1] == '}'))
-			{
-				if (text[idx - 1] == ')')
-				{
-					int depth = 1;
-					idx--;
-					while (idx > 0 && depth > 0)
-					{
-						idx--;
-						if (text[idx] == ')')
-						{
-							depth++;
-						}
-						else if (text[idx] == '(')
-						{
-							depth--;
-						}
-					}
-				}
-				else if (text[idx - 1] == '}')
-				{
-					int depth = 1;
-					idx--;
-					while (idx > 0 && depth > 0)
-					{
-						idx--;
-						if (text[idx] == '}')
-						{
-							depth++;
-						}
-						else if (text[idx] == '{')
-						{
-							depth--;
-						}
-					}
-				}
-				else if (text[idx - 1] == ']')
-				{
-					int depth = 1;
-					idx--;
-					while (idx > 0 && depth > 0)
-					{
-						idx--;
-						if (text[idx] == ']')
-						{
-							depth++;
-						}
-						else if (text[idx] == '[')
-						{
-							depth--;
-						}
-					}
-				}
-			}
-
-			while (idx > 0 && lexer::is_name(text[idx - 1]))
-			{
-				idx--;
-			}
-
-			if (idx < text.len && text[idx] == '[')
-			{
-				return end_idx;
-			}
+			i--;
 		}
-		else if (text[idx - 1] == '"')
+		else if (tokens[i - 1].kind == DOT)
 		{
-			idx--;
-			while (idx > 0)
+			if (i < 2) return end;
+			switch (tokens[i - 2].kind)
 			{
-				if (text[idx - 1] == '"' && (idx == 1 || text[idx - 2] != '\\'))
-				{
-					idx--;
-					break;
-				}
-				idx--;
-			}
-		}
-		else if (text[idx - 1] == '\'')
-		{
-			idx--;
-			while (idx > 0)
-			{
-				if (text[idx - 1] == '\'' && (idx == 1 || text[idx - 2] != '\\'))
-				{
-					idx--;
-					break;
-				}
-				idx--;
-			}
-		}
-		else if (text[idx - 1] == '`')
-		{
-			idx--;
-			while (idx > 0 && text[idx - 1] != '`')
-			{
-				idx--;
-			}
-			if (idx > 0) idx--;
-		}
-		else if (lexer::is_name(text[idx - 1]))
-		{
-			while (idx > 0 && lexer::is_name(text[idx - 1]))
-			{
-				idx--;
+				case LBRACE:
+				case COMMA:
+				case EQ:
+				case EOS:
+				case LPAREN:
+					return end;
+				default:
+					i--;
 			}
 		}
 		else
 		{
 			break;
 		}
-
-		sz p = idx;
-		while (p > 0 && (text[p - 1] == ' ' || text[p - 1] == '\t'))
-		{
-			p--;
-		}
-
-		if (p >= 2 && text[p - 2] == ':' && text[p - 1] == ':')
-		{
-			idx = p - 2;
-			while (idx > 0 && text[idx - 1].is_space())
-			{
-				idx--;
-			}
-		}
-		else if (p >= 1 && text[p - 1] == '.')
-		{
-			sz q = p - 1;
-			while (q > 0 && text[q - 1].is_space()) q--;
-			if (q == 0 || is_designator_delimiter(text[q - 1]))
-			{
-				return end_idx;
-			}
-			idx = q;
-		}
-		else
-		{
-			break;
-		}
 	}
-	return idx;
+	return first < tokens_before(sf, end) ? token_offset(sf.content, tokens[first]) : end;
 }
 
 struct CallTargetInfo

@@ -40,30 +40,6 @@ fn bool visit(Node* child, Node* parent, VisitorHooks hooks, void* data)
 	return true;
 }
 
-<*
- Doc contract attached to a declaration, or null.
-*>
-fn Node*? decl_contract(Node* node)
-{
-	NullableNode contract;
-	switch (node.kind)
-	{
-		case MODULE_DECL: contract = node.as(ModuleDecl).contract;
-		case FN_DECL: contract = node.as(FnDecl).contract;
-		case MACRO_DECL: contract = node.as(MacroDecl).contract;
-		case STRUCT_DECL: contract = node.as(StructDecl).contract;
-		case INTERFACE_DECL: contract = node.as(InterfaceDecl).contract;
-		case FAULTDEF_DECL: contract = node.as(FaultdefDecl).contract;
-		case FAULT_DECL: contract = node.as(FaultDecl).contract;
-		case VAR_DECL: contract = node.as(VarDecl).contract;
-		case ENUM_DECL: contract = node.as(EnumDecl).contract;
-		case ALIAS_DECL: contract = node.as(AliasDecl).contract;
-		case TYPEDEF_DECL: contract = node.as(TypedefDecl).contract;
-		default: return NOT_FOUND~;
-	}
-	return contract.get();
-}
-
 faultdef VISIT_BREAK;
 
 <*
@@ -116,7 +92,7 @@ fn bool visit_children(Node* parent, VisitorHooks hooks, void* data)
 
 fn void? visit_decls(Node* node, Walk* w) @private
 {
-	if (try contract = decl_contract(node)) w.node(contract)!;
+	if (try contract = contract(node)) w.node(contract)!;
 	switch (node.kind)
 	{
 		case MODULE_DECL:

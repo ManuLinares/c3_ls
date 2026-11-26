@@ -20,7 +20,6 @@ fn Module* create(AnalyzerContext* ctx, String name)
 	mod.name = name.copy(ctx.allocator);
 	mod.nodes.init(ctx.allocator);
 	mod.module_decls.init(ctx.allocator);
-	mod.node_map.init(ctx.allocator);
 
 	ctx.modules.set(mod.name, mod);
 
@@ -30,7 +29,6 @@ fn Module* create(AnalyzerContext* ctx, String name)
 fn void add_node(Module* mod, Node* node)
 {
 	mod.nodes.push(node);
-	mod.node_map.set(node.id, node);
 
 	if (node.kind == MODULE_DECL)
 	{
@@ -47,6 +45,5 @@ fn void free(AnalyzerContext* ctx, Module* mod)
 	mod.name.free(ctx.allocator);
 	mod.nodes.free();
 	mod.module_decls.free();
-	mod.node_map.free();
 	alloc::free(ctx.allocator, mod);
 }

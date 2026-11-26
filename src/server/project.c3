@@ -180,14 +180,12 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 
 	String lookup_key = file_uri.path;
 
-	if (!self.files.has_key(lookup_key))
+	LspFile*? file = self.files.get(lookup_key);
+	if (catch file)
 	{
 		log::warn("File %s is not already tracking in workspace", lookup_key);
 		return;
 	}
-
-	LspFile*? file = self.files.get(lookup_key);
-	if (catch file) return;
 
 	// Other projects' builds also report on the files they use, as on a stdlib file.
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
@@ -228,16 +226,20 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 	self.process_queue.push(input);
 }
 
+<*
+ Key of `document` in `files`: the path of a uri, or `document` itself when it is already a path.
+*>
+fn String? file_key(DocumentUri document) @local
+{
+	String raw = document;
+	if (!raw.contains("://")) return raw;
+	return uri::parse(tmem, raw).path;
+}
+
 fn void LspProject.close_document(&self, DocumentUri document)
 {
-	String raw_uri = document;
-	String lookup_key = raw_uri;
-	if (raw_uri.contains("://"))
-	{
-		Uri? query_uri = uri::parse(tmem, raw_uri);
-		if (catch query_uri) return;
-		lookup_key = query_uri.path;
-	}
+	String? lookup_key = file_key(document);
+	if (catch lookup_key) return;
 
 	LspFile*? file = self.files.get(lookup_key);
 	if (catch file) return;
@@ -272,14 +274,8 @@ fn bool is_in_dir(String path, String dir)
 
 fn void LspProject.close_file(&self, DocumentUri document)
 {
-	String raw_uri = document;
-	String lookup_key = raw_uri;
-	if (raw_uri.contains("://"))
-	{
-		Uri? query_uri = uri::parse(tmem, raw_uri);
-		if (catch query_uri) return;
-		lookup_key = query_uri.path;
-	}
+	String? lookup_key = file_key(document);
+	if (catch lookup_key) return;
 
 	log::debug("Deregistering file: %s", lookup_key);
 
@@ -323,14 +319,8 @@ fn void LspProject.evict(&self, String path)
 
 fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 {
-	String raw_uri = document;
-	String lookup_key = raw_uri;
-	if (raw_uri.contains("://"))
-	{
-		Uri? query_uri = uri::parse(tmem, raw_uri);
-		if (catch query_uri) return;
-		lookup_key = query_uri.path;
-	}
+	String? lookup_key = file_key(document);
+	if (catch lookup_key) return;
 
 	LspFile*? file = self.files.get(lookup_key);
 	if (catch file) return;
@@ -387,6 +377,17 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 		};
 	}
 	foreach (path : paths) server::publish_diagnostics_for_path(path, &self.workspace);
+}
+
+<*
+ Queues every open user file to be analyzed again, as after a change that can affect them all.
+*>
+fn void LspProject.requeue_user_files(&self)
+{
+	self.files.@each(; path, file)
+	{
+		if (file && !file.is_library) self.process_queue.push({ .source_text = file.text, .uri = file.uri.path, .path = file.uri.path });
+	};
 }
 
 fn bool LspProject.is_test_source_file(&self, String file_path)
@@ -572,18 +573,7 @@ fn void LspProject.update(&self)
 			self.close_file((DocumentUri)dead_p);
 		}
 
-		self.files.@each(; path_key, lsp_f)
-		{
-			if (lsp_f && !lsp_f.is_library)
-			{
-				self.process_queue.push({
-					.source_text = lsp_f.text,
-					.uri = lsp_f.uri.path,
-					.path = lsp_f.uri.path,
-					.is_library = false
-				});
-			}
-		};
+		self.requeue_user_files();
 	}
 
 	if (self.process_queue.is_empty()) return;
@@ -601,9 +591,6 @@ fn void LspProject.update(&self)
 	FileInput[] files = latest.array_view();
 	defer self.process_queue.clear();
 
-	bool any_syntax_error = false;
-	String user_file_for_c3c = "";
-
 	// Pass 1: Parse and register all AST nodes across queued files into global workspace registry
 	foreach (f : files)
 	{
@@ -618,7 +605,7 @@ fn void LspProject.update(&self)
 		if (text.len > 0)
 		{
 			String target_path = f.path.len > 0 ? f.path : f.uri;
-			bool ok = self.workspace.parse_and_register_file(target_path, text);
+			self.workspace.parse_and_register_file(target_path, text);
 			// `@feat` sees the project's features, those of the target built for this file, and TESTING in test files.
 			if (try sf = self.workspace.get_source_file_by_path(target_path))
 			{
@@ -629,14 +616,6 @@ fn void LspProject.update(&self)
 				if (target.len) features.push_all(self.config.targets[target]!!.own_features());
 				if (self.is_test_source_file(target_path)) features.push("TESTING");
 				sf.features = features.array_view();
-			}
-			if (!f.is_library)
-			{
-				user_file_for_c3c = target_path;
-				if (!ok)
-				{
-					any_syntax_error = true;
-				}
 			}
 		}
 	}

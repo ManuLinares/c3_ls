@@ -1101,20 +1101,22 @@ fn Node* parse_vasplat_expr(ContextScope scope)
 	return (Node*)node;
 }
 
-fn Node* parse_ct_eval_expr(ContextScope scope)
+<*
+ `keyword(expr)`: a node of `$Type` holding `expr` in `inner_expr`.
+*>
+macro Node* @parse_keyword_call(ContextScope scope, $Type)
 {
 	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
-	CtEvalExpr* node = ctx.ast.alloc_node(CtEvalExpr, start);
+	$Type* node = ctx.ast.alloc_node($Type, ctx.current.range);
 	defer node.range.end = ctx.peek(-1).range.end;
-
-	expect(ctx, node, CT_EVAL);
+	advance(ctx);
 	expect(ctx, node, LPAREN);
 	node.inner_expr = parse_expr(scope);
 	expect(ctx, node, RPAREN);
-
 	return (Node*)node;
 }
+
+fn Node* parse_ct_eval_expr(ContextScope scope) => @parse_keyword_call(scope, CtEvalExpr);
 
 fn Node* parse_lambda_expr(ContextScope scope)
 {
@@ -1575,34 +1577,9 @@ fn Node* parse_ct_feature(ContextScope scope)
 	return (Node*)node;
 }
 
-fn Node* parse_lengthof_expr(ContextScope scope)
-{
-	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
-	advance(ctx);
-	LengthofExpr* node = ctx.ast.alloc_node(LengthofExpr, start);
-	defer node.range.end = ctx.peek(-1).range.end;
+fn Node* parse_lengthof_expr(ContextScope scope) => @parse_keyword_call(scope, LengthofExpr);
 
-	expect(ctx, node, LPAREN);
-	node.inner_expr = parse_expr(scope);
-	expect(ctx, node, RPAREN);
-
-	return (Node*)node;
-}
-
-fn Node* parse_ct_stringify_expr(ContextScope scope)
-{
-	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
-	advance(ctx);
-	CtStringifyExpr* node = ctx.ast.alloc_node(CtStringifyExpr, start);
-	defer node.range.end = ctx.peek(-1).range.end;
-
-	expect(ctx, node, LPAREN);
-	node.inner_expr = parse_expr(scope);
-	expect(ctx, node, RPAREN);
-	return (Node*)node;
-}
+fn Node* parse_ct_stringify_expr(ContextScope scope) => @parse_keyword_call(scope, CtStringifyExpr);
 
 fn Node* parse_vaarg_expr(ContextScope scope)
 {
@@ -1630,16 +1607,4 @@ fn Node* parse_vaarg_expr(ContextScope scope)
 	return (Node*)node;
 }
 
-fn Node* parse_ct_reflect_expr(ContextScope scope)
-{
-	ParseContext* ctx = scope.ctx;
-	Range start = ctx.current.range;
-	advance(ctx);
-	CtReflectExpr* node = ctx.ast.alloc_node(CtReflectExpr, start);
-	defer node.range.end = ctx.peek(-1).range.end;
-
-	expect(ctx, node, LPAREN);
-	node.inner_expr = parse_expr(scope);
-	expect(ctx, node, RPAREN);
-	return node;
-}
+fn Node* parse_ct_reflect_expr(ContextScope scope) => @parse_keyword_call(scope, CtReflectExpr);

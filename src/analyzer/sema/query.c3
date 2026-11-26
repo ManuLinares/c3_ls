@@ -16,7 +16,7 @@ struct LocalSearchContext
 <*
  Whether declarations inside a node of `kind` are invisible outside it. Compile-time blocks are not scopes.
 *>
-fn bool opens_scope(NodeKind kind) @local
+fn bool opens_scope(NodeKind kind)
 {
 	switch (kind)
 	{
@@ -246,6 +246,15 @@ fn sz section_at(SourceFile* sf, Location loc)
 	return low - 1;
 }
 
+<*
+ Module of `sf` at `loc`, or its first module when `loc` has no line.
+*>
+fn String caller_module(SourceFile* sf, Location loc)
+{
+	if (!sf) return "";
+	return loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+}
+
 fn String get_module_name_at_location(SourceFile* sf, Location loc)
 {
 	if (!sf) return "";
@@ -345,6 +354,22 @@ fn List{String} visible_modules(AnalyzerContext* context, SourceFile* sf, Locati
 	return visible;
 }
 
+<*
+ First entry of the `head` list that `sf` can see at `loc`, best ranked first.
+*>
+macro Node*? @first_accessible(AnalyzerContext* context, SourceFile* sf, Location loc, head, bool $skip_methods = false)
+{
+	foreach (curr : ranked(context, sf, loc, head))
+	{
+		if (!curr.node) continue;
+		$if $skip_methods:
+			if (@ok(receiver_type_expr(curr.node))) continue;
+		$endif
+		if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)) return curr.node;
+	}
+	return NOT_FOUND~;
+}
+
 fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 {
 	List{String} list;
@@ -374,16 +399,11 @@ fn List{String} get_imported_modules_at_location(SourceFile* sf, Location loc)
 	return list;
 }
 
-fn List{String} get_source_file_imported_modules(SourceFile* sf)
-{
-	return get_imported_modules_at_location(sf, { -1, -1 });
-}
-
 fn bool is_module_visible_at(AnalyzerContext* context, SourceFile* sf, Location loc, String target_mod)
 {
 	if (!sf || target_mod.len == 0) return false;
 
-	String sf_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+	String sf_mod = caller_module(sf, loc);
 	if (sf_mod.len > 0 && sf_mod == target_mod) return true;
 
 	if (target_mod == "std::core" || target_mod.starts_with("std::core::")) return true;
@@ -420,7 +440,7 @@ fn bool is_symbol_accessible_at(AnalyzerContext* context, SourceFile* sf, Locati
 			return false;
 
 		case PRIVATE:
-			String caller_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+			String caller_mod = caller_module(sf, loc);
 			if (caller_mod.len > 0 && target_mod.len > 0 && caller_mod == target_mod) return true;
 			if (caller_mod.len == 0 && target_mod.len == 0 && sf.contains_node(target_node)) return true;
 			if (is_imported_as_public_at(sf, loc, target_mod)) return true;
@@ -458,7 +478,7 @@ fn Module*? resolve_module_for_prefix(AnalyzerContext* context, SourceFile* sf, 
 		if (settles(context, sf, loc, m, symbol, all, &candidates)) return m;
 	}
 
-	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+	String caller_mod = caller_module(sf, loc);
 
 	if (sf)
 	{
@@ -569,12 +589,7 @@ fn Node*? find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, St
 {
 	if (!context || type_name.len == 0) return NOT_FOUND~;
 
-	String clean_type = type_name.trim_right("*&? \t");
-	if (try idx = clean_type.index_of_char('{'))
-	{
-		clean_type = clean_type[:idx].trim();
-	}
-	clean_type = clean_type.trim_right("*&? \t");
+	String clean_type = bare_type_name(type_name);
 
 	if (constants::is_primitive(clean_type)) return NOT_FOUND~;
 
@@ -599,41 +614,23 @@ fn Node*? find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, St
 	{
 		if (clean_type.contains("::"))
 		{
-			foreach (curr : ranked(context, sf, loc, context.registry.types.get(clean_type) ?? (TypeInfo*)null))
-			{
-				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
-				{
-					return curr.node;
-				}
-			}
+			if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(clean_type) ?? (TypeInfo*)null)) return accessible;
 		}
 
-		String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+		String caller_mod = caller_module(sf, loc);
 		if (caller_mod.len > 0)
 		{
 			String local_qname = string::tformat("%s::%s", caller_mod, clean_type);
-			foreach (curr : ranked(context, sf, loc, context.registry.types.get(local_qname) ?? (TypeInfo*)null))
-			{
-				if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
-				{
-					return curr.node;
-				}
-			}
+			if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(local_qname) ?? (TypeInfo*)null)) return accessible;
 		}
 
 		if (sf)
 		{
-			List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
+			List{String} imports = get_imported_modules_at_location(sf, loc);
 			foreach (imp : imports)
 			{
 				String imp_qname = string::tformat("%s::%s", imp, clean_type);
-				foreach (curr : ranked(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null))
-				{
-					if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
-					{
-						return curr.node;
-					}
-				}
+				if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null)) return accessible;
 			}
 		}
 
@@ -737,12 +734,7 @@ fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, St
 {
 	if (!assoc_type_node) return false;
 
-	String target_clean = clean_type.trim_right("*&? \t");
-	if (try b_idx = target_clean.index_of_char('{'))
-	{
-		target_clean = target_clean[:b_idx].trim();
-	}
-	target_clean = target_clean.trim_right("*&? \t");
+	String target_clean = bare_type_name(clean_type);
 
 	String target_path = "";
 	String target_base = target_clean;
@@ -795,42 +787,10 @@ fn bool is_matching_associated_type(Node* assoc_type_node, String clean_type, St
 }
 
 fn Node*? check_fn_list_for_function(AnalyzerContext* context, FunctionInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
-{
-	foreach (curr : ranked(context, sf, loc, head))
-	{
-		if (curr.node && curr.node.kind == FN_DECL)
-		{
-			FnDecl* fd = curr.node.as(FnDecl);
-			if (fd.associated_type == null)
-			{
-				if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
-				{
-					return curr.node;
-				}
-			}
-		}
-	}
-	return NOT_FOUND~;
-}
+	=> @first_accessible(context, sf, loc, head, $skip_methods: true);
 
 fn Node*? check_macro_list_for_macro(AnalyzerContext* context, MacroInfo* head, SourceFile* sf = null, Location loc = { -1, -1 })
-{
-	foreach (curr : ranked(context, sf, loc, head))
-	{
-		if (curr.node && curr.node.kind == MACRO_DECL)
-		{
-			MacroDecl* md = curr.node.as(MacroDecl);
-			if (!@ok(md.associated_type.get()))
-			{
-				if (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
-				{
-					return curr.node;
-				}
-			}
-		}
-	}
-	return NOT_FOUND~;
-}
+	=> @first_accessible(context, sf, loc, head, $skip_methods: true);
 
 fn Node*? find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, String name, String caller_mod = "", Location loc = { -1, -1 })
 {
@@ -839,36 +799,16 @@ fn Node*? find_attrmacro_in_scope(AnalyzerContext* context, SourceFile* sf, Stri
 	if (caller_mod.len > 0)
 	{
 		String local_qname = string::tformat("%s::%s", caller_mod, name);
-		foreach (curr : ranked(context, sf, loc, context.registry.attrmacros.get(local_qname) ?? (AttrdefInfo*)null))
-		{
-			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
-			{
-				return curr.node;
-			}
-		}
-	}
-
-	foreach (direct : ranked(context, sf, loc, context.registry.attrmacros.get(name) ?? (AttrdefInfo*)null))
-	{
-		if (direct.node && (!sf || is_symbol_accessible_at(context, sf, loc, direct.node, direct.mod)))
-		{
-			return direct.node;
-		}
+		if (try accessible = @first_accessible(context, sf, loc, context.registry.attrmacros.get(local_qname) ?? (AttrdefInfo*)null)) return accessible;
 	}
 
 	if (sf)
 	{
-		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
+		List{String} imports = get_imported_modules_at_location(sf, loc);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, name);
-			foreach (curr : ranked(context, sf, loc, context.registry.attrmacros.get(imp_qname) ?? (AttrdefInfo*)null))
-			{
-				if (curr.node && is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod))
-				{
-					return curr.node;
-				}
-			}
+			if (try accessible = @first_accessible(context, sf, loc, context.registry.attrmacros.get(imp_qname) ?? (AttrdefInfo*)null)) return accessible;
 		}
 	}
 
@@ -916,7 +856,7 @@ fn Node*? find_callable_in_module(AnalyzerContext* context, Module* mod, String 
 	foreach (stmt : mod.nodes)
 	{
 		if (!stmt || stmt.kind == ERROR) continue;
-		if (stmt.kind == FN_DECL && stmt.as(FnDecl).associated_type != null) continue;
+		if (stmt.kind == FN_DECL && @ok(stmt.as(FnDecl).associated_type.get())) continue;
 		if (stmt.kind == MACRO_DECL && @ok(stmt.as(MacroDecl).associated_type.get())) continue;
 		if (sf && !is_symbol_accessible_at(context, sf, loc, stmt, mod.name)) continue;
 		String sname = cursor::spelling(stmt, tmem);
@@ -940,13 +880,7 @@ fn Node*? find_symbol_in_module(AnalyzerContext* context, Module* mod, String sy
 	String qname = string::tformat("%s::%s", mod.name, symbol_name);
 	if (context.registry)
 	{
-		foreach (curr : ranked(context, sf, loc, context.registry.types.get(qname) ?? (TypeInfo*)null))
-		{
-			if (curr.node && (!sf || is_symbol_accessible_at(context, sf, loc, curr.node, curr.mod)))
-			{
-				return curr.node;
-			}
-		}
+		if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(qname) ?? (TypeInfo*)null)) return accessible;
 	}
 
 	foreach (stmt : mod.nodes)
@@ -1011,7 +945,7 @@ fn Node*? find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 	String effective_mod = caller_mod;
 	if (effective_mod.len == 0 && sf)
 	{
-		effective_mod = loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf);
+		effective_mod = caller_module(sf, loc);
 	}
 
 	if (effective_mod.len > 0)
@@ -1044,7 +978,7 @@ fn Node*? find_callable_in_scope(AnalyzerContext* context, SourceFile* sf, Strin
 
 	if (sf)
 	{
-		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
+		List{String} imports = get_imported_modules_at_location(sf, loc);
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, name);
@@ -1160,7 +1094,7 @@ fn Node*? find_method_in_type(AnalyzerContext* context, String type_name, String
 {
 	if (!context || type_name.len == 0 || method_name.len == 0) return NOT_FOUND~;
 	String name = method_name.strip_prefix("@");
-	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+	String caller_mod = caller_module(sf, loc);
 	foreach (source : method_sources(context, sf, loc, type_name))
 	{
 		String clean_type = generic_base(source).trim_right("*&? \t");
@@ -1207,12 +1141,7 @@ fn Node*? find_member_in_type(AnalyzerContext* context, String type_name, String
 {
 	if (!context || type_name.len == 0 || member_name.len == 0) return NOT_FOUND~;
 
-	String clean_type = type_name.trim_right("*&? \t");
-	if (try idx = clean_type.index_of_char('{'))
-	{
-		clean_type = clean_type[:idx].trim();
-	}
-	clean_type = clean_type.trim_right("*&? \t");
+	String clean_type = bare_type_name(type_name);
 
 	Node* type_node = find_type_node_in_context(context, sf, clean_type, loc) ?? find_type_node_in_context(context, null, clean_type)!;
 
@@ -1344,7 +1273,7 @@ fn Node*? find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, Strin
 		return find_symbol_in_module(context, resolve_module_for_prefix(context, sf, loc, mod_prefix, short_name), short_name, sf, loc);
 	}
 
-	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+	String caller_mod = caller_module(sf, loc);
 	if (caller_mod.len > 0)
 	{
 		if (try m = context.modules.get(caller_mod))
@@ -1358,7 +1287,7 @@ fn Node*? find_symbol_in_context(AnalyzerContext* context, SourceFile* sf, Strin
 
 	if (sf)
 	{
-		List{String} imports = loc.line >= 0 ? get_imported_modules_at_location(sf, loc) : get_source_file_imported_modules(sf);
+		List{String} imports = get_imported_modules_at_location(sf, loc);
 		foreach (imp : imports)
 		{
 			if (try m = context.modules.get(imp))
@@ -1500,17 +1429,6 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 					if (t.len > 0) return t;
 				}
 
-				if (context && context.registry)
-				{
-					if (try ty_info = context.registry.types.get(id_name))
-					{
-						if (ty_info.node && (!sf || is_symbol_accessible_at(context, sf, effective_loc, ty_info.node, ty_info.mod)))
-						{
-							return id_name;
-						}
-					}
-				}
-
 				return id_name;
 			}
 
@@ -1520,7 +1438,7 @@ fn String type_of(AnalyzerContext* context, SourceFile* sf, Node* expr, Location
 				// `T::kind` is a TypeKind whatever `T` is, even a compile-time `$Type`.
 				if (acc.access_kind == STATIC && @ok(acc.member.get()))
 				{
-					if (try p = constants::TypeProperty::lookup_field(name, acc.member.spelling()))
+					if (try p = TypeProperty::lookup_field(name, acc.member.spelling()))
 					{
 						if (!p.type_desc.starts_with("any") && !p.type_desc.starts_with("fn")) return p.type_desc;
 					}
@@ -2617,7 +2535,6 @@ fn Type*? numeric(AnalyzerContext* context, String name) @local
 
 fn uint bits(Type* t) @local => BitSizes::from_ordinal(t.data.builtin.bitsize).bits;
 
-fn bool is_float(Type* t) @local => t.kind >= TYPE_F16 && t.kind <= TYPE_F128;
 
 fn bool is_signed(Type* t) @local => (t.kind >= TYPE_I8 && t.kind <= TYPE_I128) || t.kind == TYPE_SZ || t.kind == TYPE_IPTR;
 
@@ -2627,10 +2544,10 @@ fn bool is_signed(Type* t) @local => (t.kind >= TYPE_I8 && t.kind <= TYPE_I128) 
 *>
 fn Type* wider(Type* a, Type* b) @local
 {
-	if (is_float(a) || is_float(b))
+	if (a.is_float() || b.is_float())
 	{
-		if (is_float(a) && is_float(b)) return bits(a) >= bits(b) ? a : b;
-		return is_float(a) ? a : b;
+		if (a.is_float() && b.is_float()) return bits(a) >= bits(b) ? a : b;
+		return a.is_float() ? a : b;
 	}
 	if (is_signed(a) == is_signed(b)) return bits(a) >= bits(b) ? a : b;
 	Type* s = is_signed(a) ? a : b;
@@ -2646,7 +2563,7 @@ fn String promoted(AnalyzerContext* context, String type) @local
 {
 	Type*? t = numeric(context, type);
 	if (catch t) return type;
-	if (is_float(t)) return bits(t) < 32 ? "float" : type;
+	if (t.is_float()) return bits(t) < 32 ? "float" : type;
 	return bits(t) < 32 ? "int" : type;
 }
 
@@ -2834,6 +2751,16 @@ fn GenericDecl*? generic_params(AnalyzerContext* context, Node* decl) @private
 		if (stmt && stmt.kind == MODULE_DECL) section = generics_of(stmt);
 	}
 	return NOT_FOUND~;
+}
+
+<*
+ `type` without pointer/optional markers and generic arguments: `List{int}*` is `List`.
+*>
+fn String bare_type_name(String type)
+{
+	String clean = type.trim_right("*&? \t");
+	if (try idx = clean.index_of_char('{')) clean = clean[:idx].trim();
+	return clean.trim_right("*&? \t");
 }
 
 <*
@@ -3266,13 +3193,7 @@ fn Node*? resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_no
 
 	if (context && context.registry)
 	{
-		foreach (direct_ty : ranked(context, sf, loc, context.registry.types.get(symbol_name) ?? (TypeInfo*)null))
-		{
-			if (direct_ty.node && is_symbol_accessible_at(context, sf, loc, direct_ty.node, direct_ty.mod))
-			{
-				return direct_ty.node;
-			}
-		}
+		if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(symbol_name) ?? (TypeInfo*)null)) return accessible;
 
 		String caller_mod = get_module_name_at_location(sf, loc);
 		if (try c = find_callable_in_scope(context, sf, symbol_name, caller_mod, loc)) return c;
@@ -3281,13 +3202,7 @@ fn Node*? resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_no
 		foreach (imp : imports)
 		{
 			String imp_qname = string::tformat("%s::%s", imp, symbol_name);
-			foreach (imp_ty : ranked(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null))
-			{
-				if (imp_ty.node && is_symbol_accessible_at(context, sf, loc, imp_ty.node, imp_ty.mod))
-				{
-					return imp_ty.node;
-				}
-			}
+			if (try accessible = @first_accessible(context, sf, loc, context.registry.types.get(imp_qname) ?? (TypeInfo*)null)) return accessible;
 		}
 	}
 
@@ -3339,7 +3254,7 @@ fn Node*? resolve_callee_by_name(AnalyzerContext* context, SourceFile* sf, Strin
 {
 	if (!context || callee_name.len == 0) return NOT_FOUND~;
 
-	String caller_mod = sf ? (loc.line >= 0 ? get_module_name_at_location(sf, loc) : get_source_file_module_name(sf)) : "";
+	String caller_mod = caller_module(sf, loc);
 
 	if (try idx = callee_name.rindex_of("::"))
 	{

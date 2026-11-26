@@ -42,16 +42,7 @@ fn void on_analyzer_diagnostic(SourceFile* file, Range range, DiagnosticLevel le
 	}
 
 	LspDiagnostic diag = {
-		.range = {
-			.start = {
-				.line = range.start.line >= 0 ? (uint)range.start.line : 0,
-				.character = range.start.column >= 0 ? (uint)range.start.column : 0
-			},
-			.end = {
-				.line = range.end.line >= 0 ? (uint)range.end.line : (range.start.line >= 0 ? (uint)range.start.line : 0),
-				.character = range.end.column >= 0 ? (uint)range.end.column : (range.start.column >= 0 ? (uint)range.start.column : 0)
-			}
-		},
+		.range = analysis::to_lsp_range(range),
 		.severity = severity,
 		.message = message.copy(active_workspace.allocator),
 		.source = "c3-analyzer"
@@ -122,6 +113,20 @@ fn SourceFile*? LspWorkspace.get_source_file_by_path(&self, String path)
 	return self.ctx.files.get(path);
 }
 
+<*
+ Adds to `results` each `qname` entry of `#map` that `sf` can see at `loc`.
+*>
+macro void LspWorkspace.@add_accessible(&self, List{SymbolEntry}* results, #map, String qname, String mod_name, SourceFile* sf, Location loc)
+{
+	query::@each_declaration(#map, qname; entry)
+	{
+		if (entry.node && entry.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, entry.node, mod_name)))
+		{
+			results.push({ .node = entry.node, .section_id = 0 });
+		}
+	};
+}
+
 fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, SourceFile* sf = null, Location loc = { -1, -1 })
 {
 	List{SymbolEntry} results;
@@ -136,29 +141,9 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 			if (!sf || query::is_module_visible_at(self.ctx, sf, loc, mod_name))
 			{
 				String qname = string::tformat("%s::%s", mod_name, name);
-				query::@each_declaration(self.ctx.registry.functions, qname; FunctionInfo* fn_info)
-				{
-					if (fn_info.node && fn_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, fn_info.node, mod_name)))
-					{
-						results.push({ .node = fn_info.node, .section_id = 0 });
-					}
-				};
-
-				query::@each_declaration(self.ctx.registry.types, qname; TypeInfo* ty_info)
-				{
-					if (ty_info.node && ty_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, ty_info.node, mod_name)))
-					{
-						results.push({ .node = ty_info.node, .section_id = 0 });
-					}
-				};
-
-				query::@each_declaration(self.ctx.registry.macros, qname; MacroInfo* mac_info)
-				{
-					if (mac_info.node && mac_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, mac_info.node, mod_name)))
-					{
-						results.push({ .node = mac_info.node, .section_id = 0 });
-					}
-				};
+				self.@add_accessible(&results, self.ctx.registry.functions, qname, mod_name, sf, loc);
+				self.@add_accessible(&results, self.ctx.registry.types, qname, mod_name, sf, loc);
+				self.@add_accessible(&results, self.ctx.registry.macros, qname, mod_name, sf, loc);
 			}
 		};
 	}
@@ -472,48 +457,34 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 	}
 }
 
+<*
+ Runs `#work` with analyzer diagnostics reported to this workspace for `path`.
+*>
+macro bool LspWorkspace.@reporting(&self, String path, #work)
+{
+	active_workspace = self;
+	active_processing_path = path;
+	diagnostics::callback = &on_analyzer_diagnostic;
+	defer
+	{
+		active_workspace = null;
+		active_processing_path = "";
+	}
+	return #work;
+}
+
 fn bool LspWorkspace.parse_and_register_file(&self, String path, String text)
 {
 	self.clear_diagnostics_for_path(path);
 
-	active_workspace = self;
-	active_processing_path = path;
-	diagnostics::callback = &on_analyzer_diagnostic;
-
-	bool ok = context::parse_and_register(self.ctx, text, path);
-
-	active_workspace = null;
-	active_processing_path = "";
-
-	return ok;
+	return self.@reporting(path, context::parse_and_register(self.ctx, text, path));
 }
 
-fn bool LspWorkspace.analyze_file(&self, String path)
-{
-	active_workspace = self;
-	active_processing_path = path;
-	diagnostics::callback = &on_analyzer_diagnostic;
-
-	bool ok = context::analyze_file(self.ctx, path);
-
-	active_workspace = null;
-	active_processing_path = "";
-
-	return ok;
-}
+fn bool LspWorkspace.analyze_file(&self, String path) => self.@reporting(path, context::analyze_file(self.ctx, path));
 
 fn bool LspWorkspace.process_file(&self, String path, String text)
 {
 	self.clear_diagnostics_for_path(path);
 
-	active_workspace = self;
-	active_processing_path = path;
-	diagnostics::callback = &on_analyzer_diagnostic;
-
-	bool ok = context::process(self.ctx, text, path);
-
-	active_workspace = null;
-	active_processing_path = "";
-
-	return ok;
+	return self.@reporting(path, context::process(self.ctx, text, path));
 }

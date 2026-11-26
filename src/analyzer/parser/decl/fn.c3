@@ -139,13 +139,11 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 			if (flags.is_extern)
 			{
 				diagnostics::error(ctx.context, start, "Extern functions cannot have a structural block body");
-				ctx.ast.error(start);
 				return false;
 			}
 			if (flags.is_interface)
 			{
 				diagnostics::error(ctx.context, start, "Interface methods cannot have a body");
-				ctx.ast.error(start);
 				return false;
 			}
 			Node* body = parse_compound_stmt(scope.with_flags(
@@ -160,7 +158,6 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 			if (flags.is_extern)
 			{
 				diagnostics::error(ctx.context, start, "Extern functions cannot have an expression body");
-				ctx.ast.error(start);
 				return false;
 			}
 			Node* body = parse_short_body(scope.with_flags(

@@ -31,16 +31,7 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 	// Stdlib symbols are only renamed while editing the stdlib itself.
 	if (try decl_file = source_file::file_of(project.workspace.ctx, decl) && server::is_stdlib_file(decl_file.path) && !server::is_stdlib_file(uri.path)) return NOT_FOUND~;
 
-	return {
-		.start = {
-			.line = (uint)name.range.start.line,
-			.character = (uint)name.range.start.column
-		},
-		.end = {
-			.line = (uint)name.range.end.line,
-			.character = (uint)name.range.end.column
-		}
-	};
+	return analysis::to_lsp_range(name.range);
 }
 
 alias TextEditList = List{TextEdit};
