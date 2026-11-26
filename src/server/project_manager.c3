@@ -161,7 +161,7 @@ fn LspProject* ProjectManager.get_or_create_project_for_path(&self, String file_
 	LspProject* best_proj = null;
 	self.projects.@each(; root, proj)
 	{
-		if (file_path.starts_with(root))
+		if (is_in_dir(file_path, root))
 		{
 			if (root.len > best_root.len)
 			{

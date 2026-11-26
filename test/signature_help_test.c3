@@ -130,3 +130,65 @@ fn void test_signature_help_method_called_through_type()
 	assert(sig.parameters.len == 5, "%d parameters", sig.parameters.len);
 	assert(sig.activeParameter == 1, "active %d", sig.activeParameter);
 }
+
+fn void signature_help_skips_brackets_in_strings()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void show(String a, String b) {}\nfn void main()\n{\n\tshow(\")\", \"x\");\n\tshow(\";\", \"x\");\n\tshow(\"{\", \"x\");\n\tshow(\"}\", \"x\");\n\tshow(\"a\", // done)\n\t\t\"x\");\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/sig_strings.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/sig_strings.c3", source);
+
+	LspPosition[] positions = {
+		{ 4, 11 }, { 5, 11 }, { 6, 11 }, { 7, 11 },
+		{ 4, 12 }, { 5, 12 }, { 6, 12 }, { 7, 12 },
+		{ 9, 3 },
+	};
+	foreach (pos : positions)
+	{
+		SignatureHelpResult res = signature_help::signature_help(&proj, doc_uri, pos)!!;
+		assert(res.signatures.len == 1 && res.signatures[0].activeParameter == 1, "%d:%d", pos.line, pos.character);
+	}
+}
+
+fn void signature_help_after_non_ascii_strings()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void show(String a, String b) {}\nfn void main()\n{\n\tshow(\"😀)\", \"x\");\n\tshow(\"é(\", \"x\"); // 😀\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/sig_utf8.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/sig_utf8.c3", source);
+
+	// Columns are UTF-16 units: the emoji takes 2, `é` takes 1.
+	LspPosition[] positions = { { 4, 12 }, { 4, 13 }, { 5, 11 }, { 5, 12 } };
+	foreach (pos : positions)
+	{
+		SignatureHelpResult res = signature_help::signature_help(&proj, doc_uri, pos)!!;
+		assert(res.signatures.len == 1 && res.signatures[0].activeParameter == 1, "%d:%d", pos.line, pos.character);
+	}
+}
+
+fn void signature_help_skips_block_comments()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void show(String a, String b) {}\nfn void main()\n{\n\tshow(\"a\" /* ) */, \"x\");\n\tshow(\"a\" /* , */, \"x\");\n\tshow(/* ( */ \"a\", \"x\");\n\tshow(\"a\", /* ) ;\n\t} */ \"x\");\n\tshow(\"a\", /* /* ) */ ) */ \"x\");\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/sig_block.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/sig_block.c3", source);
+
+	LspPosition[] positions = { { 4, 20 }, { 5, 20 }, { 6, 20 }, { 8, 5 }, { 9, 28 } };
+	foreach (pos : positions)
+	{
+		SignatureHelpResult res = signature_help::signature_help(&proj, doc_uri, pos)!!;
+		assert(res.signatures.len == 1 && res.signatures[0].activeParameter == 1, "%d:%d: %d signatures, param %d", pos.line, pos.character, res.signatures.len, res.signatures.len ? (int)res.signatures[0].activeParameter : -1);
+	}
+}

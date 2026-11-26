@@ -55,3 +55,15 @@ fn void read_multiple_messages()
 	assert(actual2.rpc == "41.52");
 	actual2.free();
 }
+
+fn void read_message_with_content_type_first()
+{
+	io_handler::init();
+	defer io_handler::quit();
+
+	LspMessage? actual = io_handler::read_string(mem,
+	"Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: 51\r\n\r\n" +++ `{"jsonrpc":"2.0","method":"initialize","params":{}}`);
+	if (catch err = actual) unreachable("message rejected: %s", err);
+	defer actual.free();
+	assert(actual.method == MessageKind.INITIALIZE);
+}

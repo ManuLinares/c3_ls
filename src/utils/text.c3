@@ -119,70 +119,6 @@ fn String extract_line_prefix(String text, sz offset)
 	return text[line_start : offset - line_start].trim_left();
 }
 
-<*
- Whether the character at `idx` follows an odd number of backslashes.
-*>
-fn bool is_escaped(String text, sz idx) @local
-{
-	sz backslashes = 0;
-	while (idx > backslashes && text[idx - backslashes - 1] == '\\') backslashes++;
-	return backslashes % 2 == 1;
-}
-
-fn sz find_enclosing_bracket(String text, sz idx, char open_ch = '{', char close_ch = '}')
-{
-	int depth = 0;
-	int other_brace = 0;
-	int other_paren = 0;
-	int other_bracket = 0;
-	bool in_str = false;
-	bool in_char = false;
-	bool in_raw = false;
-
-	for (sz i = idx; i > 0; i--)
-	{
-		char c = text[i - 1];
-		if (c == '`') { in_raw = !in_raw; continue; }
-		if (in_raw) continue;
-		if (c == '"' && !is_escaped(text, i - 1)) { in_str = !in_str; continue; }
-		if (in_str) continue;
-		if (c == '\'' && !is_escaped(text, i - 1)) { in_char = !in_char; continue; }
-		if (in_char) continue;
-
-		if (c == close_ch)
-		{
-			depth++;
-		}
-		else if (c == open_ch)
-		{
-			if (depth > 0)
-			{
-				depth--;
-			}
-			else
-			{
-				return i - 1;
-			}
-		}
-		else
-		{
-			switch (c)
-			{
-				case '}': other_brace++;
-				case '{': if (other_brace > 0) other_brace--;
-				case ')': other_paren++;
-				case '(': if (other_paren > 0) other_paren--;
-				case ']': other_bracket++;
-				case '[': if (other_bracket > 0) other_bracket--;
-				default: break;
-			}
-		}
-	}
-	return (sz)-1;
-}
-
-fn sz find_enclosing_open_brace(String text, sz idx) => find_enclosing_bracket(text, idx, '{', '}');
-
 fn bool is_designator_delimiter(char c) @local
 {
 	return c == '{' || c == ',' || c == '=' || c == ';' || c == '(';
@@ -353,197 +289,133 @@ struct CallTargetInfo
 	sz open_paren_idx;
 }
 
-fn CallTargetInfo parse_call_context(String text, sz offset)
+<*
+ The call whose argument list holds `offset` in `sf`, found from the file's tokens.
+*>
+fn CallTargetInfo parse_call_context(SourceFile* sf, sz offset)
 {
-	CallTargetInfo info = {
-		.callee_name = "",
-		.active_param = 0,
-		.is_valid = false,
-		.open_paren_idx = 0
-	};
+	CallTargetInfo info;
+	Token[] tokens = sf.lexer.tokens.array_view();
+	String text = sf.content;
 	if (offset == 0 || offset > text.len) return info;
 
+	sz end = tokens_before(sf, offset);
+
+	sz paren = -1;
 	int depth = 0;
-	sz open_paren_idx = 0;
-	bool found = false;
-
-	for (sz i = offset; i > 0; i--)
+	for (sz i = end - 1; i >= 0 && paren < 0; i--)
 	{
-		char c = text[i - 1];
-
-		switch (c)
+		switch (tokens[i].kind)
 		{
-			case ';':
+			case EOS:
 				if (depth == 0) return info;
-			case '}':
+			case RBRACE:
 				depth++;
-			case '{':
+			case LBRACE:
 				if (depth == 0) return info;
 				depth--;
-			case ')':
+			case RPAREN:
 				depth++;
-			case '(':
-				if (depth > 0)
+			case LPAREN:
+				if (depth == 0)
 				{
-					depth--;
+					paren = i;
 				}
 				else
 				{
-					open_paren_idx = i - 1;
-					found = true;
+					depth--;
 				}
 			default:
 				break;
 		}
-		if (found) break;
 	}
-
-	if (!found) return info;
+	if (paren < 0) return info;
 
 	info.in_parens = true;
-	info.open_paren_idx = open_paren_idx;
+	info.open_paren_idx = token_offset(text, tokens[paren]);
 
-	uint commas = 0;
-	int nested_depth = 0;
-	bool in_str = false;
-	bool in_char = false;
-	bool in_raw = false;
-
-	for (sz i = open_paren_idx + 1; i < offset; i++)
+	int nested = 0;
+	for (sz i = paren + 1; i < end; i++)
 	{
-		char c = text[i];
-		switch (true)
+		switch (tokens[i].kind)
 		{
-			case in_raw:
-				if (c == '`') in_raw = false;
-				continue;
-			case in_str:
-				if (c == '\\')
-				{
-					i++;
-					continue;
-				}
-				if (c == '"') in_str = false;
-				continue;
-			case in_char:
-				if (c == '\\')
-				{
-					i++;
-					continue;
-				}
-				if (c == '\'') in_char = false;
-				continue;
-			default:
-				break;
-		}
-
-		switch (c)
-		{
-			case '`':
-				in_raw = true;
-			case '"':
-				in_str = true;
-			case '\'':
-				in_char = true;
-			case '(':
-			case '[':
-			case '{':
-				nested_depth++;
-			case ')':
-			case ']':
-			case '}':
-				if (nested_depth > 0)
-				{
-					nested_depth--;
-				}
-			case ',':
-				if (nested_depth == 0)
-				{
-					commas++;
-				}
+			case LPAREN:
+			case LBRACKET:
+			case LBRACE:
+				nested++;
+			case RPAREN:
+			case RBRACKET:
+			case RBRACE:
+				if (nested > 0) nested--;
+			case COMMA:
+				if (nested == 0) info.active_param++;
 			default:
 				break;
 		}
 	}
 
-	info.active_param = commas;
-
-	sz callee_end = open_paren_idx;
-	while (callee_end > 0 && text[callee_end - 1].is_space())
+	sz first = paren;
+	for (sz i = paren - 1; i >= 0; i--)
 	{
-		callee_end--;
-	}
-
-	sz callee_start = callee_end;
-	while (callee_start > 0)
-	{
-		if (text[callee_start - 1] == ')')
+		TokenKind kind = tokens[i].kind;
+		if (kind == RPAREN || kind == RBRACKET)
 		{
-			callee_start--;
-			int scan_depth = 1;
-			while (callee_start > 0 && scan_depth > 0)
+			TokenKind open = kind == RPAREN ? LPAREN : LBRACKET;
+			int group = 0;
+			for (; i >= 0; i--)
 			{
-				if (text[callee_start - 1] == ')')
-				{
-					scan_depth++;
-				}
-				else if (text[callee_start - 1] == '(')
-				{
-					scan_depth--;
-				}
-				callee_start--;
+				if (tokens[i].kind == kind) group++;
+				if (tokens[i].kind == open && --group == 0) break;
 			}
+			if (i < 0) break;
+			first = i;
 			continue;
 		}
-		else if (text[callee_start - 1] == ']')
+		if (!kind.is_identifier()) break;
+		first = i;
+		if (i > 0 && tokens[i - 1].kind == BUILTIN)
 		{
-			callee_start--;
-			int scan_depth = 1;
-			while (callee_start > 0 && scan_depth > 0)
-			{
-				if (text[callee_start - 1] == ']')
-				{
-					scan_depth++;
-				}
-				else if (text[callee_start - 1] == '[')
-				{
-					scan_depth--;
-				}
-				callee_start--;
-			}
-			continue;
-		}
-		else if (lexer::is_name(text[callee_start - 1]))
-		{
-			while (callee_start > 0 && lexer::is_name(text[callee_start - 1]))
-			{
-				callee_start--;
-			}
-		}
-		else
-		{
+			first = i - 1;
 			break;
 		}
-
-		if (callee_start >= 2 && text[callee_start - 2] == ':' && text[callee_start - 1] == ':')
-		{
-			callee_start -= 2;
-		}
-		else if (callee_start >= 1 && text[callee_start - 1] == '.')
-		{
-			callee_start -= 1;
-		}
-		else
-		{
-			break;
-		}
+		if (i == 0 || (tokens[i - 1].kind != SCOPE && tokens[i - 1].kind != DOT)) break;
+		first = --i;
 	}
 
-	if (callee_end > callee_start)
+	if (first < paren)
 	{
-		info.callee_name = text[callee_start : callee_end - callee_start];
+		Token last = tokens[paren - 1];
+		sz start = token_offset(text, tokens[first]);
+		info.callee_name = text[start : token_offset(text, last) + last.value.len - start];
 		info.is_valid = !constants::is_keyword(info.callee_name);
 	}
-
 	return info;
+}
+
+<*
+ Byte offset of `token` in `text`, the content it was lexed from.
+*>
+fn sz token_offset(String text, Token token) => token.value.ptr - text.ptr;
+
+<*
+ Number of tokens of `sf`, before its EOF, that start before `offset`.
+*>
+fn sz tokens_before(SourceFile* sf, sz offset)
+{
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz count = 0;
+	sz hi = tokens.len;
+	while (count < hi)
+	{
+		sz mid = (count + hi) / 2;
+		if (tokens[mid].kind != EOF && token_offset(sf.content, tokens[mid]) < offset)
+		{
+			count = mid + 1;
+		}
+		else
+		{
+			hi = mid;
+		}
+	}
+	return count;
 }

@@ -110,3 +110,33 @@ fn void test_evicting_directory_clears_c3c_diagnostics()
 	proj.close_file(file_uri(dir.tappend("lib")!!));
 	assert(proj.workspace.get_diagnostics(file_key(dep_path)).len == 0);
 }
+
+fn void closing_a_folder_keeps_files_of_similar_folders()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	proj.open_file({ .uri = (DocumentUri)uri::from_file_path(tmem, "/virtual/lib/a.c3").to_raw_string(tmem), .text = "module a;\n" }, from_disk: false);
+	proj.open_file({ .uri = (DocumentUri)uri::from_file_path(tmem, "/virtual/lib2/b.c3").to_raw_string(tmem), .text = "module b;\n" }, from_disk: false);
+	proj.update();
+
+	proj.close_file((DocumentUri)uri::from_file_path(tmem, "/virtual/lib").to_raw_string(tmem));
+	assert(!proj.files.has_key("/virtual/lib/a.c3"), "file in the closed folder kept");
+	assert(proj.files.has_key("/virtual/lib2/b.c3"), "file in a similar folder dropped");
+}
+
+fn void closing_a_file_drops_its_diagnostics()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	DocumentUri doc = (DocumentUri)uri::from_file_path(tmem, "/virtual/broken.c3").to_raw_string(tmem);
+	proj.open_file({ .uri = doc, .text = "module broken;\nfn void f() { int x = ; }\n" }, from_disk: false);
+	proj.update();
+	assert(proj.workspace.get_diagnostics("/virtual/broken.c3").len > 0);
+
+	proj.close_file(doc);
+	assert(proj.workspace.get_diagnostics("/virtual/broken.c3").len == 0, "diagnostics of a closed file kept");
+}

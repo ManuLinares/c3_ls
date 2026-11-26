@@ -13,6 +13,7 @@ import std::io::file;
 import std::io::path;
 import std::collections::list;
 import std::collections::maybe;
+import std::compression::zip;
 
 <*
  Fix 1: Verifies interface methods AST population and recovery.
@@ -451,4 +452,54 @@ fn void test_did_close_retains_on_disk_file_and_module() @test
 	LspDiagnostic[] diags = proj.workspace.get_diagnostics((String)main_path);
 	test::eq(diags.len, 0);
 	assert(proj.workspace.ctx.modules.has_key("sqlite3"));
+}
+fn void test_process_libs_reuses_extracted_archive()
+{
+	Path? tmp_dir = path::temp_directory(tmem);
+	if (catch tmp_dir) return;
+
+	Path test_root = tmp_dir.tappend("c3_ls_archive_cache_test")!!;
+	Path lib_dir = test_root.tappend("lib")!!;
+	(void)path::mkdir(lib_dir, recursive: true);
+	defer (void)path::rmtree(test_root);
+
+	String archive_path = (String)lib_dir.tappend("zipped.c3l")!!;
+	Path marker = test_root.tappend("build")!!.tappend(".lsp-cache")!!.tappend("zipped")!!.tappend("marker")!!;
+	for (int run = 0; run < 3; run++)
+	{
+		if (run != 1)
+		{
+			String fn_name = run == 0 ? "zipped_init" : "zipped_changed";
+			ZipArchive archive = zip::open(tmem, archive_path, "w")!!;
+			archive.write_file("manifest.json", `{"provides": "zipped", "sources": ["."]}`)!!;
+			archive.write_file("lib.c3", string::tformat("module zipped;\nfn void %s() {}\n", fn_name))!!;
+			archive.close()!!;
+		}
+
+		LspProject proj;
+		proj.init(mem);
+		defer proj.free();
+		proj.config.root_path = ((String)test_root).copy(mem);
+		String[] deps = alloc::alloc_array(mem, String, 1);
+		deps[0] = "zipped".copy(mem);
+		proj.config.dependencies = deps;
+		String[] search_paths = alloc::alloc_array(mem, String, 1);
+		search_paths[0] = "lib".copy(mem);
+		proj.config.dependency_search_paths = search_paths;
+		proj.process_libs();
+		proj.update();
+
+		switch (run)
+		{
+			case 0:
+				assert(has_fn_symbol(&proj, "zipped_init"));
+				file::save(marker, "")!!;
+			case 1:
+				assert(has_fn_symbol(&proj, "zipped_init"));
+				assert(path::exists(marker), "unchanged archive extracted again");
+			case 2:
+				assert(has_fn_symbol(&proj, "zipped_changed"), "changed archive not extracted again");
+				assert(!path::exists(marker), "changed archive not extracted again");
+		}
+	}
 }

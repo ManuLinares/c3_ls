@@ -2,14 +2,19 @@ module lsp::core::cache;
 
 import std::encoding::json;
 import std::io;
-import std::time;
+import std::hash::fnv64a;
 
 const String CACHE_DIR_NAME = ".lsp-cache";
 const String TRUST_FILE_NAME = ".trust";
 
 struct MetaData
 {
-	long modified_time;
+	ulong archive_hash;
+}
+
+fn ulong? archive_hash(String source_archive) @local
+{
+	return fnv64a::hash(file::load(tmem, source_archive)!);
 }
 
 fn Path? get_or_create_cache_dir(String workspace_root)
@@ -49,7 +54,7 @@ fn void? save_trust_level(String workspace_root, String level)
 }
 
 <*
- Checks if the cached library metadata is stale compared to the raw archive file.
+ Whether the cached extraction differs from the archive's current contents.
  @param library_name    : `e.g., lib`
  @param root_cache_path : `Path string to '.lsp-cache'`
  @param source_archive  : `Path string to the original archive file (e.g., path/to/lib.c3l)`
@@ -69,12 +74,8 @@ fn bool? is_library_outdated(String library_name, String root_cache_path, String
 
 	MetaData? meta = json::unmarshal(tmem, content, MetaData);
 	if (catch meta) return true;
-	long mod_val = meta.modified_time;
 
-	Path src_path = path::tnew(source_archive)!;
-	Time modified_time = file::last_modified(src_path)!;
-
-	return (long)modified_time > mod_val;
+	return meta.archive_hash != archive_hash(source_archive)!;
 }
 
 <*
@@ -86,10 +87,7 @@ fn void? update_library_meta(String library_name, String root_cache_path, String
 	Path lib_cache_dir = cache_base.tappend(library_name)!;
 	Path meta_file = lib_cache_dir.tappend("meta.json")!;
 
-	Path src_path = path::tnew(source_archive)!;
-	Time src_time = file::last_modified(src_path)!;
-
-	MetaData meta = {.modified_time = (long)src_time };
+	MetaData meta = {.archive_hash = archive_hash(source_archive)! };
 	String json_out = json::marshal(tmem, meta, NONE);
 
 	if (catch file::save(meta_file, json_out))

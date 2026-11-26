@@ -35,9 +35,11 @@ fn LspMessage? read_string(Allocator allocator, String message)
 *>
 fn LspMessage? read(Allocator allocator, InStream stream = &stdin_reader)
 {
+	// Headers come in any order, with case-insensitive names, and end at a blank line.
+	sz content_length = 0;
+	bool in_headers = false;
 	DString line;
 	line.tinit();
-
 	while (true)
 	{
 		line.clear();
@@ -53,37 +55,22 @@ fn LspMessage? read(Allocator allocator, InStream stream = &stdin_reader)
 				return io::EOF~;
 			}
 		}
-		if (line.len() > 0) break;
-	}
-
-	String s = line.str_view();
-	if (!s.contains("Content-Length:")) return translator::INVALID_MESSAGE~;
-
-	sz content_length = 0;
-	if (try cl_pos = s.index_of("Content-Length:"))
-	{
-		content_length = (sz)(s[cl_pos + 15..].trim().to_uint() ?? 0);
-	}
-	if (content_length == 0) return translator::INVALID_MESSAGE~;
-	// Consume remaining headers until hitting the blank separator line
-	while (true)
-	{
-		DString hdr;
-		hdr.tinit();
-		while (true)
+		String header = line.str_view();
+		if (header.len == 0)
 		{
-			if (try c = stream.read_byte())
+			if (in_headers) break;
+			continue;
+		}
+		in_headers = true;
+		if (try colon = header.index_of_char(':'))
+		{
+			if (header[:colon].trim().compare_to_ignore_case("Content-Length") == 0)
 			{
-				if (c == '\n') break;
-				if (c != '\r') hdr.append_char(c);
-			}
-			else
-			{
-				return io::EOF~;
+				content_length = (sz)(header[colon + 1..].trim().to_uint() ?? 0);
 			}
 		}
-		if (hdr.str_view().len == 0) break;
 	}
+	if (content_length == 0) return translator::INVALID_MESSAGE~;
 
 	char[] body = mem::temp_array(char, content_length);
 	sz read_so_far = 0;

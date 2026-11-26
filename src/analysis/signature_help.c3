@@ -8,7 +8,7 @@ fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition
 
 	sz offset = utils::compute_byte_offset(sf.content, pos.line, pos.character);
 
-	CallTargetInfo target_info = utils::parse_call_context(sf.content, offset);
+	CallTargetInfo target_info = utils::parse_call_context(sf, offset);
 	if (!target_info.is_valid) return {.signatures = {} };
 
 	if (target_info.callee_name.starts_with("$$"))

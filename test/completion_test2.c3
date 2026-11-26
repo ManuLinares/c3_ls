@@ -224,3 +224,23 @@ fn void designator_after_escaped_backslash_string()
 	foreach (item : completion::resolve(&proj, doc_uri, { .line = 4, .character = 31 })!!) labels.appendf("%s ", item.label);
 	test::eq(labels.str_view().trim(), "c");
 }
+
+fn void designator_ignores_comments_and_strings()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nstruct Foo { String a; int b; int c; }\nfn void f()\n{\n\tFoo x = { .a = \"y\" /* } */, . };\n\tFoo y = { .a = \"}\" /* .b */, . };\n}\n";
+	proj.workspace.process_file("/virtual/designator_comments.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/designator_comments.c3");
+	defer doc_uri.free();
+
+	foreach (LspPosition pos : (LspPosition[]){ { 4, 30 }, { 5, 31 } })
+	{
+		DString labels;
+		labels.tinit();
+		foreach (item : completion::resolve(&proj, doc_uri, pos)!!) labels.appendf("%s ", item.label);
+		test::eq(labels.str_view().trim(), "b c");
+	}
+}

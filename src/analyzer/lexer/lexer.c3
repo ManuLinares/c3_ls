@@ -599,6 +599,7 @@ fn void advance(Lexer* self, int len = 1)
 fn Token Lexer.emit(&self, TokenKind kind, String value)
 {
 	Location start = self.location;
+	value = self.get_string(self.index, value.len);
 	advance(self, value.len);
 
 	return {

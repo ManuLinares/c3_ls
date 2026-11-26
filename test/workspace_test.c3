@@ -307,3 +307,23 @@ fn void test_project_manager_frees_attached_projects()
 	assert(pm.projects.len() == 1);
 	pm.free();
 }
+
+fn void test_project_root_prefix_needs_separator()
+{
+	Path root = path::temp_directory(tmem)!!.tappend("c3_ls_project_prefix_test")!!;
+	(void)path::rmtree(root);
+	defer (void)path::rmtree(root);
+	foreach (name : (String[]){ "proj", "proj2" })
+	{
+		(void)path::mkdir(root.tappend(name)!!.tappend("src")!!, recursive: true);
+		file::save(root.tappend(name)!!.tappend("project.json")!!, `{ "sources": [ "src/**" ] }`)!!;
+	}
+
+	ProjectManager pm;
+	pm.init(mem);
+	defer pm.free();
+	pm.add_workspace_folder({ .uri = (LspUri)uri::from_file_path(tmem, root.tappend("proj")!!).to_raw_string(tmem) });
+	LspProject* first = pm.get_or_create_project_for_path((String)root.tappend("proj")!!.tappend("src")!!.tappend("a.c3")!!);
+	LspProject* second = pm.get_or_create_project_for_path((String)root.tappend("proj2")!!.tappend("src")!!.tappend("b.c3")!!);
+	assert(first != second, "proj2 file assigned to proj");
+}

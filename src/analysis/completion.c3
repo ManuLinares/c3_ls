@@ -1032,7 +1032,7 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 {
 	if (!ctx.sf || ctx.offset == 0 || !ctx.ws || !ctx.ws.ctx) return;
 
-	CallTargetInfo target_info = utils::parse_call_context(ctx.sf.content, ctx.offset);
+	CallTargetInfo target_info = utils::parse_call_context(ctx.sf, ctx.offset);
 	if (!target_info.is_valid || target_info.callee_name.len == 0) return;
 
 	CallTarget target = analysis::call_target_of(ctx.ws.ctx, ctx.sf, target_info);
@@ -1806,70 +1806,57 @@ fn void provide_enum_associated_params(List{CompletionItem}* items, Node* enum_n
 	}
 }
 
-fn void collect_already_set_fields(String text, sz open_brace_idx, sz cursor_offset, sz prefix_len, HashSet{String}* out_set) @local
+<*
+ Fields already given a designator, `.name = ...`, in the initializer around `offset`.
+*>
+fn void collect_already_set_fields(SourceFile* sf, sz offset, HashSet{String}* out_set) @local
 {
-	int brace_depth = 0;
-	int paren_depth = 0;
-	int bracket_depth = 0;
-	bool in_str = false;
-	bool in_char = false;
-	bool in_raw = false;
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz end = utils::tokens_before(sf, offset);
 
-	sz limit = cursor_offset > prefix_len ? cursor_offset - prefix_len : cursor_offset;
-
-	for (sz i = open_brace_idx + 1; i < limit && i < text.len; i++)
+	sz open = -1;
+	int depth = 0;
+	for (sz i = end - 1; i >= 0 && open < 0; i--)
 	{
-		char c = text[i];
-		if (in_raw)
+		switch (tokens[i].kind)
 		{
-			if (c == '`') in_raw = false;
-			continue;
-		}
-		if (in_str || in_char)
-		{
-			if (c == '\\')
-			{
-				i++;
-			}
-			else if (c == (in_str ? '"' : '\''))
-			{
-				in_str = in_char = false;
-			}
-			continue;
-		}
-		if (c == '`') { in_raw = true; continue; }
-		if (c == '"') { in_str = true; continue; }
-		if (c == '\'') { in_char = true; continue; }
-
-		switch (c)
-		{
-			case '{': brace_depth++;
-			case '}': if (brace_depth > 0) brace_depth--;
-			case '(': paren_depth++;
-			case ')': if (paren_depth > 0) paren_depth--;
-			case '[': bracket_depth++;
-			case ']': if (bracket_depth > 0) bracket_depth--;
-			case '.':
-				if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0)
+			case RBRACE:
+				depth++;
+			case LBRACE:
+				if (depth == 0)
 				{
-					sz start = i + 1;
-					sz end = start;
-					while (end < text.len && lexer::is_ident(text[end])) end++;
-					if (end > start && end <= limit)
-					{
-						sz next_p = end;
-						while (next_p < text.len && (text[next_p] == ' ' || text[next_p] == '\t')) next_p++;
-						if (next_p < text.len && text[next_p] == '.')
-						{
-							continue;
-						}
-
-						String field_name = text[start : end - start];
-						out_set.add(field_name);
-						i = end - 1;
-					}
+					open = i;
 				}
-			default: break;
+				else
+				{
+					depth--;
+				}
+			default:
+				break;
+		}
+	}
+	if (open < 0) return;
+
+	int nested = 0;
+	for (sz i = open + 1; i < end; i++)
+	{
+		switch (tokens[i].kind)
+		{
+			case LPAREN:
+			case LBRACKET:
+			case LBRACE:
+				nested++;
+			case RPAREN:
+			case RBRACKET:
+			case RBRACE:
+				if (nested > 0) nested--;
+			case DOT:
+				if (nested != 0 || i + 1 >= end || !tokens[i + 1].kind.is_identifier()) break;
+				// `.a.b` sets a member of `a`, not a field of this type.
+				if (i + 2 < tokens.len && tokens[i + 2].kind == DOT) break;
+				out_set.add(tokens[i + 1].value);
+			default:
+				break;
 		}
 	}
 }
@@ -2274,11 +2261,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 					seen_fields.tinit();
 					if (ctx.is_designated_initializer && ctx.sf)
 					{
-						sz open_brace = utils::find_enclosing_open_brace(ctx.sf.content, ctx.offset);
-						if (open_brace != (sz)-1)
-						{
-							collect_already_set_fields(ctx.sf.content, open_brace, ctx.offset, ctx.prefix.len, &seen_fields);
-						}
+						collect_already_set_fields(ctx.sf, ctx.offset - ctx.prefix.len, &seen_fields);
 					}
 					// Platform code built for several targets gets the fields of each of their variants.
 					List{Node*} variants;
@@ -2656,7 +2639,7 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 	bool in_parens = false;
 	if (ctx.sf && ctx.offset > 0)
 	{
-		CallTargetInfo target_info = utils::parse_call_context(ctx.sf.content, ctx.offset);
+		CallTargetInfo target_info = utils::parse_call_context(ctx.sf, ctx.offset);
 		in_parens = target_info.in_parens;
 		if (target_info.is_valid && target_info.callee_name.len > 0)
 		{

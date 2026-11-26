@@ -260,6 +260,16 @@ fn void LspProject.close_document(&self, DocumentUri document)
 	self.close_file(document);
 }
 
+<*
+ Whether `path` is the directory `dir` or inside it.
+*>
+fn bool is_in_dir(String path, String dir)
+{
+	if (!path.starts_with(dir)) return false;
+	if (path.len == dir.len || dir.ends_with("/") || dir.ends_with("\\")) return true;
+	return path[dir.len] == '/' || path[dir.len] == '\\';
+}
+
 fn void LspProject.close_file(&self, DocumentUri document)
 {
 	String raw_uri = document;
@@ -281,7 +291,7 @@ fn void LspProject.close_file(&self, DocumentUri document)
 
 		self.files.@each(; f_path, f)
 		{
-			if (f_path.starts_with(lookup_key))
+			if (is_in_dir(f_path, lookup_key))
 			{
 				to_evict.push(f_path);
 			}
@@ -302,6 +312,9 @@ fn void LspProject.evict(&self, String path)
 	LspFile*? file = self.files.get(path);
 	if (catch file) return;
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
+	self.workspace.clear_diagnostics_for_path(path);
+	// Clears the file's errors in the editor.
+	server::publish_diagnostics_for_path(file.uri.path, &self.workspace);
 	if (try sf = self.workspace.get_source_file_by_path(path)) source_file::free(self.workspace.ctx, sf);
 	file.free(self.allocator);
 	alloc::free(self.allocator, file);
@@ -956,7 +969,7 @@ fn void LspProject.process_libs(&self)
 						if (catch cache_root) continue;
 						Path? cache_target_dir = cache_root.tappend(dep_name);
 						if (catch cache_target_dir) continue;
-						bool outdated = cache::is_library_outdated(dep_name, cache_target_dir, lib_path) ?? true;
+						bool outdated = cache::is_library_outdated(dep_name, cache_root, lib_path) ?? true;
 						if (outdated)
 						{
 							log::info("Cache is stale or missing for %s. Extracting...", dep_name);

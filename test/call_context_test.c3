@@ -1,8 +1,13 @@
 module lsp::call_context_test;
 
-import lsp;
+import lsp, analyzer::core;
 
-macro bool is_call(String text) => utils::parse_call_context(text, text.len).is_valid;
+macro bool is_call(String text)
+{
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, text, "call.c3");
+	return utils::parse_call_context(context.files.get("call.c3")!!, text.len).is_valid;
+}
 
 fn void keywords_are_never_callees() @test
 {
