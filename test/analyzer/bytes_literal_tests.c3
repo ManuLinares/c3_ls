@@ -6,7 +6,7 @@ import diag_capture;
 
 fn char[] bytes_of(Module* mod, int node)
 {
-	LiteralExpr* lit = mod.nodes[node].as(VarDecl).init_expr.as(LiteralExpr);
+	LiteralExpr* lit = mod.nodes[node].as(VarDecl).init_expr.get()!!.as(LiteralExpr);
 	assert(lit.literal_kind == LiteralKind.BYTES_LITERAL);
 	return lit.bytes;
 }

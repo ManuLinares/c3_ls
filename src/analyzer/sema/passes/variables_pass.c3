@@ -48,10 +48,10 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 		if (root_node.kind == MODULE_DECL)
 		{
 			ModuleDecl* mod_decl = root_node.as(ModuleDecl);
-			if (mod_decl.path && mod_decl.path.kind == PATH_EXPR)
+			if (try path = mod_decl.path.get())
 			{
-				PathExpr* pe = mod_decl.path.as(PathExpr);
-				if (pe.path && pe.path.text.len > 0)
+				PathExpr* pe = path.as(PathExpr);
+				if (pe.path.text.len > 0)
 				{
 					current_mod_name = pe.path.text;
 
@@ -63,7 +63,7 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 							AttributeDecl* ad = attr.as(AttributeDecl);
 							if (ad.attribute_kind == AttributeKind.FEAT || ad.attribute_kind == AttributeKind.IF)
 							{
-								feat_suffix = string::format(ctx.allocator, "%s@%s", feat_suffix, ad.name ? ad.name.text : "feat");
+								feat_suffix = string::format(ctx.allocator, "%s@%s", feat_suffix, ad.name.get().text ?? "feat");
 								foreach (e : ad.exprs)
 								{
 									feat_suffix = string::format(ctx.allocator, "%s(%s)", feat_suffix, cursor::spelling(e, tmem));
@@ -73,9 +73,9 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 					}
 
 					String gen_suffix = "";
-					if (mod_decl.generics && mod_decl.generics.kind == GENERIC_DECL)
+					if (try generics = mod_decl.generics.get() && generics.kind == GENERIC_DECL)
 					{
-						GenericDecl* gd = mod_decl.generics.as(GenericDecl);
+						GenericDecl* gd = generics.as(GenericDecl);
 						gen_suffix = "<";
 						foreach (i, p_node : gd.params)
 						{
@@ -90,16 +90,15 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 					String full_suffix = string::format(ctx.allocator, "%s%s", feat_suffix, gen_suffix);
 					current_scope_key = full_suffix.len > 0 ? string::format(ctx.allocator, "%s#%s", current_mod_name, full_suffix) : current_mod_name;
 
-					Scope**existing = module_scopes.get_ref(current_scope_key) ?? null;
-					Scope* mod_scope = null;
-					if (!existing)
+					Scope* mod_scope;
+					if (try existing = module_scopes.get(current_scope_key))
 					{
-						mod_scope = scope::create(ctx.allocator, range);
-						module_scopes.set(current_scope_key, mod_scope);
+						mod_scope = existing;
 					}
 					else
 					{
-						mod_scope = *existing;
+						mod_scope = scope::create(ctx.allocator, range);
+						module_scopes.set(current_scope_key, mod_scope);
 					}
 					current_section_scope = scope::create(ctx.allocator, range, mod_scope);
 					ctx.scope = current_section_scope;
@@ -115,19 +114,19 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 			case STRUCT_DECL:
 				{
 					StructDecl* sd = root_node.as(StructDecl);
-					String sname = sd.name ? sd.name.text : "";
+					String sname = sd.name.text();
 					if (sname.len > 0 && ctx.context.lookup)
 					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, sname, root_node);
+						lookup::register_type(ctx.context.lookup, ctx.context.allocator, sname);
 					}
 					foreach (f : sd.fields)
 					{
 						if (f && f.kind == VAR_DECL)
 						{
 							VarDecl* vd = f.as(VarDecl);
-							if (vd.type)
+							if (try type = vd.type.get())
 							{
-								vd.node.resolved_type = resolve_ast_type(ctx, vd.type);
+								vd.node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
 							}
 						}
 					}
@@ -135,28 +134,28 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 			case ENUM_DECL:
 				{
 					EnumDecl* ed = root_node.as(EnumDecl);
-					String ename = ed.name ? ed.name.text : "";
+					String ename = ed.name.text();
 					if (ename.len > 0 && ctx.context.lookup)
 					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, ename, root_node);
+						lookup::register_type(ctx.context.lookup, ctx.context.allocator, ename);
 					}
 				}
 			case TYPEDEF_DECL:
 				{
 					TypedefDecl* td = root_node.as(TypedefDecl);
-					String tname = td.name ? td.name.text : "";
+					String tname = td.name.text();
 					if (tname.len > 0 && ctx.context.lookup)
 					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname, root_node);
+						lookup::register_type(ctx.context.lookup, ctx.context.allocator, tname);
 					}
 				}
 			case ALIAS_DECL:
 				{
 					AliasDecl* ad = root_node.as(AliasDecl);
-					String aname = ad.name ? ad.name.text : "";
+					String aname = ad.name.text();
 					if (aname.len > 0 && ctx.context.lookup)
 					{
-						lookup::register_type(ctx.context.lookup, ctx.context.allocator, aname, root_node);
+						lookup::register_type(ctx.context.lookup, ctx.context.allocator, aname);
 					}
 				}
 			case CT_IF_STMT:
@@ -170,21 +169,20 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 	};
 }
 
-fn Type* resolve_ast_type(SemaContext* ctx, Node* type_node)
+fn Type*? resolve_ast_type(SemaContext* ctx, Node* type_node)
 {
-	if (!type_node) return null;
+	if (!type_node) return NOT_FOUND~;
 	return type_named(ctx, cursor::instance_name(type_node));
 }
 
 <*
  Type registered as `name`, such as `List{int}`, registering it on first use.
 *>
-fn Type* type_named(SemaContext* ctx, String name) @local
+fn Type*? type_named(SemaContext* ctx, String name) @local
 {
-	if (!ctx.context.lookup || name.len == 0) return null;
-	if (Type* ty = lookup::get_type_by_name(ctx.context.lookup, name)) return ty;
-	Node* decl_node = query::find_type_node_in_context(ctx.context, ctx.context.current_source_file, name);
-	lookup::register_type(ctx.context.lookup, ctx.context.allocator, name, decl_node);
+	if (!ctx.context.lookup || name.len == 0) return NOT_FOUND~;
+	if (try ty = lookup::get_type_by_name(ctx.context.lookup, name)) return ty;
+	lookup::register_type(ctx.context.lookup, ctx.context.allocator, name);
 	return lookup::get_type_by_name(ctx.context.lookup, name);
 }
 
@@ -220,22 +218,21 @@ fn void attribute_expression_types(SemaContext* ctx, Node* node)
 				if (!ctx.context.lookup) break;
 				switch (lit.literal_kind)
 				{
-					case INT_LITERAL:    node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "int");
-					case REAL_LITERAL:   node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "double");
-					case STRING_LITERAL: node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "String");
-					case BOOL_LITERAL:   node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "bool");
-					case NULL_LITERAL:   node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "void");
+					case INT_LITERAL:    node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "int"));
+					case REAL_LITERAL:   node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "double"));
+					case STRING_LITERAL: node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "String"));
+					case BOOL_LITERAL:   node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "bool"));
+					case NULL_LITERAL:   node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "void"));
 					default: break;
 				}
 			}
 		case IDENT_EXPR:
 			{
 				IdentExpr* ie = node.as(IdentExpr);
-				String iname = ie.ident ? ie.ident.text : "";
+				String iname = ie.ident.text;
 				if (iname.len == 0) break;
 
-				VariableInfo* var_info = scope::get_variable(ctx.scope, iname);
-				if (var_info && var_info.node)
+				if (try var_info = scope::get_variable(ctx.scope, iname) && var_info.node)
 				{
 					node.resolved_type = var_info.node.resolved_type;
 				}
@@ -243,7 +240,7 @@ fn void attribute_expression_types(SemaContext* ctx, Node* node)
 		case GROUP_EXPR:
 			{
 				GroupExpr* ge = node.as(GroupExpr);
-				if (ge.inner) node.resolved_type = ge.inner.resolved_type;
+				node.resolved_type = ge.inner.resolved_type;
 			}
 		default:
 			break;
@@ -263,20 +260,14 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 				if (node.kind == FN_DECL)
 				{
 					FnDecl* fd = node.as(FnDecl);
-					if (fd.ret_type)
-					{
-						fd.node.resolved_type = resolve_ast_type(ctx, fd.ret_type);
-					}
+					fd.node.resolved_type = ast::@nullable(resolve_ast_type(ctx, fd.ret_type));
 				}
 				break;
 			}
 		case CT_IF_STMT:
 			{
 				CtIfStmt* if_stmt = node.as(CtIfStmt);
-				if (if_stmt.expr)
-				{
-					cursor::visit(if_stmt.expr, node, {&sema_on_enter, &sema_on_exit }, ctx);
-				}
+				cursor::visit(if_stmt.expr, node, {&sema_on_enter, &sema_on_exit }, ctx);
 				if (if_stmt.then_stmts.len > 0)
 				{
 					push_scope(ctx, node);
@@ -322,19 +313,19 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 	if (node.kind == TRY_EXPR)
 	{
 		TryExpr* te = node.as(TryExpr);
-		if (te.variable && te.variable.kind == IDENT_EXPR)
+		if (te.variable.kind == IDENT_EXPR)
 		{
 			IdentExpr* ie = te.variable.as(IdentExpr);
-			if (ie.ident && ie.ident.text.len > 0)
+			if (ie.ident.text.len > 0)
 			{
-				if (te.type)
+				if (try type = te.type.get())
 				{
-					node.resolved_type = resolve_ast_type(ctx, te.type);
+					node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
 				}
-				else if (te.init)
+				else if (try init = te.init.get())
 				{
-					String itype = query::type_of(ctx.context, ctx.context.current_source_file, te.init);
-					node.resolved_type = type_named(ctx, itype.trim_right("?*& \t"));
+					String itype = query::type_of(ctx.context, ctx.context.current_source_file, init);
+					node.resolved_type = ast::@nullable(type_named(ctx, itype.trim_right("?*& \t")));
 				}
 				scope::add_variable(ctx.scope, ctx.allocator, ie.ident.text, node);
 			}
@@ -344,18 +335,18 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 	if (node.kind == CATCH_EXPR)
 	{
 		CatchExpr* ce = node.as(CatchExpr);
-		if (ce.variable && ce.variable.kind == IDENT_EXPR)
+		if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR)
 		{
-			IdentExpr* ie = ce.variable.as(IdentExpr);
-			if (ie.ident && ie.ident.text.len > 0)
+			IdentExpr* ie = variable.as(IdentExpr);
+			if (ie.ident.text.len > 0)
 			{
-				if (ce.type)
+				if (try type = ce.type.get())
 				{
-					node.resolved_type = resolve_ast_type(ctx, ce.type);
+					node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
 				}
 				else
 				{
-					node.resolved_type = lookup::get_type_by_name(ctx.context.lookup, "fault");
+					node.resolved_type = ast::@nullable(lookup::get_type_by_name(ctx.context.lookup, "fault"));
 				}
 				scope::add_variable(ctx.scope, ctx.allocator, ie.ident.text, node);
 			}
@@ -366,12 +357,13 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 	{
 		VarDecl* decl = node.as(VarDecl);
 
-		if (!decl.name) break VAR;
+		Ident*? name = decl.name.get();
+		if (catch name) break VAR;
 		if (decl.var_kind == VAR_FIELD || decl.var_kind == VAR_BITFIELD) break VAR;
 
-		if (decl.type)
+		if (try type = decl.type.get())
 		{
-			decl.node.resolved_type = resolve_ast_type(ctx, decl.type);
+			decl.node.resolved_type = ast::@nullable(resolve_ast_type(ctx, type));
 		}
 
 		Scope* target_scope = ctx.scope;
@@ -393,20 +385,19 @@ fn ChildVisitResult sema_on_enter(Node* node, Node* parent, void* user_data) @lo
 			target_scope = ctx.scope.parent;
 		}
 
-		VariableInfo* info = target_scope.variables.get(decl.name.text) ?? null;
-		if (info && info.node != node)
+		if (try info = target_scope.variables.get(name.text) && info.node != node)
 		{
 			if (!has_conditional_feat_or_if(node) && !has_conditional_feat_or_if(info.node))
 			{
 				diagnostics::note(ctx.context, info.node.range, "Previous definition of '%s' was here", info.name);
-				diagnostics::error(ctx.context, decl.range, "Variable '%s' is being redefined in the same scope", decl.name.text);
+				diagnostics::error(ctx.context, decl.range, "Variable '%s' is being redefined in the same scope", name.text);
 			}
 			break VAR;
 		}
 
-		diagnostics::log_debug("[VariablePass]: Added local variable: %s", decl.name.text);
+		diagnostics::log_debug("[VariablePass]: Added local variable: %s", name.text);
 
-		scope::add_variable(target_scope, ctx.allocator, decl.name.text, node);
+		scope::add_variable(target_scope, ctx.allocator, name.text, node);
 	}
 
 	return RECURSE;

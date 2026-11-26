@@ -11,7 +11,7 @@ struct AccessFinder
 fn ChildVisitResult find_access(Node* c, Node* p, void* data)
 {
 	AccessFinder* f = data;
-	if (c && c.kind == ACCESS_EXPR && string::tformat("%s::%s", cursor::spelling(c.as(AccessExpr).left, tmem), cursor::spelling(c.as(AccessExpr).member, tmem)) == f.text) f.found = c;
+	if (c && c.kind == ACCESS_EXPR && string::tformat("%s::%s", cursor::spelling(c.as(AccessExpr).left, tmem), cursor::spelling(c.as(AccessExpr).member.get()!!, tmem)) == f.text) f.found = c;
 	return RECURSE;
 }
 

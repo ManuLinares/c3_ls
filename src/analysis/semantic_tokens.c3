@@ -70,8 +70,8 @@ fn String[] get_token_modifiers() => TOKEN_MODIFIERS;
 
 fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !sf.lexer) return {.data = {} };
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!sf.lexer) return {.data = {} };
 
 	List{uint} encoded_data;
 	encoded_data.tinit();

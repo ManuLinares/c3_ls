@@ -31,37 +31,17 @@ fn bool node_to_location(LspProject* project, Uri fallback_uri, Node* node, LspL
 
 	if (target_uri == "file:///" || target_uri.len <= 8) return false;
 
-	Range target_range = node.range;
+	Range target_range = cursor::decl_name(node).range ?? node.range;
 	switch (node.kind)
 	{
-		case FN_DECL:
-			if (node.as(FnDecl).name) target_range = node.as(FnDecl).name.range;
-		case MACRO_DECL:
-			if (node.as(MacroDecl).name) target_range = node.as(MacroDecl).name.range;
-		case VAR_DECL:
-			if (node.as(VarDecl).name) target_range = node.as(VarDecl).name.range;
-		case STRUCT_DECL:
-			if (node.as(StructDecl).name) target_range = node.as(StructDecl).name.range;
-		case ENUM_DECL:
-			if (node.as(EnumDecl).name) target_range = node.as(EnumDecl).name.range;
-		case TYPEDEF_DECL:
-			if (node.as(TypedefDecl).name) target_range = node.as(TypedefDecl).name.range;
-		case ALIAS_DECL:
-			if (node.as(AliasDecl).name) target_range = node.as(AliasDecl).name.range;
-		case INTERFACE_DECL:
-			if (node.as(InterfaceDecl).name) target_range = node.as(InterfaceDecl).name.range;
-		case FAULT_DECL:
-			if (node.as(FaultDecl).name) target_range = node.as(FaultDecl).name.range;
-		case ATTRDEF_DECL:
-			if (node.as(AttrdefDecl).name) target_range = node.as(AttrdefDecl).name.range;
 		case TRY_EXPR:
-			if (node.as(TryExpr).variable) target_range = node.as(TryExpr).variable.range;
+			target_range = node.as(TryExpr).variable.range;
 		case CATCH_EXPR:
-			if (node.as(CatchExpr).variable) target_range = node.as(CatchExpr).variable.range;
+			if (try variable = node.as(CatchExpr).variable.get()) target_range = variable.range;
 		case MODULE_DECL:
-			if (node.as(ModuleDecl).path) target_range = node.as(ModuleDecl).path.range;
+			if (try path = node.as(ModuleDecl).path.get()) target_range = path.range;
 		default:
-			if (Ident* label = query::label_of(node)) target_range = label.range;
+			if (try label = query::label_of(node)) target_range = label.range;
 	}
 
 	*out_loc = {
@@ -87,8 +67,8 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 		.column = (int)pos.character
 	};
 
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !project.workspace.ctx) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!project.workspace.ctx) return {};
 
 	List{Node*} overloads;
 	overloads.tinit();
@@ -96,8 +76,7 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 	operators.tinit();
 	query::operator_overloads_at(project.workspace.ctx, sf, loc, &operators);
 	foreach (call : operators) overloads.push(call.method);
-	Node* decl_node = overloads.len() ? overloads[0] : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
-	if (!decl_node) return {};
+	Node* decl_node = overloads.len() ? overloads[0] : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads)!;
 	if (overloads.len() <= 1)
 	{
 		overloads.clear();
@@ -119,8 +98,8 @@ fn LspLocation[]? goto_definition(LspProject* project, Uri uri, LspPosition pos)
 	if (decl_node.kind == MODULE_DECL)
 	{
 		ModuleDecl* md = decl_node.as(ModuleDecl);
-		String mod_name = (md.path && md.path.kind == PATH_EXPR && md.path.as(PathExpr).path) ? md.path.as(PathExpr).path.text : "";
-		if (Module* mod = project.workspace.ctx.modules.get(mod_name) ?? null)
+		String mod_name = md.path.get().as(PathExpr).path.text ?? "";
+		if (try mod = project.workspace.ctx.modules.get(mod_name))
 		{
 			List{LspLocation} results;
 			results.tinit();

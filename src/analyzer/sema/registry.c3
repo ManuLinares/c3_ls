@@ -36,10 +36,10 @@ fn void register(AnalyzerContext* context, SourceFile* sf) => @pool()
 		{
 			case MODULE_DECL:
 				ModuleDecl* mod_decl = statement.as(ModuleDecl);
-				if (mod_decl.path && mod_decl.path.kind == PATH_EXPR)
+				if (try path_node = mod_decl.path.get())
 				{
-					PathExpr* path = mod_decl.path.as(PathExpr);
-					if (path.path && path.path.text.len > 0)
+					PathExpr* path = path_node.as(PathExpr);
+					if (path.path.text.len > 0)
 					{
 						current_mod = mod::create(context, path.path.text);
 					}
@@ -84,44 +84,22 @@ fn void register_and_dispatch(AnalyzerContext* context, Module* mod, Node* node)
 
 fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 {
-	Ident* name;
 	switch (node.kind)
 	{
 		case STRUCT_DECL:
-			{
-				StructDecl* decl = node.as(StructDecl);
-				name = decl.name;
-			}
 		case ENUM_DECL:
-			{
-				EnumDecl* decl = node.as(EnumDecl);
-				name = decl.name;
-			}
 		case TYPEDEF_DECL:
-			{
-				TypedefDecl* decl = node.as(TypedefDecl);
-				name = decl.name;
-			}
 		case ALIAS_DECL:
-			{
-				AliasDecl* decl = node.as(AliasDecl);
-				name = decl.name;
-			}
 		case INTERFACE_DECL:
-			{
-				InterfaceDecl* decl = node.as(InterfaceDecl);
-				name = decl.name;
-			}
 		case VAR_DECL:
-			{
-				VarDecl* decl = node.as(VarDecl);
-				name = decl.name;
-			}
+			break;
 		default:
 			return;
 	}
 
-	if (!name)
+	Ident*? name = cursor::decl_name(node);
+
+	if (catch name)
 	{
 		diagnostics::log_error("registry::register_type - name is null");
 		return;
@@ -139,19 +117,20 @@ fn void register_type(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered type: %s", qname);
 
 	context.registry.types.set(qname, type_info);
-	lookup::register_type(context.lookup, context.allocator, qname, node);
+	lookup::register_type(context.lookup, context.allocator, qname);
 }
 
 fn void register_function(AnalyzerContext* context, Module* mod, Node* node)
 {
 	FnDecl* decl = node.as(FnDecl);
-	if (!decl.name)
+	Ident*? name = decl.name.get();
+	if (catch name)
 	{
 		diagnostics::log_error("registry::register_function - function name is null");
 		return;
 	}
 
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
 
 	FunctionInfo* function_info = alloc::new(&context.registry.arena, FunctionInfo);
 	function_info.mod = mod.name;
@@ -163,19 +142,20 @@ fn void register_function(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered fn: %s", qname);
 
 	context.registry.functions.set(qname, function_info);
-	register_method(context, mod, node, decl.associated_type);
+	if (try receiver = decl.associated_type.get()) register_method(context, mod, node, receiver);
 }
 
 fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 {
 	MacroDecl* decl = node.as(MacroDecl);
-	if (!decl.name)
+	Ident*? name = decl.name.get();
+	if (catch name)
 	{
 		diagnostics::log_error("registry::register_macro - macro name is null");
 		return;
 	}
 
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
 
 	MacroInfo* macros_info = alloc::new(&context.registry.arena, MacroInfo);
 	macros_info.mod = mod.name;
@@ -187,7 +167,7 @@ fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 	diagnostics::log_debug("[Registry]: registered macro: %s", qname);
 
 	context.registry.macros.set(qname, macros_info);
-	register_method(context, mod, node, decl.associated_type.get() ?? null);
+	if (try receiver = decl.associated_type.get()) register_method(context, mod, node, receiver);
 }
 
 <*
@@ -196,7 +176,7 @@ fn void register_macro(AnalyzerContext* context, Module* mod, Node* node)
 *>
 fn void register_method(AnalyzerContext* context, Module* mod, Node* node, Node* receiver) @local
 {
-	String type_name = receiver ? cursor::raw_type_identifier(receiver) ?? "" : "";
+	String type_name = cursor::raw_type_identifier(receiver) ?? "";
 	if (!type_name.len) return;
 	index_method(context, mod, node, type_name);
 	if (receiver.kind == TYPE_EXPR && receiver.as(TypeExpr).type_kind == TYPE_VECTOR) index_method(context, mod, node, query::ANY_VECTOR);
@@ -212,13 +192,14 @@ fn void index_method(AnalyzerContext* context, Module* mod, Node* node, String k
 fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)
 {
 	AttrdefDecl* decl = node.as(AttrdefDecl);
-	if (!decl.name)
+	Ident*? name = decl.name.get();
+	if (catch name)
 	{
 		diagnostics::log_error("registry::register_attrdef - attrdef name is null");
 		return;
 	}
 
-	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, decl.name.text);
+	String qname = string::format(&context.registry.arena, "%s::%s", mod.name, name.text);
 
 	AttrdefInfo* attr_info = alloc::new(&context.registry.arena, AttrdefInfo);
 	attr_info.mod = mod.name;
@@ -232,7 +213,7 @@ fn void register_attrdef(AnalyzerContext* context, Module* mod, Node* node)
 	context.registry.attrmacros.set(qname, attr_info);
 }
 
-fn FunctionInfo* get_function(AnalyzerContext* context, String name)
+fn FunctionInfo*? get_function(AnalyzerContext* context, String name)
 {
-	return context.registry.functions.get(name) ?? null;
+	return context.registry.functions.get(name);
 }

@@ -98,7 +98,7 @@ fn void main() {
 	defer doc_uri.free();
 	// Hover over the non-existent function call
 	LspPosition pos = {.line = 2,.character = 5 };
-	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos) ?? {};
 	// Must return an empty slice, never file:/// or invalid root locations
 	assert(locs.len == 0);
 }

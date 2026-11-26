@@ -47,49 +47,36 @@ fn bool is_local_decl(Node* node)
 		case CONTRACT_PARAM:
 			return true;
 		default:
-			return query::label_of(node) != null;
+			return @ok(query::label_of(node));
 	}
 }
 
 <*
- Name token introduced by a declaration node, or null.
+ Name token introduced by a declaration or labelled statement `node`.
 *>
-fn Ident* decl_name(Node* node)
+fn Ident*? declared_name(Node* node)
 {
-	if (!node) return null;
-	switch (node.kind)
-	{
-		case VAR_DECL: return node.as(VarDecl).name;
-		case FN_DECL: return node.as(FnDecl).name;
-		case MACRO_DECL: return node.as(MacroDecl).name;
-		case STRUCT_DECL: return node.as(StructDecl).name;
-		case ENUM_DECL: return node.as(EnumDecl).name;
-		case TYPEDEF_DECL: return node.as(TypedefDecl).name;
-		case ALIAS_DECL: return node.as(AliasDecl).name;
-		case FAULT_DECL: return node.as(FaultDecl).name;
-		case INTERFACE_DECL: return node.as(InterfaceDecl).name;
-		case ATTRDEF_DECL: return node.as(AttrdefDecl).name;
-		default: return query::label_of(node);
-	}
+	if (!node) return NOT_FOUND~;
+	return cursor::decl_name(node) ?? query::label_of(node);
 }
 
 <*
  Name token through which a non-declaration node refers to a symbol, or null.
 *>
-fn Ident* ref_name(Node* node)
+fn Ident*? ref_name(Node* node)
 {
-	if (!node) return null;
+	if (!node) return NOT_FOUND~;
 	switch (node.kind)
 	{
 		case IDENT_EXPR:
-			return node.as(IdentExpr).ident;
+			return node.as(IdentExpr).ident ?: NOT_FOUND~;
 		case TYPE_EXPR:
 			TypeExpr* te = node.as(TypeExpr);
-			return te.type_kind == TYPE_IDENTIFIER ? te.unresolved.name : null;
+			return te.type_kind == TYPE_IDENTIFIER ? te.unresolved.name.get() : NOT_FOUND~;
 		case ATTRIBUTE_DECL:
-			return node.as(AttributeDecl).name;
+			return node.as(AttributeDecl).name.get();
 		case CONTRACT_PARAM:
-			return node.as(ContractParam).ident;
+			return node.as(ContractParam).ident.get();
 		default:
 			return query::jump_label(node);
 	}
@@ -98,9 +85,9 @@ fn Ident* ref_name(Node* node)
 <*
  Declaration `ref`, the name token of non-declaration `node`, refers to.
 *>
-fn Node* resolve_ref(RefCollectorContext* ctx, Node* node, Ident* ref) @local
+fn Node*? resolve_ref(RefCollectorContext* ctx, Node* node, Ident* ref) @local
 {
-	if (node.kind == TYPE_EXPR && !node.as(TypeExpr).unresolved.path) return ctx.types.resolve(ref);
+	if (node.kind == TYPE_EXPR && !@ok(node.as(TypeExpr).unresolved.path.get())) return ctx.types.resolve(ref);
 	return query::resolve_symbol_at(ctx.project.workspace.ctx, ctx.sf, ref.range.start);
 }
 
@@ -109,18 +96,21 @@ fn ChildVisitResult collect_references_callback(Node* c, Node* p, void* user_dat
 	if (!c || c.kind == ERROR) return CONTINUE;
 	RefCollectorContext* ctx = (RefCollectorContext*)user_data;
 
-	Ident* name = null;
+	Ident*? name = NOT_FOUND~;
 	if (c == ctx.decl_node)
 	{
 		if (!ctx.include_declaration) return RECURSE;
-		name = decl_name(c) ?: ref_name(c);
+		name = declared_name(c) ?? ref_name(c);
 	}
-	else if (!decl_name(c))
+	else if (!@ok(declared_name(c)))
 	{
-		Ident* ref = ref_name(c);
-		if (ref && ref.text == ctx.symbol_name && resolve_ref(ctx, c, ref) == ctx.decl_node) name = ref;
+		if (try ref = ref_name(c) && ref.text == ctx.symbol_name)
+		{
+			if (try decl = resolve_ref(ctx, c, ref) && decl == ctx.decl_node) name = ref;
+		}
 	}
-	if (!name || name.text != ctx.symbol_name) return RECURSE;
+	if (catch name) return RECURSE;
+	if (name.text != ctx.symbol_name) return RECURSE;
 
 	LspLocation loc = {
 		.uri = ctx.file_uri,
@@ -165,7 +155,7 @@ fn void collect_in_file(LspProject* project, SourceFile* sf, String file_uri, No
 *>
 fn String decl_symbol_name(Node* decl_node)
 {
-	if (Ident* name = decl_name(decl_node) ?: ref_name(decl_node)) return name.text;
+	if (try name = declared_name(decl_node) ?? ref_name(decl_node)) return name.text;
 	return analysis::get_node_symbol_name(decl_node);
 }
 
@@ -176,11 +166,10 @@ fn LspLocation[]? find_references(LspProject* project, Uri uri, LspPosition pos,
 		.column = (int)pos.character
 	};
 
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !project.workspace.ctx) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!project.workspace.ctx) return {};
 
-	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
-	if (!decl_node) return {};
+	Node* decl_node = query::resolve_symbol_at(project.workspace.ctx, sf, loc)!;
 
 	String symbol_name = decl_symbol_name(decl_node);
 	if (symbol_name.len == 0) return {};

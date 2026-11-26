@@ -40,17 +40,9 @@ fn bool has_variable(Scope* scope, String name)
 	}
 }
 
-fn VariableInfo* get_variable(Scope* scope, String name)
+fn VariableInfo*? get_variable(Scope* scope, String name)
 {
-	switch (true)
-	{
-		case scope.variables.has_key(name):
-			return scope.variables.get(name)!!;
-		case scope.parent != null:
-			return get_variable(scope.parent, name);
-		default:
-			return null;
-	}
+	return scope.variables.get(name) ?? (scope.parent ? get_variable(scope.parent, name) : NOT_FOUND~);
 }
 
 fn bool has_function(Scope* scope, String name)
@@ -66,15 +58,7 @@ fn bool has_function(Scope* scope, String name)
 	}
 }
 
-fn FunctionInfo* get_function(Scope* scope, String name)
+fn FunctionInfo*? get_function(Scope* scope, String name)
 {
-	switch (true)
-	{
-		case scope.functions.has_key(name):
-			return scope.functions.get(name)!!;
-		case scope.parent != null:
-			return get_function(scope.parent, name);
-		default:
-			return null;
-	}
+	return scope.functions.get(name) ?? (scope.parent ? get_function(scope.parent, name) : NOT_FOUND~);
 }

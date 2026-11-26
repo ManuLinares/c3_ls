@@ -186,8 +186,8 @@ fn void LspProject.change_file(&self, DidChangeParams params)
 		return;
 	}
 
-	LspFile* file = self.files.get(lookup_key) ?? null;
-	if (!file) return;
+	LspFile*? file = self.files.get(lookup_key);
+	if (catch file) return;
 
 	// Other projects' builds also report on the files they use, as on a stdlib file.
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
@@ -239,8 +239,8 @@ fn void LspProject.close_document(&self, DocumentUri document)
 		lookup_key = query_uri.path;
 	}
 
-	LspFile* file = self.files.get(lookup_key) ?? null;
-	if (!file) return;
+	LspFile*? file = self.files.get(lookup_key);
+	if (catch file) return;
 
 	if (file::exists(lookup_key) && !lookup_key.starts_with("/virtual/"))
 	{
@@ -299,11 +299,10 @@ fn void LspProject.close_file(&self, DocumentUri document)
 *>
 fn void LspProject.evict(&self, String path)
 {
-	LspFile* file = self.files.get(path) ?? null;
-	if (!file) return;
+	LspFile*? file = self.files.get(path);
+	if (catch file) return;
 	self.workspace.clear_c3c_diagnostics_for_path(file.uri.path);
-	SourceFile* sf = self.workspace.get_source_file_by_path(path);
-	if (sf) source_file::free(self.workspace.ctx, sf);
+	if (try sf = self.workspace.get_source_file_by_path(path)) source_file::free(self.workspace.ctx, sf);
 	file.free(self.allocator);
 	alloc::free(self.allocator, file);
 	(void)self.files.remove(path);
@@ -320,8 +319,9 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 		lookup_key = query_uri.path;
 	}
 
-	LspFile* file = self.files.get(lookup_key) ?? null;
-	if (!file || file.is_library) return;
+	LspFile*? file = self.files.get(lookup_key);
+	if (catch file) return;
+	if (file.is_library) return;
 
 	if (self.process_queue.len() > 0)
 	{
@@ -330,8 +330,7 @@ fn void LspProject.save_file(&self, DocumentUri document) => @pool()
 
 	if (lookup_key.starts_with("/virtual/")) return;
 
-	SourceFile* sf = self.workspace.get_source_file_by_path(lookup_key);
-	if (sf)
+	if (@ok(self.workspace.get_source_file_by_path(lookup_key)))
 	{
 		if (try diags = self.workspace.diagnostics.get_ref(lookup_key))
 		{
@@ -436,13 +435,11 @@ fn String LspProject.get_c3c_target(&self, String file_path)
 }
 
 <*
- Output of `cmd`, stderr included, read while it runs so a full pipe cannot block it;
- empty when it cannot start.
+ Output of `cmd`, stderr included, read while it runs so a full pipe cannot block it.
 *>
-fn String capture_output(String[] cmd, bool close_stdin) @local
+fn String? capture_output(String[] cmd, bool close_stdin) @local
 {
-	Process? proc = process::spawn(cmd, options: STDERR_TO_STDOUT | INHERIT_ENV);
-	if (catch proc) return "";
+	Process proc = process::spawn(cmd, options: STDERR_TO_STDOUT | INHERIT_ENV)!;
 	defer (void)proc.destroy();
 	if (close_stdin) proc.close_stdin();
 
@@ -469,7 +466,7 @@ fn bool has_lsp2(String compiler) @local => @pool()
 	ulong id = compiler.hash();
 	if (id != lsp2_checked_compiler)
 	{
-		lsp2_supported = capture_output({ compiler, "--help" }, false).contains("--lsp2");
+		lsp2_supported = capture_output({ compiler, "--help" }, false).contains("--lsp2") ?? false;
 		lsp2_checked_compiler = id;
 	}
 	return lsp2_supported;
@@ -538,7 +535,8 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 		if (trust.len) cmd.push(string::tformat("--trust=%s", trust));
 	}
 
-	self.workspace.parse_c3c_lsp_output(capture_output(cmd.array_view(), stdlib_only), self.config.root_path);
+	// A c3c that does not start leaves no diagnostics, clearing the previous ones.
+	self.workspace.parse_c3c_lsp_output(capture_output(cmd.array_view(), stdlib_only) ?? "", self.config.root_path);
 }
 
 fn void LspProject.update(&self)
@@ -609,7 +607,7 @@ fn void LspProject.update(&self)
 			String target_path = f.path.len > 0 ? f.path : f.uri;
 			bool ok = self.workspace.parse_and_register_file(target_path, text);
 			// `@feat` sees the project's features, those of the target built for this file, and TESTING in test files.
-			if (SourceFile* sf = self.workspace.get_source_file_by_path(target_path))
+			if (try sf = self.workspace.get_source_file_by_path(target_path))
 			{
 				List{String} features;
 				features.init(&sf.arena);

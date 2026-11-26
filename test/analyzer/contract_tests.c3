@@ -31,7 +31,7 @@ fn void contract_with_expr_checks()
 	FnDecl* fn_decl = mod.nodes[1].as(FnDecl);
 	ContractDecl* decl = fn_decl.contract.get()!!.as(ContractDecl);
 	test::ne(decl.comment, null);
-	test::eq(decl.comment.text.trim(), "Hello there");
+	test::eq(decl.comment.get()!!.text.trim(), "Hello there");
 	test::eq(decl.deprecated, null);
 	test::eq(decl.ensures.len, 1);
 	test::eq(decl.requires.len, 1);
@@ -63,9 +63,9 @@ fn void contract_with_expr_checks()
 	{
 		Node* param         = decl.params[0];
 		ContractParam* expr = param.as(ContractParam);
-		test::eq(expr.ident.text, "a");
+		test::eq(expr.ident.get()!!.text, "a");
 		test::eq(expr.modifier, InOutModifier.IN);
-		test::eq(expr.description.text, "\"my param\"");
+		test::eq(expr.description.get()!!.text, "\"my param\"");
 	}
 }
 
@@ -116,7 +116,7 @@ fn void contract_description()
 	FnDecl* fn_decl = mod.nodes[1].as(FnDecl);
 	ContractDecl* contract_decl = fn_decl.contract.get()!!.as(ContractDecl);
 	test::ne(contract_decl.comment, null);
-	test::eq(contract_decl.comment.text.trim(), "this is a comment");
+	test::eq(contract_decl.comment.get()!!.text.trim(), "this is a comment");
 }
 
 fn void contract_with_embedded_at_symbols_and_code_blocks()
@@ -146,7 +146,7 @@ fn void contract_with_embedded_at_symbols_and_code_blocks()
 	MacroDecl* mac_decl = mod.nodes[1].as(MacroDecl);
 	ContractDecl* contract_decl = mac_decl.contract.get()!!.as(ContractDecl);
 	test::ne(contract_decl.comment, null);
-	test::eq(contract_decl.comment.text.contains("res.@or_else"), true);
+	test::eq(contract_decl.comment.get()!!.text.contains("res.@or_else"), true);
 }
 
 fn void contract_with_param_modifiers_and_pinpoints()
@@ -205,14 +205,14 @@ fn void contract_with_deprecated()
 	FnDecl* fn_decl = mod.nodes[1].as(FnDecl);
 	ContractDecl* decl = fn_decl.contract.get()!!.as(ContractDecl);
 	test::ne(decl.comment, null);
-	test::eq(decl.comment.text.trim(), "Hello there");
+	test::eq(decl.comment.get()!!.text.trim(), "Hello there");
 	test::eq(decl.ensures.len, 1);
 	test::eq(decl.requires.len, 1);
 	test::eq(decl.params.len, 1);
 	test::eq(decl.is_pure, true);
 
 	{
-		AttributeDecl* attr = decl.deprecated.as(AttributeDecl);
+		AttributeDecl* attr = decl.deprecated.get()!!.as(AttributeDecl);
 		test::eq(attr.attribute_kind, AttributeKind.DEPRECATED);
 		LiteralExpr* lit = attr.exprs[0].as(LiteralExpr);
 		test::eq(lit.string, "This is deprecated!");
@@ -244,8 +244,8 @@ fn void contract_with_deprecated()
 	{
 		Node* param         = decl.params[0];
 		ContractParam* expr = param.as(ContractParam);
-		test::eq(expr.ident.text, "a");
+		test::eq(expr.ident.get()!!.text, "a");
 		test::eq(expr.modifier, InOutModifier.IN);
-		test::eq(expr.description.text, "\"my param\"");
+		test::eq(expr.description.get()!!.text, "\"my param\"");
 	}
 }

@@ -373,7 +373,7 @@ fn Node* parse_case_stmt(ContextScope scope) => @pool()
 	node.expr = parse_expr(scope);
 	if (consume(ctx, DOTDOT))
 	{
-		node.to_expr = parse_expr(scope);
+		node.to_expr.set(parse_expr(scope));
 	}
 
 	if (!consume(ctx, COLON))
@@ -384,7 +384,7 @@ fn Node* parse_case_stmt(ContextScope scope) => @pool()
 
 	node.body = parse_case_stmts(scope, start.start.line);
 
-	if (node.body && node.body.flags.has_error)
+	if (node.body.flags.has_error)
 	{
 		node.flags.has_error = true;
 	}
@@ -416,7 +416,7 @@ fn Node* parse_default_stmt(ContextScope scope)
 
 	node.body = parse_case_stmts(scope, start.start.line);
 
-	if (node.body && node.body.flags.has_error)
+	if (node.body.flags.has_error)
 	{
 		node.flags.has_error = true;
 	}
@@ -440,7 +440,7 @@ fn Node* parse_nextcase_stmt(ContextScope scope)
 	}
 	if (ctx.is(CONST_IDENT) && ctx.peek(1).kind == COLON)
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx, 2);
 	}
 	if (consume(ctx, DEFAULT))
@@ -449,7 +449,7 @@ fn Node* parse_nextcase_stmt(ContextScope scope)
 	}
 	else
 	{
-		node.expr = parse_expr(scope);
+		node.expr.set(parse_expr(scope));
 	}
 
 	(void)consume(ctx, EOS);
@@ -471,7 +471,7 @@ fn Node* parse_continue_break_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 
@@ -498,7 +498,7 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 	if (ctx.is(CONST_IDENT))
 	{
 		Token label_tok = ctx.current;
-		node.label = ctx.ident(label_tok);
+		node.label.set(ctx.ident(label_tok));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -509,7 +509,7 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 
 	if (consume(ctx, LPAREN))
 	{
-		node.cond = parse_cond_expr(scope);
+		node.cond.set(parse_cond_expr(scope));
 		if (!consume(ctx, RPAREN))
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close switch condition");
@@ -555,7 +555,7 @@ fn Node* parse_return_stmt(ContextScope scope)
 
 	if (!ctx.is(EOS))
 	{
-		node.expr = parse_expr(scope);
+		node.expr.set(parse_expr(scope));
 	}
 
 	if (!consume(ctx, EOS))
@@ -579,8 +579,9 @@ fn Node* parse_ct_switch_stmt(ContextScope scope) => @pool()
 
 	if (!ctx.is(COLON))
 	{
-		node.cond = parse_constant_expr(scope);
-		if (node.cond && node.cond.flags.has_error) node.flags.has_error = true;
+		Node* cond = parse_constant_expr(scope);
+		node.cond.set(cond);
+		if (cond.flags.has_error) node.flags.has_error = true;
 	}
 
 	if (!consume(ctx, COLON))
@@ -665,7 +666,7 @@ fn Node* parse_if_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -682,7 +683,7 @@ fn Node* parse_if_stmt(ContextScope scope)
 
 	node.condition = parse_cond_expr(scope);
 
-	if (!node.condition || node.condition.flags.has_error)
+	if (node.condition.flags.has_error)
 	{
 		node.flags.has_error = true;
 	}
@@ -694,15 +695,16 @@ fn Node* parse_if_stmt(ContextScope scope)
 	}
 
 	node.then_body = parse_stmt(scope);
-	if (!node.then_body || node.then_body.flags.has_error)
+	if (node.then_body.flags.has_error)
 	{
 		node.flags.has_error = true;
 	}
 
 	if (consume(ctx, ELSE))
 	{
-		node.else_body = parse_stmt(scope);
-		if (!node.else_body || node.else_body.flags.has_error)
+		Node* else_body = parse_stmt(scope);
+		node.else_body.set(else_body);
+		if (else_body.flags.has_error)
 		{
 			node.flags.has_error = true;
 		}
@@ -722,7 +724,7 @@ fn Node* parse_ct_if_stmt(ContextScope scope) => @pool()
 	defer node.range.end = ctx.peek(-1).range.end;
 
 	node.expr = parse_expr(scope);
-	if (node.expr && node.expr.flags.has_error)
+	if (node.expr.flags.has_error)
 	{
 		node.flags.has_error = true;
 	}
@@ -805,7 +807,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -853,7 +855,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 	Location prev_loc = ctx.current.range.start;
 	node.body = parse_stmt(scope);
 
-	if (node.body && node.body.kind != COMPOUND_STMT)
+	if (node.body.kind != COMPOUND_STMT)
 	{
 		Location body_loc = node.body.range.start;
 		if (prev_loc.line != body_loc.line)
@@ -893,11 +895,11 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 
 	if (!ctx.is(EOS))
 	{
-		node.cond = parse_expr(scope.with_only_flags(
+		node.cond.set(parse_expr(scope.with_only_flags(
 		{
 			.is_comptime
 		}
-		));
+		)));
 	}
 	if (!consume(ctx, EOS))
 	{
@@ -967,7 +969,7 @@ fn Node* parse_while_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -1017,7 +1019,7 @@ fn Node* parse_do_while_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -1064,7 +1066,7 @@ fn Node* parse_foreach_var(ContextScope scope)
 
 	if (!ctx.is(IDENT) && !ctx.is(AMP))
 	{
-		var_node.type = parse_type_expr(scope);
+		var_node.type.set(parse_type_expr(scope));
 	}
 
 	if (ctx.is(AMP))
@@ -1075,7 +1077,7 @@ fn Node* parse_foreach_var(ContextScope scope)
 
 	if (!ctx.is(IDENT))
 	{
-		if (var_node.type != null)
+		if (@ok(var_node.type.get()))
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected an identifier after the type.");
 		}
@@ -1088,7 +1090,7 @@ fn Node* parse_foreach_var(ContextScope scope)
 		return var_node;
 	}
 
-	var_node.name = ctx.ident(ctx.current);
+	var_node.name.set(ctx.ident(ctx.current));
 	advance(ctx);
 
 	return (Node*)var_node;
@@ -1108,7 +1110,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	if (ctx.is(CONST_IDENT))
 	{
-		node.label = ctx.ident(ctx.current);
+		node.label.set(ctx.ident(ctx.current));
 		advance(ctx);
 		if (!consume(ctx, COLON))
 		{
@@ -1128,7 +1130,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	if (consume(ctx, COMMA))
 	{
-		node.index = idx_or_variable;
+		node.index.set(idx_or_variable);
 		node.index_by_ref = var_decl.var_flags.is_ref;
 
 		node.variable = parse_foreach_var(scope);
@@ -1148,7 +1150,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 	}
 
 	node.enumeration = parse_expr(scope);
-	if (!node.enumeration || node.enumeration.flags.has_error)
+	if (node.enumeration.flags.has_error)
 	{
 		error_node(ctx, node);
 	}
@@ -1161,7 +1163,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	node.body = parse_stmt(scope);
 
-	if (!node.body || node.body.flags.has_error)
+	if (node.body.flags.has_error)
 	{
 		error_node(ctx, node);
 	}
@@ -1230,7 +1232,7 @@ fn Node* parse_ct_echo_stmt(ContextScope scope) => @pool()
 
 	node.expr = parse_constant_expr(scope);
 
-	if (!node.expr || node.expr.flags.has_error)
+	if (node.expr.flags.has_error)
 	{
 		error_node(ctx, node);
 	}
@@ -1269,9 +1271,10 @@ fn Node* parse_defer_stmt(ContextScope scope)
 			}
 			else
 			{
-				node.ident = parse_expr(scope);
+				Node* ident = parse_expr(scope);
+				node.ident.set(ident);
 
-				if (!node.ident || node.ident.kind != IDENT_EXPR)
+				if (ident.kind != IDENT_EXPR)
 				{
 					diagnostics::error(ctx.context, ctx.current.range, "Expected identifier after 'catch'");
 					node.flags.has_error = true;
@@ -1292,7 +1295,7 @@ fn Node* parse_defer_stmt(ContextScope scope)
 
 	node.body = parse_stmt(scope);
 
-	if (!node.body || node.flags.has_error)
+	if (node.flags.has_error)
 	{
 		error_node(ctx, node);
 	}
@@ -1312,14 +1315,14 @@ fn Node* parse_assert_stmt(ContextScope scope)
 
 	node.expr = parse_expr(scope);
 
-	if (!node.expr || node.flags.has_error)
+	if (node.flags.has_error)
 	{
 		error_node(ctx, node);
 	}
 
 	if (consume(ctx, COMMA))
 	{
-		node.message = parse_constant_expr(scope);
+		node.message.set(parse_constant_expr(scope));
 
 		@pool()
 		{
@@ -1366,9 +1369,9 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 
 	if (consume(ctx, COMMA))
 	{
-		node.index = idx_or_variable;
+		node.index.set(idx_or_variable);
 		node.value = parse_ct_foreach_var(scope);
-		if (node.value && node.value.flags.has_error)
+		if (node.value.flags.has_error)
 		{
 			error_node(ctx, node);
 		}
@@ -1437,7 +1440,7 @@ fn Node* parse_ct_foreach_var(ContextScope scope)
 
 	if (ctx.is(CT_IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 	else
@@ -1464,7 +1467,7 @@ fn Node* parse_ct_expand_stmt(ContextScope scope)
 	}
 
 	node.expr = parse_expr(scope);
-	if (!node.expr || node.expr.flags.has_error)
+	if (node.expr.flags.has_error)
 	{
 		error_node(ctx, node);
 	}

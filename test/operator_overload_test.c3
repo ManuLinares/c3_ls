@@ -59,7 +59,7 @@ fn void typedefs_do_not_take_their_base_overloads() @test
 	proj.init(mem);
 	defer proj.free();
 	proj.workspace.process_file("/virtual/td.c3", source);
-	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/td.c3");
+	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/td.c3")!!;
 	AnalyzerContext* ctx = proj.workspace.ctx;
 	assert(!query::operator_method(ctx, sf, "Pt2", OV_PLUS, other: "Pt2").method);
 	assert(query::operator_method(ctx, sf, "Pt3", OV_PLUS, other: "Pt3").method);

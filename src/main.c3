@@ -195,8 +195,8 @@ fn int run_analyzer_cli(String path)
 	defer context::free(ctx);
 	(void)context::process(ctx, content, path);
 
-	SourceFile* sf = ctx.files.get(path) ?? null;
-	if (!sf)
+	SourceFile*? sf = ctx.files.get(path);
+	if (catch sf)
 	{
 		io::eprintfn("Error: File not found in context: '%s'", path);
 		return 1;

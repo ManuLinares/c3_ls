@@ -221,8 +221,10 @@ fn Node* alloc_any_type_expr(ParseContext* ctx)
 	TypeExpr* type_node = ctx.ast.alloc_node(TypeExpr, ctx.current.range);
 
 	type_node.type_kind = TYPE_IDENTIFIER;
-	type_node.unresolved.name = ctx.ident_string("any");
-	type_node.unresolved.name.range = ctx.current.range;
+	type_node.flags.is_synthetic = true;
+	Ident* any_name = ctx.ident_string("any");
+	any_name.range = ctx.current.range;
+	type_node.unresolved.name.set(any_name);
 
 	return type_node;
 }

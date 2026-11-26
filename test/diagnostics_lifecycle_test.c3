@@ -60,7 +60,7 @@ fn void test_top_level_include_and_exec_parse()
 	proj.workspace.process_file(path, "module t;\n$include(\"other.c3\");\n$exec(\"echo\", { \"fn void x() {}\" });\nfn void main() {}\n");
 	test::eq(proj.workspace.get_diagnostics(path).len, 0);
 
-	SourceFile* sf = proj.workspace.get_source_file_by_path(path);
+	SourceFile* sf = proj.workspace.get_source_file_by_path(path)!!;
 	int includes;
 	foreach (stmt : sf.ast.statements)
 	{

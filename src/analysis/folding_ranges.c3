@@ -117,8 +117,7 @@ fn void collect_comment_folds(String content, Folds* folds)
 
 fn FoldingRange[]? get_folding_ranges(LspProject* project, Uri uri)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
 
 	Folds folds;
 	folds.ranges.tinit();

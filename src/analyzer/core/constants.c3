@@ -235,8 +235,9 @@ enum ValueProperty : int (String name, String doc)
 {
 	LEN     { "len",     "Number of elements in the array, slice, vector or string." },
 	PTR     { "ptr",     "Pointer to the elements of the slice or string, or to the value of the `any` or interface." },
-	TYPE    { "type",    "Type of the value held by the `any` or interface." },
+	TYPE    { "type",    "Type of the value held by the `any` or interface, or of the fault." },
 	ORDINAL { "ordinal", "Position of the value in its enum." },
+	DESCRIPTION { "description", "Name of the enum value or fault." },
 	KIND    { "kind",    "Kind of the type the `typeid` identifies." },
 	SIZE    { "size",    "Size in bytes of the type the `typeid` identifies." },
 	PARENT  { "parent",  "Inline member type of the typedef or struct the `typeid` identifies." },

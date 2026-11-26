@@ -7,8 +7,8 @@ struct IfStmt
 	inline Node node;
 	Node* condition;
 	Node* then_body;
-	Node* else_body;
-	Ident* label;
+	NullableNode else_body;
+	NullableIdent label;
 }
 
 struct CtIfStmt
@@ -29,8 +29,8 @@ struct SwitchStmt
 {
 	inline Node node;
 	NodeArray cases;
-	Node* cond;
-	Ident* label;
+	NullableNode cond;
+	NullableIdent label;
 	NodeArray attributes;
 }
 
@@ -43,7 +43,7 @@ struct CaseStmt
 {
 	inline Node node;
 	Node* expr;
-	Node* to_expr;
+	NullableNode to_expr;
 	Node* body;
 }
 
@@ -59,28 +59,28 @@ struct DefaultStmt
 struct NextcaseStmt
 {
 	inline Node node;
-	Node* expr;
-	Ident* label;
+	NullableNode expr;
+	NullableIdent label;
 	bool is_default;
 }
 
 struct ContinueBreakStmt
 {
 	inline Node node;
-	Ident* label;
+	NullableIdent label;
 	bool is_continue;
 }
 
 struct ReturnStmt
 {
 	inline Node node;
-	Node* expr;
+	NullableNode expr;
 }
 
 struct CtSwitchStmt
 {
 	inline Node node;
-	Node* cond;
+	NullableNode cond;
 	NodeArray cases;
 }
 
@@ -104,7 +104,7 @@ struct ForStmt
 	NullableNode cond;
 	NullableNode incr;
 	Node* body;
-	Ident* label;
+	NullableIdent label;
 }
 
 <*
@@ -118,7 +118,7 @@ struct CtForStmt
 {
 	inline Node node;
 	NullableNode init;
-	Node* cond;
+	NullableNode cond;
 	NullableNode incr;
 	Node* body;
 }
@@ -128,7 +128,7 @@ struct WhileStmt
 	inline Node node;
 	Node* cond;
 	Node* body;
-	Ident* label;
+	NullableIdent label;
 }
 
 struct DoWhileStmt
@@ -136,17 +136,17 @@ struct DoWhileStmt
 	inline Node node;
 	Node* body;
 	NullableNode cond;
-	Ident* label;
+	NullableIdent label;
 }
 
 struct ForeachStmt
 {
 	inline Node node;
-	Node* index;
+	NullableNode index;
 	Node* variable;
 	Node* enumeration;
 	Node* body;
-	Ident* label;
+	NullableIdent label;
 	bool is_reverse;
 	bool value_by_ref;
 	bool index_by_ref;
@@ -155,7 +155,7 @@ struct ForeachStmt
 struct CtForeachStmt
 {
 	inline Node node;
-	Node* index;
+	NullableNode index;
 	Node* value;
 	Node* expr;
 	Node* body;
@@ -185,7 +185,7 @@ struct DeferStmt
 {
 	inline Node node;
 	DeferKind defer_kind;
-	Node* ident;
+	NullableNode ident;
 	Node* body;
 }
 
@@ -193,7 +193,7 @@ struct AssertStmt
 {
 	inline Node node;
 	Node* expr;
-	Node* message;
+	NullableNode message;
 	NodeArray args;
 }
 

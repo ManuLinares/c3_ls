@@ -71,10 +71,10 @@ fn void test_literals()
 
 		VarDecl* var_decl = node.as(VarDecl);
 		test::eq(var_decl.var_kind, VarDeclKind.VAR_GLOBAL);
-		String var_name = var_decl.name.text;
+		String var_name = var_decl.name.get()!!.text;
 
 		test::ne(var_decl.init_expr, null);
-		Node* expr_node = var_decl.init_expr;
+		Node* expr_node = var_decl.init_expr.get()!!;
 
 		if (var_name == "blocal")
 		{
@@ -375,16 +375,16 @@ fn void group_and_cast()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 	VarDecl* cast_decl = comp.statements[0].as(VarDecl);
 	test::ne(cast_decl.init_expr, null);
-	CastExpr* cast     = cast_decl.init_expr.as(CastExpr);
+	CastExpr* cast     = cast_decl.init_expr.get()!!.as(CastExpr);
 
 	test::eq(cast.inner.kind, NodeKind.TYPE_EXPR);
 	test::eq(cast.operand.kind, NodeKind.IDENT_EXPR);
 
 	VarDecl* group_decl  = comp.statements[1].as(VarDecl);
-	GroupExpr* group     = group_decl.init_expr.as(GroupExpr);
+	GroupExpr* group     = group_decl.init_expr.get()!!.as(GroupExpr);
 	CastExpr* group_cast = group.inner.as(CastExpr);
 
 	test::eq(group_cast.inner.kind, NodeKind.TYPE_EXPR);
@@ -414,7 +414,7 @@ fn void initializers()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
@@ -439,13 +439,13 @@ fn void access()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 	VarDecl* type      = comp.statements[0].as(VarDecl);
 	VarDecl* name      = comp.statements[1].as(VarDecl);
 
 	test::ne(type.init_expr, null);
-	AccessExpr* bar_type = type.init_expr.as(AccessExpr);
-	AccessExpr* bar_name = name.init_expr.as(AccessExpr);
+	AccessExpr* bar_type = type.init_expr.get()!!.as(AccessExpr);
+	AccessExpr* bar_name = name.init_expr.get()!!.as(AccessExpr);
 	test::eq(bar_type.access_kind, AccessKind.INSTANCE);
 	test::eq(bar_name.access_kind, AccessKind.STATIC);
 
@@ -484,7 +484,7 @@ fn void range()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
@@ -510,7 +510,7 @@ fn void optional_expr()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[2].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
@@ -536,7 +536,7 @@ fn void ct_defined()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
@@ -560,7 +560,7 @@ fn void lengthof_expr()
 	Module* mod = context.modules.get("hello")!!;
 
 	FnDecl* func       = mod.nodes[1].as(FnDecl);
-	CompoundStmt* comp = func.body.as(CompoundStmt);
+	CompoundStmt* comp = func.body.get()!!.as(CompoundStmt);
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 1);
@@ -653,13 +653,13 @@ fn void test_vasplat_slice()
 
 	MacroInfo* macro_info = context.registry.macros.get("hello::@forward")!!;
 	MacroDecl* macro_decl = macro_info.node.as(MacroDecl);
-	CompoundStmt* body = macro_decl.body.as(CompoundStmt);
+	CompoundStmt* body = macro_decl.body.get()!!.as(CompoundStmt);
 	ExprStmt* expr_stmt = body.statements[0].as(ExprStmt);
 	CallExpr* call = expr_stmt.expr_stmt.as(CallExpr);
 	test::eq(call.args.len, 1);
 	VasplatExpr* vasplat = call.args[0].as(VasplatExpr);
 	test::ne(vasplat.range_expr, null);
-	test::eq(vasplat.range_expr.kind, NodeKind.DESIGNATOR_EXPR);
+	test::eq(vasplat.range_expr.get()!!.kind, NodeKind.DESIGNATOR_EXPR);
 }
 
 fn void ct_feature_multiple_args()
@@ -812,7 +812,7 @@ fn void test_adjacent_bytes_literal_concatenation() @test
 
 	Module* mod = context.modules.get("test_bytes")!!;
 	VarDecl* a = mod.nodes[1].as(VarDecl);
-	LiteralExpr* lit_a = a.init_expr.as(LiteralExpr);
+	LiteralExpr* lit_a = a.init_expr.get()!!.as(LiteralExpr);
 	test::eq(lit_a.literal_kind, LiteralKind.BYTES_LITERAL);
 	test::eq(lit_a.bytes.len, 4);
 	test::eq((char)lit_a.bytes[0], (char)0x12);
@@ -821,7 +821,7 @@ fn void test_adjacent_bytes_literal_concatenation() @test
 	test::eq((char)lit_a.bytes[3], (char)0x78);
 
 	VarDecl* b = mod.nodes[2].as(VarDecl);
-	LiteralExpr* lit_b = b.init_expr.as(LiteralExpr);
+	LiteralExpr* lit_b = b.init_expr.get()!!.as(LiteralExpr);
 	test::eq(lit_b.literal_kind, LiteralKind.BYTES_LITERAL);
 	test::eq(lit_b.bytes.len, 4);
 	test::eq((char)lit_b.bytes[0], (char)0xAA);
@@ -830,7 +830,7 @@ fn void test_adjacent_bytes_literal_concatenation() @test
 	test::eq((char)lit_b.bytes[3], (char)0xDD);
 
 	VarDecl* c = mod.nodes[3].as(VarDecl);
-	LiteralExpr* lit_c = c.init_expr.as(LiteralExpr);
+	LiteralExpr* lit_c = c.init_expr.get()!!.as(LiteralExpr);
 	test::eq(lit_c.literal_kind, LiteralKind.BYTES_LITERAL);
 	test::eq(lit_c.bytes.len, 5);
 	test::eq((String)lit_c.bytes, "Hello");
@@ -847,14 +847,14 @@ fn void negative_int_literal_keeps_sign()
 	Module* mod = context.modules.get("neg")!!;
 
 	VarDecl* a = mod.nodes[1].as(VarDecl);
-	UnaryExpr* neg = a.init_expr.as(UnaryExpr);
+	UnaryExpr* neg = a.init_expr.get()!!.as(UnaryExpr);
 	test::eq(neg.operator, UnaryOpKind.UNARYOP_NEG);
 	test::eq(neg.expr.as(LiteralExpr).integer, 5u);
-	test::eq(neg.range.start.column, a.init_expr.range.start.column);
+	test::eq(neg.range.start.column, a.init_expr.get()!!.range.start.column);
 	test::eq(neg.range.start.column, 16);
 
 	VarDecl* b = mod.nodes[2].as(VarDecl);
-	BinaryExpr* sum = b.init_expr.as(BinaryExpr);
+	BinaryExpr* sum = b.init_expr.get()!!.as(BinaryExpr);
 	test::eq(sum.op, OperatorKind.OP_ADD);
 	test::eq(sum.left.as(UnaryExpr).operator, UnaryOpKind.UNARYOP_NEG);
 	test::eq(sum.right.as(LiteralExpr).integer, 3u);

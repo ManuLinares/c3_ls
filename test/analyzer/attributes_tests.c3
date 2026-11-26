@@ -138,7 +138,7 @@ fn void const_var_private_if()
 		test::eq(node.visibility, Visibility.PRIVATE);
 		test::eq(node.flags.has_attributes, true);
 
-		String var_name = var_decl.name.text;
+		String var_name = var_decl.name.get()!!.text;
 
 		test::eq(var_decl.var_kind, VarDeclKind.VAR_GLOBAL);
 		test::eq(var_decl.attributes.len, 2);
@@ -210,7 +210,7 @@ fn void op_overloads()
 		fn_decl_count++;
 
 		FnDecl* fn_decl = node.as(FnDecl);
-		String fn_name = fn_decl.name.text;
+		String fn_name = fn_decl.name.get()!!.text;
 		test::eq(fn_decl.attributes.len, 1);
 
 		AttributeDecl* attr = parser_tests::@attr(fn_decl, 0);
@@ -616,7 +616,7 @@ fn void main() {}
 	bool found_main = false;
 	foreach (node : mod.nodes)
 	{
-		if (node && node.kind == FN_DECL && node.as(FnDecl).name && node.as(FnDecl).name.text == "main")
+		if (node && node.kind == FN_DECL && node.as(FnDecl).name.is("main"))
 		{
 			found_main = true;
 			break;

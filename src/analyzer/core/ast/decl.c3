@@ -7,8 +7,8 @@ import std::collections::list;
 struct ContractParam
 {
 	inline Node node;
-	Ident* ident;
-	Ident* description;
+	NullableIdent ident;
+	NullableIdent description;
 	InOutModifier modifier;
 	bool by_ref;
 }
@@ -20,9 +20,9 @@ struct ContractDecl
 	NodeArray ensures;
 	NodeArray returns;
 	NodeArray params;  // ContractParam
-	Ident* comment;
-	Node* return_desc;  // ident_expr
-	Node* deprecated;
+	NullableIdent comment;
+	NullableNode return_desc;  // ident_expr
+	NullableNode deprecated;
 	bool is_pure;
 }
 
@@ -32,10 +32,10 @@ struct ContractDecl
 struct ModuleDecl
 {
 	inline Node node;
-	Node* path;
+	NullableNode path;
 	NullableNode contract;
 	NodeArray attributes;
-	Node* generics;
+	NullableNode generics;
 }
 
 struct ImportDecl
@@ -64,11 +64,11 @@ struct AliasDecl
 {
 	inline Node node;
 	NullableNode contract;
-	Ident* name;
+	NullableIdent name;
 	TokenKind name_kind;
 	AliasDeclKind alias_kind;
-	Node* generics;
-	Node* target;
+	NullableNode generics;
+	NullableNode target;
 	NodeArray attributes;
 }
 
@@ -87,9 +87,9 @@ struct TypedefDecl
 {
 	inline Node node;
 	NullableNode contract;
-	Ident* name;
-	Node* base_type;
-	Node* generics;
+	NullableIdent name;
+	NullableNode base_type;
+	NullableNode generics;
 	NodeArray interfaces;
 	NodeArray attributes;
 	bool is_inline;
@@ -98,11 +98,11 @@ struct TypedefDecl
 struct FnDecl
 {
 	inline Node node;
-	Ident* name;
-	Node* associated_type;
+	NullableIdent name;
+	NullableNode associated_type;
 	Node* ret_type;
-	Node* body;
-	Node* generics;
+	NullableNode body;
+	NullableNode generics;
 	NullableNode contract;
 	NodeArray params;
 	NodeArray attributes;
@@ -111,15 +111,15 @@ struct FnDecl
 struct MacroDecl
 {
 	inline Node node;
-	Ident* name;
+	NullableIdent name;
 	NullableNode associated_type;
 	NullableNode ret_type;
-	Node* body;
+	NullableNode body;
 	NullableNode contract;
-	Node* body_params;
+	NullableNode body_params;
 	NodeArray params;
 	NodeArray attributes;
-	Node* generics;
+	NullableNode generics;
 }
 
 <*
@@ -134,13 +134,13 @@ struct VarDecl
 	inline Node node;
 	VarDeclKind var_kind;
 	VarDeclFlags var_flags;
-	Ident* name;
+	NullableIdent name;
 	NullableNode contract;
-	Node* type;
-	Node* init_expr;
-	Node* bit_end;
+	NullableNode type;
+	NullableNode init_expr;
+	NullableNode bit_end;
 	NodeArray attributes;
-	Node* assoc_values;  // enum variant associated values: VARIANT{expr, ...}
+	NullableNode assoc_values;  // enum variant associated values: VARIANT{expr, ...}
 	Node* next;
 }
 
@@ -148,11 +148,11 @@ struct EnumDecl
 {
 	inline Node node;
 	NullableNode contract;
-	Ident* name;
+	NullableIdent name;
 	NodeArray interfaces;  // optional implemented interfaces: "(" type ("," type)* ")"
 	bool is_constdef;
 	bool is_inline_backing;
-	Node* backing_type;  // optional: ":" type
+	NullableNode backing_type;
 	NodeArray assoc_params;  // optional enum_param_list inside ":"
 	NodeArray attributes;
 	NodeArray variants;
@@ -162,7 +162,7 @@ struct AttributeDecl
 {
 	inline Node node;
 	NullableNode path;
-	Ident* name;
+	NullableIdent name;
 	NodeArray exprs;
 	AttributeKind attribute_kind;
 }
@@ -185,9 +185,9 @@ struct StructDecl
 	NodeArray interfaces;
 	NodeArray attributes;
 	NodeArray fields;
-	Node* generics;
-	Node* type;
-	Ident* name;
+	NullableNode generics;
+	NullableNode type;
+	NullableIdent name;
 	bool is_union;
 	bool is_bitstruct;
 }
@@ -197,7 +197,7 @@ struct FaultDecl
 	inline Node node;
 	NullableNode contract;
 	NodeArray attributes;
-	Ident* name;
+	NullableIdent name;
 }
 
 struct FaultdefDecl
@@ -217,7 +217,7 @@ struct InterfaceDecl
 	NodeArray interfaces;
 	NodeArray attributes;
 	NodeArray methods;
-	Ident* name;
+	NullableIdent name;
 }
 
 <*
@@ -226,7 +226,7 @@ struct InterfaceDecl
 struct AttrdefDecl
 {
 	inline Node node;
-	Ident* name;
+	NullableIdent name;
 	NodeArray params;
 	NodeArray attributes;
 	NodeArray defined_attributes;

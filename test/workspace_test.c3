@@ -19,7 +19,7 @@ fn void test_workspace_process_and_lookup()
 	bool ok = ws.process_file("virtual://test.c3", sample_code);
 	assert(ok);
 
-	SourceFile* sf = ws.get_source_file_by_path("virtual://test.c3");
+	SourceFile* sf = ws.get_source_file_by_path("virtual://test.c3")!!;
 	assert(sf != null);
 	assert(sf.path == "virtual://test.c3");
 

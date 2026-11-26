@@ -16,25 +16,25 @@ fn String get_node_source_text(SourceFile* sf, Node* node)
  parameter replaced by the argument bound to it and the body parameter's
  calls by the trailing block, formatted. Empty when there is no body.
 *>
-fn String expand_macro(AnalyzerContext* ctx, SourceFile* sf, CallExpr* call, MacroDecl* mac)
+fn String? expand_macro(AnalyzerContext* ctx, SourceFile* sf, CallExpr* call, MacroDecl* mac)
 {
-	SourceFile* mf = source_file::file_of(ctx, (Node*)mac);
-	if (!call || !mac.body || !mf || !mf.lexer) return "";
+	SourceFile* mf = source_file::file_of(ctx, (Node*)mac)!;
+	Node* body = mac.body.get()!;
+	if (!call || !mf.lexer) return NOT_FOUND~;
 
 	HashMap{String, String} args;
 	args.tinit();
 	bind_arguments(ctx, sf, mf, call, mac, &args);
 
-	String body_name = mac.body_params ? source_text(mf, mac.body_params.range) : "";
-	MacroBodyExpr* trailing = call.macro_body_expr ? call.macro_body_expr.as(MacroBodyExpr) : null;
-	String block = trailing && trailing.body ? source_text(sf, trailing.body.range) : "";
+	String body_name = source_text(mf, mac.body_params.get().range) ?? "";
+	String block = source_text(sf, call.macro_body_expr.get().as(MacroBodyExpr).body.get().range) ?? "";
 
 	Token[] tokens = mf.lexer.tokens.array_view();
 	OffsetCursor offsets = { .text = mf.content };
 	DString out;
 	out.tinit();
-	sz previous_end = offsets.at(mac.body.range.start);
-	for (sz i = mf.lexer.first_token_at(mac.body.range.start); i < tokens.len && tokens[i].range.start.before(mac.body.range.end); i++)
+	sz previous_end = offsets.at(body.range.start);
+	for (sz i = mf.lexer.first_token_at(body.range.start); i < tokens.len && tokens[i].range.start.before(body.range.end); i++)
 	{
 		Token token = tokens[i];
 		sz start = offsets.at(token.range.start);
@@ -62,10 +62,10 @@ fn String expand_macro(AnalyzerContext* ctx, SourceFile* sf, CallExpr* call, Mac
 	defer lexer::free(ctx, lexer);
 	lexer::tokenize(lexer);
 	sz count = lexer.tokens.len();
-	if (count < 2) return "";
+	if (count < 2) return NOT_FOUND~;
 	FormattingOptions options = { .tab_size = 4, .insert_spaces = true };
 	String formatted = formatting::format_tokens_range(tmem, expanded, lexer.tokens.array_view(), 0, count - 2, 0, options).trim();
-	return formatted == "{}" ? "" : formatted;
+	return formatted == "{}" ? NOT_FOUND~ : formatted;
 }
 
 <*
@@ -88,7 +88,7 @@ fn void bind_arguments(AnalyzerContext* ctx, SourceFile* sf, SourceFile* mf, Cal
 		if (arg.kind == NAMED_ARG_EXPR)
 		{
 			NamedArgExpr* named = arg.as(NamedArgExpr);
-			if (named.name && named.value) args.set(named.name.text, operand_text(sf, named.value));
+			args.set(named.name.text, operand_text(sf, named.value));
 			continue;
 		}
 		sz index = i + target.first_param;
@@ -97,14 +97,14 @@ fn void bind_arguments(AnalyzerContext* ctx, SourceFile* sf, SourceFile* mf, Cal
 	foreach (p : params)
 	{
 		String name = param_name(p);
-		if (!name.len || args.has_key(name) || !p.as(VarDecl).init_expr) continue;
-		args.set(name, operand_text(mf, p.as(VarDecl).init_expr));
+		if (!name.len || args.has_key(name)) continue;
+		if (try init_expr = p.as(VarDecl).init_expr.get()) args.set(name, operand_text(mf, init_expr));
 	}
 }
 
 fn String param_name(Node* param) @local
 {
-	return param && param.kind == VAR_DECL && param.as(VarDecl).name ? param.as(VarDecl).name.text : "";
+	return param && param.kind == VAR_DECL ? param.as(VarDecl).name.text() : "";
 }
 
 <*
@@ -180,7 +180,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 		case CALL_EXPR:
 			{
 				CallExpr* call = node.as(CallExpr);
-				if (call.callee && cursor::spelling(call.callee, tmem) == "$Typeof" && call.args.len > 0)
+				if (cursor::spelling(call.callee, tmem) == "$Typeof" && call.args.len > 0)
 				{
 					String resolved = query::type_of(ctx, sf, call.args[0], {-1, -1});
 					if (resolved.len > 0)
@@ -188,7 +188,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 						return string::tformat("typeid (%s)", resolved);
 					}
 				}
-				if (call.callee && cursor::spelling(call.callee, tmem) == "$stringify" && call.args.len > 0)
+				if (cursor::spelling(call.callee, tmem) == "$stringify" && call.args.len > 0)
 				{
 					String text = get_node_source_text(sf, call.args[0]);
 					return string::tformat("\"%s\"", text);
@@ -214,14 +214,13 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 				if (acc.access_kind == STATIC)
 				{
 					String left_name = cursor::spelling(acc.left, tmem);
-					String member_name = cursor::spelling(acc.member, tmem);
+					String member_name = acc.member.spelling();
 
 					if (member_name == "size" || member_name == "alignment")
 					{
 						if (ctx && ctx.lookup)
 						{
-							Type* ty = lookup::get_type_by_name(ctx.lookup, left_name);
-							if (ty && ty.status == RESOLVED)
+							if (try ty = lookup::get_type_by_name(ctx.lookup, left_name) && ty.status == RESOLVED)
 							{
 								if (member_name == "size")
 								{
@@ -260,8 +259,8 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 					{
 						if (try pt = constants::PrimitiveType::lookup_field(name, left_name))
 						{
-							Type* ty = ctx && ctx.lookup ? lookup::get_type_by_name(ctx.lookup, left_name) : null;
-							if (pt.kind == INT && ty)
+							Type*? ty = ctx && ctx.lookup ? lookup::get_type_by_name(ctx.lookup, left_name) : NOT_FOUND~;
+							if (try ty && pt.kind == INT)
 							{
 								uint bits = ty.data.builtin.bytesize * 8u;
 								// The top bit's value; an unsigned maximum of `2 * top - 1` would overflow written that way.
@@ -320,10 +319,10 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 				else
 				{
 					String left_str = cursor::spelling(acc.left, tmem);
-					bool is_reflect = (acc.left && (acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
+					bool is_reflect = ((acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
 					if (is_reflect)
 					{
-						String member_name = cursor::spelling(acc.member, tmem);
+						String member_name = acc.member.spelling();
 						Node* inner_node = null;
 						if (acc.left.kind == CT_REFLECT_EXPR)
 						{
@@ -346,24 +345,23 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 								field_name = inner_text[dot_idx + 1..].trim();
 							}
 
-							Node* target_field = query::find_member_in_type(ctx, struct_name, field_name);
-							if (target_field && target_field.kind == VAR_DECL)
+							if (try target_field = query::find_member_in_type(ctx, struct_name, field_name) && target_field.kind == VAR_DECL)
 							{
 								VarDecl* vd = target_field.as(VarDecl);
 								if (member_name == "bitoffset")
 								{
-									if (vd.init_expr && vd.init_expr.kind == LITERAL_EXPR)
+									if (try init_expr = vd.init_expr.get() && init_expr.kind == LITERAL_EXPR)
 									{
-										return string::tformat("%d (bits)", (int)vd.init_expr.as(LiteralExpr).integer);
+										return string::tformat("%d (bits)", (int)init_expr.as(LiteralExpr).integer);
 									}
 									return "0 (bits)";
 								}
 								else if (member_name == "bitsize")
 								{
-									if (vd.bit_end && vd.bit_end.kind == LITERAL_EXPR && vd.init_expr && vd.init_expr.kind == LITERAL_EXPR)
+									if (try bit_end = vd.bit_end.get() && try init_expr = vd.init_expr.get() && bit_end.kind == LITERAL_EXPR && init_expr.kind == LITERAL_EXPR)
 									{
-										int start_bit = (int)vd.init_expr.as(LiteralExpr).integer;
-										int end_bit = (int)vd.bit_end.as(LiteralExpr).integer;
+										int start_bit = (int)init_expr.as(LiteralExpr).integer;
+										int end_bit = (int)bit_end.as(LiteralExpr).integer;
 										return string::tformat("%d (bits)", end_bit - start_bit + 1);
 									}
 									return "1 (bits)";
@@ -381,8 +379,7 @@ fn String evaluate_compile_time(AnalyzerContext* ctx, SourceFile* sf, Node* node
 								field_name = inner_text[dot_idx + 1..].trim();
 							}
 
-							Node* target_field = query::find_member_in_type(ctx, struct_name, field_name);
-							if (target_field)
+							if (@ok(query::find_member_in_type(ctx, struct_name, field_name)))
 							{
 								return string::tformat("offset of %s in %s", field_name, struct_name);
 							}

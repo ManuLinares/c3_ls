@@ -48,8 +48,8 @@ fn String? hover(LspProject* project, Uri uri, LspPosition pos)
 		.column = (int)pos.character
 	};
 
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !project.workspace.ctx) return "";
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!project.workspace.ctx) return "";
 
 	String shown = code_hover(project, sf, loc)!;
 	if (!sf.lexer) return shown;
@@ -80,14 +80,13 @@ fn ChildVisitResult find_type_at_callback(Node* c, Node* p, void* user_data)
  Unlike the caret lookup, which gives the base type on the suffix's first character,
  it matches only the type that holds the character at `loc`.
 *>
-fn TypeExpr* suffix_type_at(SourceFile* sf, Location loc) @local
+fn TypeExpr*? suffix_type_at(SourceFile* sf, Location loc) @local
 {
-	Node* top = query::enclosing_top_level(sf, loc);
-	if (!top) return null;
+	Node* top = query::enclosing_top_level(sf, loc)!;
 	TypeAtContext ctx = { .loc = loc };
 	cursor::visit(top, null, {.on_enter = &find_type_at_callback }, &ctx);
 	TypeExpr* t = ctx.found;
-	if (!t) return null;
+	if (!t) return NOT_FOUND~;
 	switch (t.type_kind)
 	{
 		case TYPE_POINTER:
@@ -95,9 +94,9 @@ fn TypeExpr* suffix_type_at(SourceFile* sf, Location loc) @local
 			return t;
 		case TYPE_ARRAY:
 		case TYPE_VECTOR:
-			return t.array.len_expr && t.array.len_expr.range.contains(loc) ? null : t;
+			return t.array.len_expr.contains(loc) ? NOT_FOUND~ : t;
 		default:
-			return t.optional && on_question(sf, loc) ? t : null;
+			return t.optional && on_question(sf, loc) ? t : NOT_FOUND~;
 	}
 }
 
@@ -115,14 +114,14 @@ fn bool on_question(SourceFile* sf, Location loc) @local
 *>
 fn LspRange? hover_range(LspProject* project, Uri uri, LspPosition pos)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !sf.lexer) return NOT_FOUND~;
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!sf.lexer) return NOT_FOUND~;
 	Location loc = { .line = (int)pos.line, .column = (int)pos.character };
-	if (TypeExpr* t = suffix_type_at(sf, loc)) return analysis::to_lsp_range(t.range);
-	Node* n = query::node_at(sf, loc);
-	if (!n || n.kind == ERROR) return NOT_FOUND~;
-	Ident* name = references::decl_name(n);
-	if (!name) return analysis::to_lsp_range(n.range);
+	if (try t = suffix_type_at(sf, loc)) return analysis::to_lsp_range(t.range);
+	Node* n = query::node_at(sf, loc)!;
+	if (n.kind == ERROR) return NOT_FOUND~;
+	Ident*? name = references::declared_name(n);
+	if (catch name) return analysis::to_lsp_range(n.range);
 	if (name.range.touches(loc)) return analysis::to_lsp_range(name.range);
 	sz i = sf.lexer.token_at(loc);
 	if (i < 0) return NOT_FOUND~;
@@ -151,18 +150,18 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 	}
 
 	Range target_range = {.start = loc,.end = loc };
-	Node* target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
+	Node*? target_node = cursor::find_at(sf.ast.statements.array_view(), target_range);
 
 	// `$$name` and `$$NAME`, defined by the compiler.
 	Ident* builtin = null;
-	if (target_node && target_node.kind == BUILTIN_EXPR) builtin = target_node.as(BuiltinExpr).name;
-	if (target_node && target_node.kind == COMPILER_CONST_EXPR) builtin = target_node.as(CompilerConstExpr).expr.name;
+	if (try target_node && target_node.kind == BUILTIN_EXPR) builtin = target_node.as(BuiltinExpr).name;
+	if (try target_node && target_node.kind == COMPILER_CONST_EXPR) builtin = target_node.as(CompilerConstExpr).expr.name;
 	if (builtin)
 	{
 		String text = builtin.text;
 		String label = string::tformat("$$%s", text);
 		String doc;
-		if (target_node.kind == BUILTIN_EXPR)
+		if (try target_node && target_node.kind == BUILTIN_EXPR)
 		{
 			if (try b = constants::Builtin::lookup_field(name, text))
 			{
@@ -177,7 +176,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 		return doc.len ? string::tformat("```c3\n%s\n```\n\n%s", label, doc) : string::tformat("```c3\n%s\n```", label);
 	}
 
-	if (TypeExpr* t = suffix_type_at(sf, loc))
+	if (try t = suffix_type_at(sf, loc))
 	{
 		String full = cursor::spelling(t, tmem);
 		String type = full.strip_suffix("?");
@@ -211,14 +210,14 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 	// An access describes its member only; its left side has hover of its own.
 	AccessExpr* access = acc_finder.found_access;
-	if (access && !(access.member && access.member.range.contains(loc))) access = null;
-	Node* ct_node = access ? (Node*)access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
-	if (ct_node && !operators.len())
+	if (access && !access.member.contains(loc)) access = null;
+	Node*? ct_node = access ? (Node*)access : (call_finder.found_call ? (Node*)call_finder.found_call : target_node);
+	if (try ct_node && !operators.len())
 	{
 		if (ct_node.kind == ACCESS_EXPR)
 		{
 			AccessExpr* acc = ct_node.as(AccessExpr);
-			String mem_name = cursor::spelling(acc.member, tmem);
+			String mem_name = acc.member.spelling();
 			if (acc.access_kind == STATIC)
 			{
 				if (try tp = constants::TypeProperty::lookup_field(name, mem_name))
@@ -242,7 +241,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 			}
 			else
 			{
-				if (acc.member && acc.member.range.contains(loc))
+				if (acc.member.contains(loc))
 				{
 					if (try property = ValueProperty::lookup_field(name, mem_name))
 					{
@@ -258,7 +257,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 				}
 
 				String left_str = cursor::spelling(acc.left, tmem);
-				bool is_reflect = (acc.left && (acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
+				bool is_reflect = ((acc.left.kind == CT_REFLECT_EXPR || left_str.starts_with("$reflect")));
 				if (is_reflect)
 				{
 					if (try rp = constants::ReflectProperty::lookup_field(name, mem_name))
@@ -294,8 +293,8 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 	List{Node*} overloads;
 	overloads.tinit();
-	Node* decl_node = operators.len() ? operators[0].method : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
-	if (!decl_node) return "";
+	Node*? decl_node = operators.len() ? operators[0].method : query::resolve_symbol_at(project.workspace.ctx, sf, loc, &overloads);
+	if (catch decl_node) return "";
 	// A member of a generic instance shows the instance's types: `int element` for `Type element` on a `List{int}`.
 	GenericBinding binding = operators.len()
 		? query::member_binding(project.workspace.ctx, sf, operators[0].receiver, decl_node)
@@ -327,7 +326,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 		foreach (i, o : overloads)
 		{
 			if (i > 0) md_buf.append(", ");
-			md_buf.appendf("`%s`", cursor::spelling(query::receiver_type_expr(o), tmem));
+			md_buf.appendf("`%s`", cursor::spelling(query::receiver_type_expr(o), tmem) ?? "");
 		}
 	}
 	if (doc_comment.len > 0) md_buf.appendf("\n\n%s", doc_comment);
@@ -344,7 +343,7 @@ fn String? code_hover(LspProject* project, SourceFile* sf, Location loc) @local
 
 		if (call_ctx.found_call)
 		{
-			String expansion = macro_expand::expand_macro(project.workspace.ctx, sf, call_ctx.found_call, decl_node.as(MacroDecl));
+			String expansion = macro_expand::expand_macro(project.workspace.ctx, sf, call_ctx.found_call, decl_node.as(MacroDecl)) ?? "";
 			String trimmed_expansion = expansion.trim();
 			if (trimmed_expansion.len > 0 && trimmed_expansion != "{}" && trimmed_expansion != "{\n}")
 			{

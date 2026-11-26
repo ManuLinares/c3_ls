@@ -143,7 +143,7 @@ fn void run() {
 
 	// 2. mod_b::priv_b() must NOT resolve because mod_b does not have @public
 	LspPosition pos_b = { .line = 5, .character = 12 };
-	LspLocation[] locs_b = definition::goto_definition(&proj, doc_uri, pos_b)!!;
+	LspLocation[] locs_b = definition::goto_definition(&proj, doc_uri, pos_b) ?? {};
 	test::eq(locs_b.len, 0);
 }
 
@@ -207,7 +207,7 @@ fn void run() {
 
 	// Line 5, col 6: local_action() in section 2 cannot access @local symbol from section 1
 	LspPosition pos = { .line = 5, .character = 6 };
-	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, pos) ?? {};
 	test::eq(locs.len, 0);
 
 	String h = hover::hover(&proj, doc_uri, pos) ?? "";

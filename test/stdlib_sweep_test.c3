@@ -70,7 +70,7 @@ fn void sweep() @test
 		}
 		foreach (full : paths)
 		{
-			SourceFile* sf = proj.workspace.get_source_file_by_path(full);
+			SourceFile* sf = proj.workspace.get_source_file_by_path(full)!!;
 			if (!sf)
 			{
 				io::fprintfn(&out, "NOFILE\t%s", full)!!;

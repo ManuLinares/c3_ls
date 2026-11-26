@@ -45,12 +45,12 @@ fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Alloc
 <*
  File whose AST owns `node`, or null.
 *>
-fn SourceFile* file_of(AnalyzerContext* context, Node* node)
+fn SourceFile*? file_of(AnalyzerContext* context, Node* node)
 {
-	if (!node) return null;
+	if (!node) return NOT_FOUND~;
 	SourceFile*[] files = context.files_by_node_id.array_view();
 	sz index = sort::binarysearch(files, null, &starts_after, &node.id) - 1;
-	return index >= 0 && files[index].contains_node(node) ? files[index] : null;
+	return index >= 0 && files[index].contains_node(node) ? files[index] : NOT_FOUND~;
 }
 
 <*

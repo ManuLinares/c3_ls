@@ -14,7 +14,7 @@ struct IdentExpr
 {
 	inline Node node;
 	Ident* ident;
-	Node* path_expr;
+	NullableNode path_expr;
 }
 
 struct PathExpr
@@ -46,8 +46,8 @@ struct TypeExpr
 	{
 		struct unresolved
 		{
-			Ident* name;
-			Node* path;
+			NullableIdent name;
+			NullableNode path;
 		}
 
 		struct modify
@@ -60,7 +60,7 @@ struct TypeExpr
 		struct array
 		{
 			Node* base;
-			Node* len_expr;
+			NullableNode len_expr;
 		}
 
 		struct generic
@@ -83,7 +83,7 @@ struct CallExpr
 	inline Node node;
 	bool is_outer_call;
 	Node* callee;
-	Node* macro_body_expr;
+	NullableNode macro_body_expr;
 	NodeArray args;
 	NodeArray attributes;
 }
@@ -91,10 +91,9 @@ struct CallExpr
 struct ContractExpr
 {
 	inline Node node;
-	Node* pinpoint;
+	NullableNode pinpoint;
 	Node* exprs;
-	Ident**comment;
-	Node* expr_string;
+	NullableNode expr_string;
 }
 
 struct ExprList
@@ -154,8 +153,8 @@ struct CondExpr
 struct CatchExpr
 {
 	inline Node node;
-	Node* variable;
-	Node* type;
+	NullableNode variable;
+	NullableNode type;
 	NodeArray exprs;
 }
 
@@ -166,8 +165,8 @@ struct TryExpr
 {
 	inline Node node;
 	Node* variable;
-	Node* type;
-	Node* init;
+	NullableNode type;
+	NullableNode init;
 	Node* next;
 }
 
@@ -186,7 +185,7 @@ struct TernaryExpr
 struct MacroBodyExpr
 {
 	inline Node node;
-	Node* body;
+	NullableNode body;
 	NodeArray args;
 }
 
@@ -210,7 +209,7 @@ struct SplatExpr
 struct VasplatExpr
 {
 	inline Node node;
-	Node* range_expr;
+	NullableNode range_expr;
 }
 
 struct NamedArgExpr
@@ -238,7 +237,7 @@ struct LambdaExpr
 	inline Node node;
 	NodeArray attributes;
 	NodeArray params;
-	Node* return_type;
+	NullableNode return_type;
 	Node* body;
 }
 
@@ -281,11 +280,11 @@ struct DesignatorExpr
 {
 	inline Node node;
 	DesignatorKind designator_kind;
-	Node* path;
+	NullableNode path;
 
 	union data
 	{
-		Node* field;
+		NullableNode field;
 		Node* range;
 	}
 }
@@ -313,7 +312,7 @@ struct AccessExpr
 	inline Node node;
 	AccessKind access_kind;
 	Node* left;
-	Node* member;
+	NullableNode member;
 }
 
 struct MaybeDerefExpr
@@ -332,8 +331,8 @@ struct RangeExpr
 	RangeKind range_kind;
 	bool start_from_end;
 	bool end_from_end;
-	Node* start;
-	Node* end;
+	NullableNode start;
+	NullableNode end;
 }
 
 struct OptionalExpr
@@ -372,7 +371,7 @@ struct CtStringifyExpr
 struct VaargExpr
 {
 	inline Node node;
-	Node* expr;
+	NullableNode expr;
 	bool start_from_end;
 }
 

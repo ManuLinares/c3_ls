@@ -26,8 +26,8 @@ fn void type_ident()
 	io::printn(mod.nodes[1].kind);
 	FnDecl* fn_decl = mod.nodes[1].as(FnDecl);
 	VarDecl* var_decl = fn_decl.params[1].as(VarDecl);
-	TypeExpr* type_expr = var_decl.type.as(TypeExpr);
-	test::eq(type_expr.unresolved.name.text, "Bar");
+	TypeExpr* type_expr = var_decl.type.get()!!.as(TypeExpr);
+	test::eq(type_expr.unresolved.name.text(), "Bar");
 }
 
 fn void global_array_pointer()
@@ -46,10 +46,10 @@ fn void global_array_pointer()
 
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
-	test::eq(decl.name.text, "FOO");
+	test::eq(decl.name.text(), "FOO");
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 
 	switch (type_data.type_kind)
 	{
@@ -64,7 +64,7 @@ fn void global_array_pointer()
 				test::ne(inner_type.array.len_expr, null);
 
 				test::eq(inner_type.array.base.as(TypeExpr).type_kind, TypeExprKind.TYPE_IDENTIFIER);
-				test::eq(inner_type.array.len_expr.kind, NodeKind.LITERAL_EXPR);
+				test::eq(inner_type.array.len_expr.get()!!.kind, NodeKind.LITERAL_EXPR);
 				break;
 			default:
 				assert(false, "Expected TYPE_ARRAY directly wrapped under pointer modifier");
@@ -95,22 +95,22 @@ fn void optional()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 	test::eq(type_data.optional, true);
 
 	Node* target_node_2 = mod.nodes[2];
 	VarDecl* decl_2     = target_node_2.as(VarDecl);
 	test::eq(decl_2.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl_2.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data_2 = decl_2.type.as(TypeExpr);
+	test::eq(decl_2.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data_2 = decl_2.type.get()!!.as(TypeExpr);
 	test::eq(type_data_2.optional, true);
 
 	Node* target_node_3 = mod.nodes[3];
 	VarDecl* decl_3     = target_node_3.as(VarDecl);
 	test::eq(decl_3.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl_3.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data_3 = decl_3.type.as(TypeExpr);
+	test::eq(decl_3.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data_3 = decl_3.type.get()!!.as(TypeExpr);
 	test::eq(type_data_3.optional, true);
 }
 
@@ -131,17 +131,17 @@ fn void global_inferred_array_pointer()
 
 	// Inferred-length array: TYPE_ARRAY with no length expression.
 	VarDecl* foo = mod.nodes[1].as(VarDecl);
-	test::eq(foo.name.text, "FOO");
+	test::eq(foo.name.text(), "FOO");
 	test::eq(foo.var_kind, VarDeclKind.VAR_GLOBAL);
-	TypeExpr* foo_type = foo.type.as(TypeExpr);
+	TypeExpr* foo_type = foo.type.get()!!.as(TypeExpr);
 	test::eq(foo_type.type_kind, TypeExprKind.TYPE_ARRAY);
 	test::eq(foo_type.array.base.as(TypeExpr).type_kind, TypeExprKind.TYPE_IDENTIFIER);
 	test::eq(foo_type.array.len_expr, null);
 
 	// Pointer to array: TYPE_POINTER wrapping TYPE_ARRAY with a length.
 	VarDecl* bar = mod.nodes[2].as(VarDecl);
-	test::eq(bar.name.text, "bar");
-	TypeExpr* bar_type = bar.type.as(TypeExpr);
+	test::eq(bar.name.text(), "bar");
+	TypeExpr* bar_type = bar.type.get()!!.as(TypeExpr);
 	test::eq(bar_type.type_kind, TypeExprKind.TYPE_POINTER);
 	TypeExpr* inner = bar_type.modify.base.as(TypeExpr);
 	test::eq(inner.type_kind, TypeExprKind.TYPE_ARRAY);
@@ -164,10 +164,10 @@ fn void global_generic()
 	Module* mod = context.modules.get("hello")!!;
 
 	VarDecl* decl = mod.nodes[2].as(VarDecl);
-	test::eq(decl.name.text, "CHANNELS");
+	test::eq(decl.name.text(), "CHANNELS");
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 
 	switch (type_data.type_kind)
 	{
@@ -211,10 +211,10 @@ fn void global_vec()
 	Module* mod = context.modules.get("hello")!!;
 	test::eq(mod.nodes.len(), 2);
 	VarDecl* decl = mod.nodes[1].as(VarDecl);
-	test::eq(decl.name.text, "CHANNELS");
+	test::eq(decl.name.text(), "CHANNELS");
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 
 	switch (type_data.type_kind)
 	{
@@ -245,9 +245,9 @@ fn void typeof_typefrom()
 	Module* mod = context.modules.get("hello")!!;
 
 	MacroDecl* mac = mod.nodes[1].as(MacroDecl);
-	CompoundStmt* comp = mac.body.as(CompoundStmt);
+	CompoundStmt* comp = mac.body.get()!!.as(CompoundStmt);
 	VarDecl* vardecl = comp.statements[0].as(VarDecl);
-	TypeExpr* type = vardecl.type.as(TypeExpr);
+	TypeExpr* type = vardecl.type.get()!!.as(TypeExpr);
 	test::eq(type.type_kind, TypeExprKind.TYPE_TYPEFROM);
 
 	AccessExpr* access = type.expr.as(AccessExpr);
@@ -255,6 +255,6 @@ fn void typeof_typefrom()
 	test::eq(left.type_kind, TypeExprKind.TYPE_TYPEOF);
 	test::eq(left.expr.as(IdentExpr).ident.text, "value");
 
-	IdentExpr* member = access.member.as(IdentExpr);
+	IdentExpr* member = access.member.get()!!.as(IdentExpr);
 	test::eq(member.ident.text, "inner");
 }

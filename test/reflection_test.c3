@@ -169,7 +169,7 @@ fn void test() {
 	assert(found_size);
 	// 2. Unimported private `Point` does not jump to std::crypto::ed25519
 	LspPosition point_pos = {.line = 4,.character = 4 };
-	LspLocation[] locs = definition::goto_definition(&proj, app_uri, point_pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, point_pos) ?? {};
 	assert(locs.len == 0);
 }
 
@@ -342,7 +342,7 @@ fn void run() {
 	assert(fn_locs[0].range.start.line == 1);
 	// 2. Struct in @private section of same file is not accessible to consumer
 	LspPosition sk_pos = {.line = 4,.character = 4 };
-	LspLocation[] sk_locs = definition::goto_definition(&proj, app_uri, sk_pos)!!;
+	LspLocation[] sk_locs = definition::goto_definition(&proj, app_uri, sk_pos) ?? {};
 	assert(sk_locs.len == 0);
 }
 

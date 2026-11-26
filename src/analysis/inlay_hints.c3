@@ -45,7 +45,7 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 		case CALL_EXPR:
 			{
 				CallExpr* call = c.as(CallExpr);
-				if (!call.callee || call.args.len == 0) break;
+				if (call.args.len == 0) break;
 
 				if (!ctx.project.workspace.ctx) break;
 				CallTarget target = query::call_target(ctx.project.workspace.ctx, ctx.sf, call);
@@ -66,7 +66,7 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 					if (!param_node || param_node.kind != VAR_DECL) continue;
 					VarDecl* pdecl = param_node.as(VarDecl);
 
-					String pname = pdecl.name ? pdecl.name.text.strip_prefix("#").strip_prefix("$") : "";
+					String pname = pdecl.name.get().text.strip_prefix("#").strip_prefix("$") ?? "";
 					if (pname.len == 0) continue;
 
 					ctx.hints.push(
@@ -92,8 +92,7 @@ fn ChildVisitResult collect_inlay_hints_callback(Node* c, Node* p, void* user_da
 
 fn InlayHint[]? get_inlay_hints(LspProject* project, Uri uri, LspRange range)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
 
 	List{InlayHint} hints;
 	hints.tinit();

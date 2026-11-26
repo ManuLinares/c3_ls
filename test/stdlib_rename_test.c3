@@ -52,7 +52,7 @@ fn void stdlib_symbol_renameable_from_stdlib_file() @test
 		proj.workspace.process_file(APP_PATH, APP);
 
 		String std_file = ((String)path::tnew(server::std_path)!!.tappend("std/io/path.c3")!!).treplace("\\", "/");
-		SourceFile* sf = proj.workspace.get_source_file_by_path(std_file);
+		SourceFile* sf = proj.workspace.get_source_file_by_path(std_file)!!;
 		assert(sf != null, "%s not loaded", std_file);
 		Uri std_uri = uri::from_file_path(tmem, std_file);
 		LspPosition decl = pos_of(sf.content, "fn Path? temp_directory");

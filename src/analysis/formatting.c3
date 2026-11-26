@@ -1638,8 +1638,8 @@ fn String apply_text_edits(Allocator allocator, String content, TextEdit[] edits
 *>
 fn TextEdit[]? format_document(LspProject* project, Uri uri, FormattingOptions options)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || sf.content.len == 0) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (sf.content.len == 0) return {};
 
 	Lexer* lexer = lexer::create(project.workspace.ctx, sf.content, true);
 	defer lexer::free(project.workspace.ctx, lexer);
@@ -1657,8 +1657,8 @@ fn TextEdit[]? format_document(LspProject* project, Uri uri, FormattingOptions o
 *>
 fn TextEdit[]? format_range(LspProject* project, Uri uri, LspRange range, FormattingOptions options)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || sf.content.len == 0) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (sf.content.len == 0) return {};
 
 	Lexer* lexer = lexer::create(project.workspace.ctx, sf.content, true);
 	defer lexer::free(project.workspace.ctx, lexer);

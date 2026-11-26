@@ -636,7 +636,7 @@ fn void main() {
 	LspPosition pos = { .line = 6, .character = 11 };
 
 	// 1. Goto definition must return 0 locations (must not jump to mem_lib::free)
-	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos)!!;
+	LspLocation[] locs = definition::goto_definition(&proj, app_uri, pos) ?? {};
 	test::eq(locs.len, 0);
 
 	// 2. Hover must be empty (must not display signature of mem_lib::free)
@@ -1265,6 +1265,6 @@ fn void test_hover_on_top_level_include_without_node()
 	proj.workspace.process_file("/virtual/include.c3", source);
 
 	(void)hover::hover(&proj, doc_uri, { .line = 1, .character = 0 })!!;
-	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/include.c3");
+	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/include.c3")!!;
 	(void)query::member_binding_at(proj.workspace.ctx, sf, { .line = 1, .column = 0 }, null);
 }

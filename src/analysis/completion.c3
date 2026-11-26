@@ -60,7 +60,7 @@ struct Context
 	bool missing_second_colon;
 	bool is_designated_initializer;
 	bool designated_has_dot;
-	Node* switch_node;
+	NullableNode switch_node;
 	bool is_stmt;
 }
 
@@ -172,7 +172,7 @@ fn int append_placeholders(DString* out, CallParam[] params) @local
  Parameters with defaults and variadic parameters are left out, so required
  parameters after a left-out one are named.
 *>
-fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_method, Node* body_params, bool is_void, InsertTextFormat* format) @local
+fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_method, NullableNode body_params, bool is_void, InsertTextFormat* format) @local
 {
 	*format = PLAIN_TEXT;
 	if (has_lparen_ahead(ctx)) return name;
@@ -189,26 +189,30 @@ fn String call_insert_text(Context* ctx, String name, NodeArray params, bool is_
 		if (i == 0 && is_method) continue;
 		if (!param || param.kind != VAR_DECL) continue;
 		VarDecl* vd = param.as(VarDecl);
-		if (!vd.name || vd.var_flags.is_variadic || vd.var_flags.is_macro_optional_ellipsis) continue;
-		if (vd.init_expr)
+		Ident*? param_name = vd.name.get();
+		if (catch param_name) continue;
+		if (vd.var_flags.is_variadic || vd.var_flags.is_macro_optional_ellipsis) continue;
+		if (@ok(vd.init_expr.get()))
 		{
 			skipped = true;
 			continue;
 		}
-		required.push({ vd.name.text, skipped });
+		required.push({ param_name.text, skipped });
 	}
 	int placeholders = append_placeholders(&out, required.array_view());
 
-	BodyParamDecl* body = body_params && body_params.kind == BODY_PARAM_DECL ? body_params.as(BodyParamDecl) : null;
-	if (body)
+	if (try body_node = body_params.get())
 	{
+		BodyParamDecl* body = body_node.as(BodyParamDecl);
 		bool has_body_names;
 		foreach (param : body.params)
 		{
-			if (!param || param.kind != VAR_DECL || !param.as(VarDecl).name) continue;
+			if (!param || param.kind != VAR_DECL) continue;
+			Ident*? param_name = param.as(VarDecl).name.get();
+			if (catch param_name) continue;
 			out.append(has_body_names ? ", " : "; ");
 			has_body_names = true;
-			append_snippet_text(&out, param.as(VarDecl).name.text);
+			append_snippet_text(&out, param_name.text);
 		}
 		out.append(")\n{\n\t$0\n}");
 		if (ctx.is_stmt && !follows_arrow(ctx)) out.append_char(';');
@@ -255,19 +259,9 @@ fn void add_symbol_completion(
 		case FN_DECL:
 			{
 				FnDecl* fd = node.as(FnDecl);
-				bool is_void = false;
-				if (fd.ret_type)
-				{
-					String rt = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
-					node_type = rt;
-					if (rt == "void") is_void = true;
-				}
-				else
-				{
-					is_void = true;
-				}
-
-				insert_text = call_insert_text(ctx, insert_text, fd.params, fd.associated_type != null, null, is_void, &format);
+				String rt = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+				node_type = rt;
+				insert_text = call_insert_text(ctx, insert_text, fd.params, @ok(fd.associated_type.get()), {}, rt == "void", &format);
 			}
 		case MACRO_DECL:
 			{
@@ -295,7 +289,7 @@ fn void add_symbol_completion(
 		case VAR_DECL:
 			{
 				VarDecl* decl = node.as(VarDecl);
-				if (decl.type) node_type = cursor::raw_type_identifier(decl.type) ?? "";
+				node_type = cursor::raw_type_identifier(decl.type.get()) ?? "";
 			}
 		default:
 			break;
@@ -442,8 +436,8 @@ fn bool is_type_position(Context* ctx)
 		{
 			if (stmt && stmt.range.contains(ctx.loc) && (stmt.kind == FN_DECL || stmt.kind == MACRO_DECL))
 			{
-				Node* body = (stmt.kind == FN_DECL) ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
-				if (!body || !body.range.contains(ctx.loc)) return true;
+				NullableNode body = stmt.kind == FN_DECL ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
+				if (!body.contains(ctx.loc)) return true;
 			}
 		}
 		// Elsewhere `(` opens a call, a cast or a group: values fit as well as types.
@@ -535,7 +529,9 @@ fn void provide_labels(Context* ctx, List{CompletionItem}* items, Location loc, 
 {
 	foreach (i, stmt : query::enclosing_labeled(ctx.sf, loc))
 	{
-		String name = query::label_of(stmt).text;
+		Ident*? label = query::label_of(stmt);
+		if (catch label) continue;
+		String name = label.text;
 		if (!fuzzy_match(name, ctx.prefix)) continue;
 		switch (jump)
 		{
@@ -648,7 +644,7 @@ fn void provide_attrmacros(Context* ctx, List{CompletionItem}* items)
 	{
 		if (!attr_info || !attr_info.node) return;
 		AttrdefDecl* ad = attr_info.node.as(AttrdefDecl);
-		String aname = ad.name ? ad.name.text : "";
+		String aname = ad.name.text();
 		if (aname.len == 0) return;
 
 		if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, attr_info.node, attr_info.mod))
@@ -814,10 +810,10 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 		case VAR_DECL:
 			{
 				VarDecl* vd = c.as(VarDecl);
-				String vname = vd.name ? vd.name.text : "";
+				String vname = vd.name.text();
 				if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
 				{
-					String vtype = vd.type ? (cursor::spelling(vd.type, tmem) ?: "var") : "var";
+					String vtype = declaration::type_text(lctx.ctx.ws.ctx, vd.type) ?: "var";
 					if (lctx.seen.add(vname))
 					{
 						String sort_prefix = "0001";
@@ -842,16 +838,16 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 		case TRY_EXPR:
 			{
 				TryExpr* te = c.as(TryExpr);
-				if (!te.variable || te.variable.kind != IDENT_EXPR) break;
+				if (te.variable.kind != IDENT_EXPR) break;
 				IdentExpr* ie = te.variable.as(IdentExpr);
-				String vname = ie.ident ? ie.ident.text : "";
+				String vname = ie.ident.text;
 				if (vname.len == 0 || (lctx.ctx.prefix.len > 0 && !vname.starts_with(lctx.ctx.prefix))) break;
 				if (!lctx.seen.add(vname)) break;
 
-				String vtype = te.type ? (cursor::spelling(te.type, tmem) ?: "var") : "var";
-				if (vtype == "var" && te.init && lctx.ctx.ws && lctx.ctx.ws.ctx)
+				String vtype = declaration::type_text(lctx.ctx.ws.ctx, te.type) ?: "var";
+				if (try init = te.init.get() && vtype == "var" && lctx.ctx.ws && lctx.ctx.ws.ctx)
 				{
-					String itype = query::type_of(lctx.ctx.ws.ctx, lctx.ctx.sf, te.init, lctx.loc);
+					String itype = query::type_of(lctx.ctx.ws.ctx, lctx.ctx.sf, init, lctx.loc);
 					itype = itype.trim_right("?*& \t");
 					if (itype.len > 0) vtype = itype;
 				}
@@ -875,15 +871,14 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 		case CATCH_EXPR:
 			{
 				CatchExpr* ce = c.as(CatchExpr);
-				if (ce.variable && ce.variable.kind == IDENT_EXPR)
+				if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR)
 				{
-					IdentExpr* ie = ce.variable.as(IdentExpr);
-					String vname = ie.ident ? ie.ident.text : "";
+					String vname = variable.as(IdentExpr).ident.text;
 					if (vname.len > 0 && (lctx.ctx.prefix.len == 0 || vname.starts_with(lctx.ctx.prefix)))
 					{
 						if (lctx.seen.add(vname))
 						{
-							String vtype = ce.type ? (cursor::spelling(ce.type, tmem) ?: "fault") : "fault";
+							String vtype = declaration::type_text(lctx.ctx.ws.ctx, ce.type) ?: "fault";
 							String sort_prefix = "0001";
 							if (lctx.ctx.expected_type.len > 0)
 							{
@@ -907,10 +902,10 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 		case FOREACH_STMT:
 			{
 				ForeachStmt* fst = c.as(ForeachStmt);
-				if (fst.index && fst.index.kind == VAR_DECL)
+				if (try index = fst.index.get() && index.kind == VAR_DECL)
 				{
-					VarDecl* ivd = fst.index.as(VarDecl);
-					String iname = ivd.name ? ivd.name.text : "";
+					VarDecl* ivd = index.as(VarDecl);
+					String iname = ivd.name.text();
 					if (iname.len > 0 && (lctx.ctx.prefix.len == 0 || iname.starts_with(lctx.ctx.prefix)))
 					{
 						if (lctx.seen.add(iname))
@@ -929,15 +924,15 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 						}
 					}
 				}
-				if (fst.variable && fst.variable.kind == VAR_DECL)
+				if (fst.variable.kind == VAR_DECL)
 				{
 					VarDecl* vvd = fst.variable.as(VarDecl);
-					String vname = vvd.name ? vvd.name.text : "";
+					String vname = vvd.name.text();
 					if (vname.len > 0 && (lctx.ctx.prefix.len == 0 || vname.starts_with(lctx.ctx.prefix)))
 					{
 						if (lctx.seen.add(vname))
 						{
-							String vtype = vvd.type ? (cursor::spelling(vvd.type, tmem) ?: "var") : "var";
+							String vtype = declaration::type_text(lctx.ctx.ws.ctx, vvd.type) ?: "var";
 							lctx.items.push(
 							{
 								.label = vname,
@@ -1130,7 +1125,7 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 		Node* p = params[i];
 		if (!p || p.kind != VAR_DECL) continue;
 		VarDecl* vd = p.as(VarDecl);
-		String raw_name = vd.name ? vd.name.text : "";
+		String raw_name = vd.name.text();
 		if (raw_name.len == 0 || vd.var_flags.is_variadic) continue;
 
 		String pname = raw_name.strip_prefix("#").strip_prefix("$");
@@ -1144,7 +1139,7 @@ fn void provide_named_args(Context* ctx, List{CompletionItem}* items)
 
 		if (fuzzy_match(pname, ctx.prefix))
 		{
-			String ptype = vd.type ? (cursor::spelling(vd.type, tmem) ?: "any") : "any";
+			String ptype = declaration::type_text(ctx.ws.ctx, vd.type) ?: "any";
 			String sort_prefix = (param_pos_idx == (sz)target_info.active_param) ? "0002" : "0004";
 			items.push(
 			{
@@ -1257,7 +1252,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 				FnDecl* fndecl = fn_info.node.as(FnDecl);
 				if (!fndecl.associated_type)
 				{
-					String fname = fndecl.name ? fndecl.name.text : "";
+					String fname = fndecl.name.text();
 					if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 					{
 						if (seen_symbols.add(fname))
@@ -1291,7 +1286,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 				MacroDecl* mac = mac_info.node.as(MacroDecl);
 				if (!@ok(mac.associated_type.get()))
 				{
-					String mname = mac.name ? mac.name.text : "";
+					String mname = mac.name.text();
 					if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
 					{
 						if (seen_symbols.add(mname))
@@ -1325,7 +1320,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 						{
 							if (!fault_node || fault_node.kind != FAULT_DECL) continue;
 							FaultDecl* fdecl = fault_node.as(FaultDecl);
-							String fname = fdecl.name ? fdecl.name.text : "";
+							String fname = fdecl.name.text();
 							if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 							{
 								if (seen_symbols.add(fname))
@@ -1339,7 +1334,7 @@ fn void provide_global(Context* ctx, List{CompletionItem}* items)
 					if (stmt.kind == FAULT_DECL)
 					{
 						FaultDecl* fdecl = stmt.as(FaultDecl);
-						String fname = fdecl.name ? fdecl.name.text : "";
+						String fname = fdecl.name.text();
 						if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 						{
 							if (seen_symbols.add(fname))
@@ -1460,8 +1455,9 @@ fn String active_param_type(Context* ctx, SourceFile* sf, CallTargetInfo info) @
 	sz index = info.active_param + target.first_param;
 	if (index >= target.params.len) return "";
 	Node* param = target.params[index];
-	if (!param || param.kind != VAR_DECL || !param.as(VarDecl).type) return "";
-	Node* type = param.as(VarDecl).type;
+	if (!param || param.kind != VAR_DECL) return "";
+	Node*? type = param.as(VarDecl).type.get();
+	if (catch type) return "";
 	return (cursor::raw_type_identifier(type) ?? cursor::spelling(type, tmem)).trim_right("*& \t");
 }
 
@@ -1484,8 +1480,18 @@ fn String designated_struct_at(Context* ctx, SourceFile* sf) @local
 {
 	String type = initializer_slot_type(ctx, sf);
 	if (type.len == 0) return "";
-	Node* type_node = query::find_type_node_in_context(ctx.ws.ctx, sf, type, ctx.loc);
-	return type_node && type_node.kind == STRUCT_DECL ? type : "";
+	if (try type_node = query::find_type_node_in_context(ctx.ws.ctx, sf, type, ctx.loc) && type_node.kind == STRUCT_DECL) return type;
+	return "";
+}
+
+<*
+ Type `name` in scope at the cursor, or else the first workspace symbol of that name.
+*>
+fn Node*? type_or_symbol(Context* ctx, String name) @local
+{
+	if (try node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, name, ctx.loc)) return node;
+	List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(name, ctx.sf);
+	return syms.len() > 0 && syms.get(0).node ? syms.get(0).node : NOT_FOUND~;
 }
 
 fn void detect_access_context(Context* ctx, SourceFile* sf)
@@ -1567,7 +1573,7 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 				if (name == word || name.ends_with(string::tformat("::%s", word))) names_module = true;
 			}
 		}
-		bool names_type = ctx.ws && ctx.ws.ctx && word.len && (constants::is_primitive(word) || query::find_type_node_in_context(ctx.ws.ctx, sf, word, ctx.loc));
+		bool names_type = ctx.ws && ctx.ws.ctx && word.len && (constants::is_primitive(word) || @ok(query::find_type_node_in_context(ctx.ws.ctx, sf, word, ctx.loc)));
 		if (ctx.prefix.len > 0 || (!names_module && !names_type))
 		{
 			ctx.access = NONE;
@@ -1624,17 +1630,28 @@ fn void detect_access_context(Context* ctx, SourceFile* sf)
 	}
 }
 
-fn void inject_vector_swizzles(List{CompletionItem}* items, String prefix)
+const String[] SWIZZLES @local = { "x", "y", "z", "w", "r", "g", "b", "a", "xy", "yx", "xx", "yy", "xz", "yz", "zx", "zy", "zz", "xyz", "xzy", "yxz", "yzx", "zxy", "zyx", "xyzw", "rgba" };
+
+<*
+ Components of the vector `type`, as many as its length when that is known.
+*>
+fn void inject_vector_swizzles(List{CompletionItem}* items, String prefix, String type)
 {
-	List{String} comps;
-	comps.tinit();
-	foreach (set : query::SWIZZLE_SETS)
+	sz length = 4;
+	if (try open = type.rindex_of("[<"))
 	{
-		foreach (i, c : set) comps.push(set[i:1]);
+		String digits = type[open + 2..].strip_suffix(">]");
+		if (try n = digits.to_int()) length = n;
 	}
-	comps.push_all({ "xy", "yx", "xx", "yy", "xz", "yz", "zx", "zy", "zz", "xyz", "xzy", "yxz", "yzx", "zxy", "zyx", "xyzw", "rgba" });
-	foreach (c : comps)
+	foreach (c : SWIZZLES)
 	{
+		bool fits = true;
+		foreach (ch : c)
+		{
+			sz index = query::SWIZZLE_SETS[0].index_of_char(ch) ?? query::SWIZZLE_SETS[1].index_of_char(ch) ?? 0;
+			if (index >= length) fits = false;
+		}
+		if (!fits) continue;
 		if (prefix.len == 0 || c.starts_with(prefix))
 		{
 			items.push(
@@ -1659,174 +1676,52 @@ fn void provide_interface_methods(Context* ctx, List{CompletionItem}* items, Nod
 {
 	if (depth >= query::MAX_ALIAS_DEPTH) return;
 	InterfaceDecl* id = iface.as(InterfaceDecl);
-	String owner = id.name ? id.name.text : "";
+	String owner = id.name.text();
 	foreach (m : id.methods)
 	{
-		if (!m || m.kind != FN_DECL || !m.as(FnDecl).name) continue;
-		String name = m.as(FnDecl).name.text;
+		if (!m || m.kind != FN_DECL) continue;
+		Ident*? method_name = m.as(FnDecl).name.get();
+		if (catch method_name) continue;
+		String name = method_name.text;
 		if (fuzzy_match(name, ctx.prefix) && seen_methods.add(name)) add_symbol_completion(ctx, items, name, m, owner, ctx.prefix);
 	}
 	foreach (parent : id.interfaces)
 	{
-		Node* parent_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, cursor::raw_type_identifier(parent) ?? "", ctx.loc);
-		if (parent_node && parent_node.kind == INTERFACE_DECL) provide_interface_methods(ctx, items, parent_node, seen_methods, depth + 1);
+		if (try parent_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, cursor::raw_type_identifier(parent) ?? "", ctx.loc) && parent_node.kind == INTERFACE_DECL)
+		{
+			provide_interface_methods(ctx, items, parent_node, seen_methods, depth + 1);
+		}
 	}
 }
 
 fn void provide_methods_for_type(Context* ctx, List{CompletionItem}* items, String type_name, HashSet{String}* seen_methods)
 {
-	if (!ctx.ws || !ctx.ws.ctx || type_name.len == 0) return;
-
-	String clean_type = type_name.trim_right("*& \t");
-	if (try brace_idx = clean_type.index_of_char('{'))
+	if (!ctx.ws || !ctx.ws.ctx || !ctx.ws.ctx.registry || type_name.len == 0) return;
+	AnalyzerContext* actx = ctx.ws.ctx;
+	String[][] platforms;
+	foreach (source : query::method_sources(actx, ctx.sf, ctx.loc, type_name))
 	{
-		clean_type = clean_type[:brace_idx].trim();
-	}
-	clean_type = clean_type.trim_right("*& \t");
-
-	Registry* reg = ctx.ws.ctx.registry;
-	if (reg)
-	{
-		reg.functions.@each(; qname, fn_info)
+		String clean_type = query::generic_base(source).trim_right("*&? \t");
+		bool any_element = query::has_unknown_element(actx, ctx.sf, clean_type, ctx.loc);
+		FixedList{String, 2} keys;
+		keys.push(query::method_key(clean_type));
+		if (query::is_vector_type(clean_type)) keys.push(query::ANY_VECTOR);
+		foreach (key : keys)
 		{
-			FunctionInfo* curr = fn_info;
-			while (curr != null)
+			query::@each_declaration(actx.registry.methods_by_type, key; MethodInfo* m)
 			{
-				if (curr.node && curr.node.kind == FN_DECL)
+				Node* method = m.node;
+				String name = cursor::decl_name(method).text ?? "";
+				if (name.len > 0 && fuzzy_match(name, ctx.prefix)
+					&& (query::is_matching_associated_type(query::receiver_type_expr(method), clean_type, source, any_element) ?? false)
+					&& query::is_symbol_accessible_at(actx, ctx.sf, ctx.loc, method, m.mod)
+					&& query::compiled_for(actx, ctx.sf, ctx.loc, method, &platforms)
+					&& query::if_conditions_hold(actx, method, source)
+					&& seen_methods.add(name))
 				{
-					FnDecl* fndecl = curr.node.as(FnDecl);
-					if (fndecl.associated_type && query::is_matching_associated_type(fndecl.associated_type, clean_type, type_name))
-					{
-						if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, curr.node, curr.mod))
-						{
-							String mname = fndecl.name ? fndecl.name.text : "";
-							if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
-							{
-								if (seen_methods.add(mname))
-								{
-									add_symbol_completion(ctx, items, mname, curr.node, clean_type, ctx.prefix);
-								}
-							}
-						}
-					}
+					add_symbol_completion(ctx, items, name, method, clean_type, ctx.prefix);
 				}
-				curr = curr.next;
-			}
-		};
-
-		reg.macros.@each(; qname, mac_info)
-		{
-			MacroInfo* curr = mac_info;
-			while (curr != null)
-			{
-				if (curr.node && curr.node.kind == MACRO_DECL)
-				{
-					MacroDecl* mac = curr.node.as(MacroDecl);
-					if (try assoc_node = mac.associated_type.get())
-					{
-						if (query::is_matching_associated_type(assoc_node, clean_type, type_name))
-						{
-							if (query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, ctx.loc, curr.node, curr.mod))
-							{
-								String mname = mac.name ? mac.name.text : "";
-								if (mname.len > 0 && fuzzy_match(mname, ctx.prefix))
-								{
-									if (seen_methods.add(mname))
-									{
-										add_symbol_completion(ctx, items, mname, curr.node, clean_type, ctx.prefix);
-									}
-								}
-							}
-						}
-					}
-				}
-				curr = curr.next;
-			}
-		};
-	}
-
-	Node* type_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, clean_type, ctx.loc);
-	if (type_node)
-	{
-		switch (type_node.kind)
-		{
-			case TYPEDEF_DECL:
-				{
-					TypedefDecl* td = type_node.as(TypedefDecl);
-					if (td.is_inline && td.base_type)
-					{
-						String base_type_str = cursor::raw_type_identifier(td.base_type) ?? cursor::spelling(td.base_type, tmem);
-						if (base_type_str.len > 0 && base_type_str != clean_type)
-						{
-							provide_methods_for_type(ctx, items, base_type_str, seen_methods);
-						}
-					}
-				}
-			case ALIAS_DECL:
-				{
-					AliasDecl* ad = type_node.as(AliasDecl);
-					if (ad.target)
-					{
-						if (ad.target.kind == TERNARY_EXPR)
-						{
-							TernaryExpr* ter = ad.target.as(TernaryExpr);
-							if (ter.then_expr)
-							{
-								String t_type = cursor::raw_type_identifier(ter.then_expr) ?? cursor::spelling(ter.then_expr, tmem);
-								t_type = t_type.trim_right("*& \t");
-								if (t_type.len > 0 && t_type != clean_type)
-								{
-									provide_methods_for_type(ctx, items, t_type, seen_methods);
-								}
-							}
-							if (ter.else_expr)
-							{
-								String e_type = cursor::raw_type_identifier(ter.else_expr) ?? cursor::spelling(ter.else_expr, tmem);
-								e_type = e_type.trim_right("*& \t");
-								if (e_type.len > 0 && e_type != clean_type)
-								{
-									provide_methods_for_type(ctx, items, e_type, seen_methods);
-								}
-							}
-						}
-						else
-						{
-							String target_type = cursor::raw_type_identifier(ad.target) ?? cursor::spelling(ad.target, tmem);
-							target_type = target_type.trim_right("*& \t");
-							if (target_type.len > 0 && target_type != clean_type)
-							{
-								provide_methods_for_type(ctx, items, target_type, seen_methods);
-							}
-						}
-					}
-				}
-			case STRUCT_DECL:
-				{
-					StructDecl* sd = type_node.as(StructDecl);
-					foreach (field : sd.fields)
-					{
-						if (!field || field.kind != VAR_DECL) continue;
-						VarDecl* vd = field.as(VarDecl);
-						if (vd.var_flags.is_inline && vd.type)
-						{
-							String sub_type = cursor::raw_type_identifier(vd.type) ?? "";
-							if (sub_type.len > 0 && sub_type != clean_type)
-							{
-								provide_methods_for_type(ctx, items, sub_type, seen_methods);
-							}
-						}
-					}
-					foreach (inter : sd.interfaces)
-					{
-						String inter_type = cursor::raw_type_identifier(inter) ?? "";
-						if (inter_type.len > 0 && inter_type != clean_type)
-						{
-							provide_methods_for_type(ctx, items, inter_type, seen_methods);
-						}
-					}
-				}
-			default:
-				break;
+			};
 		}
 	}
 }
@@ -1840,7 +1735,7 @@ fn void provide_enum_variants(List{CompletionItem}* items, Node* enum_node, Stri
 	{
 		if (!variant || variant.kind != VAR_DECL) continue;
 		VarDecl* var_decl = variant.as(VarDecl);
-		String vname = var_decl.name ? var_decl.name.text : "";
+		String vname = var_decl.name.text();
 		if (vname.len > 0 && fuzzy_match(vname, prefix))
 		{
 			String insert_str = missing_second_colon ? string::tformat(":%s", vname) : vname;
@@ -1892,10 +1787,10 @@ fn void provide_enum_associated_params(List{CompletionItem}* items, Node* enum_n
 	{
 		if (!param || param.kind != VAR_DECL) continue;
 		VarDecl* vd = param.as(VarDecl);
-		String pname = vd.name ? vd.name.text : "";
+		String pname = vd.name.text();
 		if (pname.len > 0 && fuzzy_match(pname, prefix))
 		{
-			String ptype = vd.type ? (cursor::raw_type_identifier(vd.type) ?? "") : "";
+			String ptype = cursor::raw_type_identifier(vd.type.get()) ?? "";
 			items.push(
 			{
 				.label = pname,
@@ -1978,12 +1873,12 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* item
 			VarDecl* fdecl = field.as(VarDecl);
 			while (fdecl != null)
 			{
-				String fname = fdecl.name ? fdecl.name.text : "";
+				String fname = fdecl.name.text();
 				if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 				{
 					if (seen_fields.add(fname))
 					{
-						String ftype = cursor::spelling(fdecl.type, tmem);
+						String ftype = declaration::type_text(ctx.ws.ctx, fdecl.type);
 						String insert_str = fname;
 						InsertTextFormat format = PLAIN_TEXT;
 						if (ctx.is_designated_initializer)
@@ -2012,22 +1907,11 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* item
 						);
 					}
 				}
-				if (fdecl.var_flags.is_inline && fdecl.type)
+				if (try sub_type = cursor::inline_type(fdecl))
 				{
-					String sub_type = cursor::raw_type_identifier(fdecl.type) ?? cursor::spelling(fdecl.type, tmem);
-					sub_type = sub_type.trim_right("*& \t");
-					if (sub_type.len > 0)
+					if (try sub_node = type_or_symbol(ctx, sub_type) && sub_node.kind == STRUCT_DECL)
 					{
-						Node* sub_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, sub_type, ctx.loc);
-						if (!sub_node && ctx.ws)
-						{
-							List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(sub_type, ctx.sf);
-							if (syms.len() > 0 && syms.get(0).node) sub_node = syms.get(0).node;
-						}
-						if (sub_node && sub_node.kind == STRUCT_DECL)
-						{
-							collect_struct_fields_recursive(ctx, items, sub_node, sub_type, seen_fields);
-						}
+						collect_struct_fields_recursive(ctx, items, sub_node, sub_type, seen_fields);
 					}
 				}
 				fdecl = fdecl.next ? fdecl.next.as(VarDecl) : null;
@@ -2036,9 +1920,9 @@ fn void collect_struct_fields_recursive(Context* ctx, List{CompletionItem}* item
 		else if (field.kind == STRUCT_DECL)
 		{
 			StructDecl* sub = field.as(StructDecl);
-			if (sub.name != null)
+			if (try sub_name = sub.name.get())
 			{
-				String sname = sub.name.text;
+				String sname = sub_name.text;
 				if (sname.len > 0 && fuzzy_match(sname, ctx.prefix) && seen_fields.add(sname))
 				{
 					String kind_str = sub.is_union ? "union" : (sub.is_bitstruct ? "bitstruct" : "struct");
@@ -2213,10 +2097,10 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 					// Nothing tells yet which module the prefix means, so every one it can name is offered.
 					List{Module*} mods;
 					mods.tinit();
-					query::resolve_module_for_prefix(ctx.ws.ctx, ctx.sf, loc, base_id, all: &mods);
+					(void)query::resolve_module_for_prefix(ctx.ws.ctx, ctx.sf, loc, base_id, all: &mods);
 					if (!mods.len())
 					{
-						if (Module* found = analysis::find_module_by_identifier(ctx.ws, "", base_id)) mods.push(found);
+						if (try found = analysis::find_module_by_identifier(ctx.ws, "", base_id)) mods.push(found);
 					}
 					foreach (mod : mods)
 					{
@@ -2235,7 +2119,7 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 									if (!query::is_symbol_accessible_at(ctx.ws.ctx, ctx.sf, loc, fault_node, mod.name)) continue;
 
 									FaultDecl* fdecl = fault_node.as(FaultDecl);
-									String fname = fdecl.name ? fdecl.name.text : "";
+									String fname = fdecl.name.text();
 									if (fname.len > 0 && fuzzy_match(fname, ctx.prefix))
 									{
 										add_symbol_completion(ctx, items, fname, fault_node, base_id, ctx.prefix);
@@ -2301,6 +2185,16 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 			{
 				Location loc = { .line = (int)ctx.position.line, .column = (int)ctx.position.character };
 				String type_name = ctx.is_designated_initializer ? base_id : type_of_text(ctx, ctx.sf, base_id);
+				// An alias is the type it names.
+				for (int depth = 0; depth < query::MAX_ALIAS_DEPTH; depth++)
+				{
+					Node*? decl = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, query::generic_base(type_name), ctx.loc);
+					if (catch decl) break;
+					if (decl.kind != ALIAS_DECL) break;
+					String target = query::aliased_type(ctx.ws.ctx, ctx.sf, type_name);
+					if (!target.len) break;
+					type_name = target;
+				}
 				String clean_type = type_name;
 				if (try brace_idx = type_name.index_of_char('{'))
 				{
@@ -2314,23 +2208,14 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 				HashSet{String} seen_methods;
 				seen_methods.tinit();
 
-				Node* type_node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, clean_type, ctx.loc);
-				if (!type_node && ctx.ws)
-				{
-					List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(clean_type, ctx.sf);
-					if (syms.len() > 0 && syms.get(0).node)
-					{
-						type_node = syms.get(0).node;
-					}
-				}
-
-				if (type_node && type_node.kind == ENUM_DECL)
+				Node*? type_node = type_or_symbol(ctx, clean_type);
+				if (try type_node && type_node.kind == ENUM_DECL)
 				{
 					bool is_type_access = false;
 					if (base_id == clean_type || base_id.ends_with(string::tformat("::%s", clean_type)))
 					{
 						String dummy = "";
-						if (!query::find_local_decl_in_file(ctx.sf, base_id, &dummy, ctx.ws ? ctx.ws.ctx : null, loc))
+						if (!@ok(query::find_local_decl_in_file(ctx.sf, base_id, &dummy, ctx.ws ? ctx.ws.ctx : null, loc)))
 						{
 							is_type_access = true;
 						}
@@ -2350,21 +2235,26 @@ fn bool provide_member_access(Context* ctx, List{CompletionItem}* items)
 
 				if (query::is_vector_type(clean_type))
 				{
-					inject_vector_swizzles(items, ctx.prefix);
+					inject_vector_swizzles(items, ctx.prefix, clean_type);
 				}
 
-				if (type_node && type_node.kind == INTERFACE_DECL) provide_interface_methods(ctx, items, type_node, &seen_methods);
+				if (try type_node && type_node.kind == INTERFACE_DECL) provide_interface_methods(ctx, items, type_node, &seen_methods);
 
 				// Typedefs and aliases keep the fields of the struct they stand for; only an inline typedef keeps the methods.
-				Node* fields_node = type_node;
+				Node*? fields_node = type_node;
 				String fields_type = type_name;
-				for (int depth = 0; depth < query::MAX_ALIAS_DEPTH && fields_node && (fields_node.kind == TYPEDEF_DECL || fields_node.kind == ALIAS_DECL); depth++)
+				for (int depth = 0; depth < query::MAX_ALIAS_DEPTH; depth++)
 				{
-					fields_type = query::aliased_type(ctx.ws.ctx, ctx.sf, fields_type);
-					fields_node = fields_type.len ? query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, query::generic_base(fields_type), ctx.loc) : null;
+					if (try node = fields_node && (node.kind == TYPEDEF_DECL || node.kind == ALIAS_DECL))
+					{
+						fields_type = query::aliased_type(ctx.ws.ctx, ctx.sf, fields_type);
+						fields_node = fields_type.len ? query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, query::generic_base(fields_type), ctx.loc) : NOT_FOUND~;
+						continue;
+					}
+					break;
 				}
 
-				if (fields_node && fields_node.kind == STRUCT_DECL)
+				if (try fields_node && fields_node.kind == STRUCT_DECL)
 				{
 					HashSet{String} seen_fields;
 					seen_fields.tinit();
@@ -2516,8 +2406,8 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 					case FN_DECL:
 					case MACRO_DECL:
 						{
-							Node* body = (stmt.kind == FN_DECL) ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
-							if (!body || !body.range.contains(loc))
+							NullableNode body = stmt.kind == FN_DECL ? stmt.as(FnDecl).body : stmt.as(MacroDecl).body;
+							if (!body.contains(loc))
 							{
 								*out_target = FUNCTION;
 								return true;
@@ -2556,12 +2446,12 @@ fn bool detect_attribute_context(Context* ctx, Location loc, AttributeTargetKind
 			{
 				if (stmt && stmt.range.contains(loc))
 				{
-					if (stmt.kind == FN_DECL && stmt.as(FnDecl).body && stmt.as(FnDecl).body.range.contains(loc))
+					if (stmt.kind == FN_DECL && stmt.as(FnDecl).body.contains(loc))
 					{
 						inside_fn = true;
 						break;
 					}
-					if (stmt.kind == MACRO_DECL && stmt.as(MacroDecl).body && stmt.as(MacroDecl).body.range.contains(loc))
+					if (stmt.kind == MACRO_DECL && stmt.as(MacroDecl).body.contains(loc))
 					{
 						inside_fn = true;
 						break;
@@ -2588,9 +2478,9 @@ fn void collect_already_handled_cases(Node* switch_node, Location loc, HashSet{S
 	foreach (c : cases)
 	{
 		if (!c || c.kind != CASE_STMT || c.range.contains(loc)) continue;
-		Node* value = c.as(CaseStmt).expr;
-		if (value && value.kind == ACCESS_EXPR) value = value.as(AccessExpr).member;
-		if (value && value.kind == IDENT_EXPR && value.as(IdentExpr).ident) out_set.add(value.as(IdentExpr).ident.text);
+		Node*? value = c.as(CaseStmt).expr;
+		if (try v = value && v.kind == ACCESS_EXPR) value = v.as(AccessExpr).member.get();
+		if (try v = value && v.kind == IDENT_EXPR) out_set.add(v.as(IdentExpr).ident.text);
 	}
 }
 
@@ -2628,15 +2518,12 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 				if (stmt && stmt.range.contains(loc) && stmt.kind == FN_DECL)
 				{
 					FnDecl* fd = stmt.as(FnDecl);
-					if (fd.ret_type)
+					String rtype = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
+					rtype = rtype.trim_right("*&? \t");
+					if (rtype.len > 0)
 					{
-						String rtype = cursor::raw_type_identifier(fd.ret_type) ?? cursor::spelling(fd.ret_type, tmem);
-						rtype = rtype.trim_right("*&? \t");
-						if (rtype.len > 0)
-						{
-							if (out_expected_type) *out_expected_type = rtype;
-							return TYPE_ASSIGNMENT;
-						}
+						if (out_expected_type) *out_expected_type = rtype;
+						return TYPE_ASSIGNMENT;
 					}
 					break;
 				}
@@ -2650,16 +2537,16 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 		String rem = text_before_case.strip_prefix("$case").strip_prefix("case").trim();
 		if (rem.len == 0 || rem == ":" || rem.starts_with(".."))
 		{
-			Node* switch_node = query::enclosing_switch(ctx.sf, loc);
-			Node* cond = null;
-			if (switch_node) cond = switch_node.kind == SWITCH_STMT ? switch_node.as(SwitchStmt).cond : switch_node.as(CtSwitchStmt).cond;
+			Node*? switch_node = query::enclosing_switch(ctx.sf, loc);
+			Node*? cond = NOT_FOUND~;
+			if (try sw = switch_node) cond = sw.kind == SWITCH_STMT ? sw.as(SwitchStmt).cond.get() : sw.as(CtSwitchStmt).cond.get();
 			// `switch (a, b)` switches on its last expression.
-			if (cond && cond.kind == COND_EXPR) cond = cond.as(CondExpr).exprs.len ? cond.as(CondExpr).exprs[^1] : null;
-			String switch_type = cond && ctx.ws && ctx.ws.ctx ? query::type_of(ctx.ws.ctx, ctx.sf, cond, loc) : "";
+			if (try c = cond && c.kind == COND_EXPR) cond = c.as(CondExpr).exprs.len ? c.as(CondExpr).exprs[^1] : NOT_FOUND~;
+			String switch_type = ctx.ws && ctx.ws.ctx ? (query::type_of(ctx.ws.ctx, ctx.sf, cond, loc) ?? "") : "";
 			if (switch_type.len > 0)
 			{
 				if (out_expected_type) *out_expected_type = switch_type;
-				ctx.switch_node = switch_node;
+				ctx.switch_node = ast::@nullable(switch_node);
 				return TYPE_ASSIGNMENT;
 			}
 		}
@@ -2775,13 +2662,13 @@ fn ScopeKind detect_completion_scope(Context* ctx, String* out_expected_type, Lo
 					case FN_DECL:
 						{
 							FnDecl* fd = stmt.as(FnDecl);
-							if (fd.body && fd.body.range.contains(loc)) return in_parens ? EXPRESSION : EXECUTION;
+							if (fd.body.contains(loc)) return in_parens ? EXPRESSION : EXECUTION;
 							return GLOBAL;
 						}
 					case MACRO_DECL:
 						{
 							MacroDecl* md = stmt.as(MacroDecl);
-							if (md.body && md.body.range.contains(loc)) return in_parens ? EXPRESSION : EXECUTION;
+							if (md.body.contains(loc)) return in_parens ? EXPRESSION : EXECUTION;
 							return GLOBAL;
 						}
 					case STRUCT_DECL:
@@ -2803,24 +2690,14 @@ fn void provide_expected_type_completions(Context* ctx, List{CompletionItem}* it
 {
 	if (!ctx.ws || type_name.len == 0) return;
 
-	Node* node = query::find_type_node_in_context(ctx.ws.ctx, ctx.sf, type_name, ctx.loc);
-	if (!node)
-	{
-		List{SymbolEntry} syms = ctx.ws.find_symbol_by_name(type_name, ctx.sf);
-		if (syms.len() > 0 && syms.get(0).node)
-		{
-			node = syms.get(0).node;
-		}
-	}
-
-	if (node && node.kind == ENUM_DECL)
+	if (try node = type_or_symbol(ctx, type_name) && node.kind == ENUM_DECL)
 	{
 		EnumDecl* ed = node.as(EnumDecl);
 		foreach (variant : ed.variants)
 		{
 			if (!variant || variant.kind != VAR_DECL) continue;
 			VarDecl* vd = variant.as(VarDecl);
-			String vname = vd.name ? vd.name.text : "";
+			String vname = vd.name.text();
 			if (excluded_names && excluded_names.contains(vname)) continue;
 			if (vname.len > 0 && fuzzy_match(vname, ctx.prefix))
 			{
@@ -2856,7 +2733,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 
 	if (item.kind == KEYWORD) return;
 
-	Node* target_node = null;
+	Node*? target_node = NOT_FOUND~;
 
 	if (item.data.len > 0)
 	{
@@ -2883,8 +2760,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 			String doc_comment = "";
 			if (project.workspace.ctx)
 			{
-				Module* mod = analysis::find_module_by_identifier(&project.workspace, "", mod_name);
-				if (mod && mod.module_decls.len() > 0)
+				if (try mod = analysis::find_module_by_identifier(&project.workspace, "", mod_name) && mod.module_decls.len() > 0)
 				{
 					doc_comment = declaration::docs((Node*)mod.module_decls.get(0));
 				}
@@ -2915,7 +2791,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 				{
 					foreach (v : syms.get(0).node.as(EnumDecl).variants)
 					{
-						if (v && v.kind == VAR_DECL && v.as(VarDecl).name && v.as(VarDecl).name.text == variant_name)
+						if (v && v.kind == VAR_DECL && v.as(VarDecl).name.is(variant_name))
 						{
 							target_node = v;
 							break;
@@ -2958,8 +2834,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 			if (base.len > 0 && project.workspace.ctx)
 			{
 				AnalyzerContext* actx = project.workspace.ctx;
-				Module* mod = analysis::find_module_by_identifier(&project.workspace, "", base);
-				if (mod)
+				if (try mod = analysis::find_module_by_identifier(&project.workspace, "", base))
 				{
 					String qname = string::tformat("%s::%s", mod.name, sym);
 					if (actx.registry)
@@ -2977,7 +2852,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 							target_node = ty_info.node;
 						}
 					}
-					if (!target_node)
+					if (catch target_node)
 					{
 						foreach (n : mod.nodes)
 						{
@@ -2989,13 +2864,13 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 								{
 									if (!fault_node || fault_node.kind != FAULT_DECL) continue;
 									FaultDecl* fdecl = fault_node.as(FaultDecl);
-									if (fdecl.name && fdecl.name.text == sym)
+									if (fdecl.name.is(sym))
 									{
 										target_node = fault_node;
 										break;
 									}
 								}
-								if (target_node) break;
+								if (@ok(target_node)) break;
 							}
 							String sname = cursor::spelling(n, tmem);
 							if (sname == sym || sname.strip_prefix("@") == sym.strip_prefix("@"))
@@ -3007,13 +2882,9 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 					}
 				}
 
-				if (!target_node)
+				if (catch target_node)
 				{
-					target_node = query::find_method_in_type(actx, base, sym);
-				}
-				if (!target_node)
-				{
-					target_node = query::find_member_in_type(actx, base, sym);
+					target_node = query::find_method_in_type(actx, base, sym) ?? query::find_member_in_type(actx, base, sym);
 				}
 			}
 		}
@@ -3035,7 +2906,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 
 	String sym_name = item.label;
 
-	if (!target_node)
+	if (catch target_node)
 	{
 		List{SymbolEntry} syms = project.workspace.find_symbol_by_name(sym_name);
 		if (syms.len() == 0 && sym_name.starts_with("@"))
@@ -3048,7 +2919,7 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 		}
 	}
 
-	if (!target_node) return;
+	if (catch target_node) return;
 
 	DString md_buf;
 	md_buf.tinit();
@@ -3081,8 +2952,8 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 	List{CompletionItem} items;
 	items.init(tmem);
 
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf) return items.array_view();
+	SourceFile*? sf = project.workspace.get_source_file_by_path(uri.path);
+	if (catch sf) return items.array_view();
 
 	sz offset = utils::compute_byte_offset(sf.content, pos.line, pos.character);
 
@@ -3223,26 +3094,18 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 		bool is_enum_expected = false;
 		if (expected_type.len > 0 && project.workspace.ctx)
 		{
-			Node* node = query::find_type_node_in_context(project.workspace.ctx, sf, expected_type, loc);
-			if (!node)
-			{
-				List{SymbolEntry} syms = project.workspace.find_symbol_by_name(expected_type, sf);
-				if (syms.len() > 0 && syms.get(0).node) node = syms.get(0).node;
-			}
-			if (node && node.kind == ENUM_DECL)
-			{
-				is_enum_expected = true;
-			}
+			if (try node = type_or_symbol(&ctx, expected_type) && node.kind == ENUM_DECL) is_enum_expected = true;
 		}
 
 		if (is_enum_expected)
 		{
-			bool in_switch = ctx.switch_node != null;
+			Node*? switch_node = ctx.switch_node.get();
+			bool in_switch = @ok(switch_node);
 			HashSet{String} seen_cases;
 			seen_cases.tinit();
-			if (in_switch && ctx.sf)
+			if (try switch_node && ctx.sf)
 			{
-				collect_already_handled_cases(ctx.switch_node, ctx.loc, &seen_cases);
+				collect_already_handled_cases(switch_node, ctx.loc, &seen_cases);
 			}
 			provide_named_args(&ctx, &items);
 			provide_expected_type_completions(&ctx, &items, expected_type, in_switch ? &seen_cases : null);

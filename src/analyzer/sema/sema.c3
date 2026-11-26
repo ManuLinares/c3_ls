@@ -55,7 +55,7 @@ fn void analyze_imports(SemaContext* ctx)
 		{
 			if (!path || path.kind != PATH_EXPR) continue;
 			PathExpr* expr = path.as(PathExpr);
-			String full_path = expr.path ? expr.path.text.strip_suffix("::") : "";
+			String full_path = expr.path.text.strip_suffix("::");
 			if (full_path.len == 0) continue;
 
 			bool found_module = ctx.context.modules.has_key(full_path);
@@ -63,14 +63,14 @@ fn void analyze_imports(SemaContext* ctx)
 			{
 				String prefix = string::tformat("%s::", full_path);
 				String suffix = string::tformat("::%s", full_path);
-				ctx.context.modules.@each(; mod_name, m)
+				foreach (mod_name : ctx.context.modules.key_iter())
 				{
 					if (mod_name.starts_with(prefix) || mod_name.ends_with(suffix))
 					{
 						found_module = true;
 						break;
 					}
-				};
+				}
 			}
 
 			if (!found_module)

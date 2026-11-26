@@ -9,17 +9,18 @@ fn void apply_implicit_self_type(ParseContext* ctx, Node* param, Node* assoc)
 {
 	if (!param || param.kind != VAR_DECL) return;
 	VarDecl* vd = param.as(VarDecl);
-	if (vd.type) return;
+	if (@ok(vd.type.get())) return;
 	vd.var_flags.is_self = true;
 	if (!vd.var_flags.is_self_by_ref)
 	{
-		vd.type = assoc;
+		vd.type.set(assoc);
 		return;
 	}
 	TypeExpr* ptr = ctx.ast.alloc_node(TypeExpr, assoc.range);
 	ptr.type_kind = TYPE_POINTER;
+	ptr.flags.is_synthetic = true;
 	ptr.modify.base = assoc;
-	vd.type = (Node*)ptr;
+	vd.type.set(ptr);
 }
 
 <*
@@ -62,14 +63,14 @@ fn Node* parse_fn_decl(ContextScope scope)
 			return (Node*)node;
 	}
 	// C3 spec Section 5.3.2: First parameter of a method implicitly has the associated type if omitted
-	if (node.associated_type != null && node.params.len > 0)
+	if (try assoc = node.associated_type.get() && node.params.len > 0)
 	{
-		apply_implicit_self_type(ctx, node.params[0], node.associated_type);
+		apply_implicit_self_type(ctx, node.params[0], assoc);
 	}
 
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 
 	switch (ctx.current.kind)
@@ -96,11 +97,6 @@ fn bool parse_fn_name_and_type(ContextScope scope, FnDecl* func) @local
 	ParseFlags flags = scope.flags;
 
 	func.ret_type = parse_type_expr(scope);
-	if (!func.ret_type)
-	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected return type");
-		return false;
-	}
 
 	switch (is_type(ctx))
 	{
@@ -113,18 +109,19 @@ fn bool parse_fn_name_and_type(ContextScope scope, FnDecl* func) @local
 
 			diagnostics::log_debug("parse_fn - set associated: %s", ctx.current.value);
 
-			func.associated_type = parse_type_expr(scope);
-			if (!func.associated_type) return false;
+			Node* associated_type = parse_type_expr(scope);
+			if (!associated_type) return false;
+			func.associated_type.set(associated_type);
 
 			if (expect(ctx, func, DOT).kind == ERROR) return false;
 
 			Token t = expect(ctx, func, IDENT);
 			if (t.kind == ERROR) return false;
-			func.name = ctx.ident(t);
+			func.name.set(ctx.ident(t));
 		case false:
 			Token t = expect(ctx, func, IDENT);
 			if (t.kind == ERROR) return false;
-			func.name = ctx.ident(t);
+			func.name.set(ctx.ident(t));
 	}
 
 	return true;
@@ -151,15 +148,13 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 				ctx.ast.error(start);
 				return false;
 			}
-			func.body = parse_compound_stmt(scope.with_flags(
+			Node* body = parse_compound_stmt(scope.with_flags(
 			{
 				.is_local
 			}
 			));
-			if (func.body)
-			{
-				func.range.end = func.body.range.end;
-			}
+			func.body.set(body);
+			if (body) func.range.end = body.range.end;
 		case IMPLIES:
 			advance(ctx);
 			if (flags.is_extern)
@@ -168,15 +163,13 @@ fn bool parse_fn_body(ContextScope scope, FnDecl* func)
 				ctx.ast.error(start);
 				return false;
 			}
-			func.body = parse_short_body(scope.with_flags(
+			Node* body = parse_short_body(scope.with_flags(
 			{
 				.is_local
 			}
 			), true);
-			if (func.body)
-			{
-				func.range.end = func.body.range.end;
-			}
+			func.body.set(body);
+			if (body) func.range.end = body.range.end;
 		case EOS:
 			func.range.end = ctx.current.range.end;
 			advance(ctx);

@@ -84,8 +84,8 @@ fn bool parse_and_register(AnalyzerContext* context, String buffer, String path)
 *>
 fn bool analyze_file(AnalyzerContext* context, String path) => @pool()
 {
-	SourceFile* source = context.files.get(path) ?? null;
-	if (!source) return false;
+	SourceFile*? source = context.files.get(path);
+	if (catch source) return false;
 
 	SemaContext* sema_ctx = sema::create(context, tmem);
 	sema::analyze_source_file(sema_ctx, source);

@@ -20,14 +20,14 @@ fn String get_node_symbol_name(Node* node)
 		case symbol_name.len == 0 && node.kind == IDENT_EXPR:
 			{
 				IdentExpr* ident_expr = node.as(IdentExpr);
-				return ident_expr.ident ? ident_expr.ident.text : "";
+				return ident_expr.ident.text;
 			}
 		case symbol_name.len == 0 && node.kind == TYPE_EXPR:
 			{
 				return cursor::raw_type_identifier(node) ?? "";
 			}
-		case symbol_name.len == 0 && query::label_of(node) != null:
-			return query::label_of(node).text;
+		case symbol_name.len == 0:
+			return query::label_of(node).text ?? "";
 		default:
 			return symbol_name;
 	}
@@ -95,9 +95,9 @@ fn CompletionItemKind to_completion_kind(Node* node)
 	}
 }
 
-fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_name, String identifier)
+fn Module*? find_module_by_identifier(LspWorkspace* ws, String current_module_name, String identifier)
 {
-	if (!ws.ctx) return null;
+	if (!ws.ctx) return NOT_FOUND~;
 
 	String scoped_path = "";
 	if (current_module_name.len > 0)
@@ -113,7 +113,7 @@ fn Module* find_module_by_identifier(LspWorkspace* ws, String current_module_nam
 		if (mod_name.ends_with(suffix_path)) return mod;
 	};
 
-	return null;
+	return NOT_FOUND~;
 }
 
 fn LspRange to_lsp_range(Range r)
@@ -153,7 +153,7 @@ fn void collect_file_symbols(
 				if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 				if (!f || f.kind != FAULT_DECL) continue;
 				FaultDecl* fdecl = f.as(FaultDecl);
-				String fname = fdecl.name ? fdecl.name.text : "";
+				String fname = fdecl.name.text();
 				if (fname.len > 0 && (query_lower.len == 0 || fname.to_lower_tcopy().contains(query_lower)))
 				{
 					out_symbols.push(
@@ -177,23 +177,21 @@ fn void collect_file_symbols(
 			case MODULE_DECL:
 				{
 					ModuleDecl* md = stmt.as(ModuleDecl);
-					sname = (md.path && md.path.kind == PATH_EXPR && md.path.as(PathExpr).path)
-						? md.path.as(PathExpr).path.text
-						: "module";
+					sname = md.path.get().as(PathExpr).path.text ?? "module";
 				}
 			case FN_DECL:
 				{
 					FnDecl* fd = stmt.as(FnDecl);
-					sname = fd.name ? fd.name.text : "";
+					sname = fd.name.text();
 					if (fd.associated_type)
 					{
-						container = cursor::raw_type_identifier(fd.associated_type) ?? "";
+						container = cursor::raw_type_identifier(fd.associated_type.get()) ?? "";
 					}
 				}
 			case MACRO_DECL:
 				{
 					MacroDecl* md = stmt.as(MacroDecl);
-					sname = md.name ? md.name.text : "";
+					sname = md.name.text();
 					if (try assoc_node = md.associated_type.get())
 					{
 						container = cursor::raw_type_identifier(assoc_node) ?? "";
@@ -228,7 +226,7 @@ fn void collect_file_symbols(
 						if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 						if (!f || f.kind != VAR_DECL) continue;
 						VarDecl* vd = f.as(VarDecl);
-						String fname = vd.name ? vd.name.text : "";
+						String fname = vd.name.text();
 						if (fname.len > 0 && (query_lower.len == 0 || fname.to_lower_tcopy().contains(query_lower)))
 						{
 							out_symbols.push(
@@ -250,7 +248,7 @@ fn void collect_file_symbols(
 						if (max_symbols > 0 && out_symbols.len() >= max_symbols) break;
 						if (!v || v.kind != VAR_DECL) continue;
 						VarDecl* vd = v.as(VarDecl);
-						String vname = vd.name ? vd.name.text : "";
+						String vname = vd.name.text();
 						if (vname.len > 0 && (query_lower.len == 0 || vname.to_lower_tcopy().contains(query_lower)))
 						{
 							out_symbols.push(

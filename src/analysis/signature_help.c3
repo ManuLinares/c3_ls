@@ -3,8 +3,8 @@ import analyzer, lsp, uri, std::collections::list, std::io;
 
 fn SignatureHelpResult? signature_help(LspProject* project, Uri uri, LspPosition pos)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !project.workspace.ctx) return {.signatures = {} };
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!project.workspace.ctx) return {.signatures = {} };
 
 	sz offset = utils::compute_byte_offset(sf.content, pos.line, pos.character);
 

@@ -3,6 +3,31 @@ import analyzer::core, std::collections::list, std::collections::ref;
 
 alias NodeArray = Node*[];
 alias NullableNode = Nullable{Node};
+alias NullableIdent = Nullable{Ident};
+alias NullableGenerics = Nullable{GenericDecl};
+alias NullableType = Nullable{Type};
+
+<*
+ Text of the name, or "" when there is none.
+*>
+fn String NullableIdent.text(self) => self.get().text ?? "";
+fn bool NullableIdent.is(self, String text) => self.text() == text;
+
+<*
+ Whether the field holds `node`.
+*>
+fn bool NullableNode.is(self, Node* node) => (self.get() == node) ?? false;
+
+<*
+ Whether the field holds a node whose range contains `loc`.
+*>
+fn bool NullableNode.contains(self, Location loc) => self.get().range.contains(loc) ?? false;
+
+<*
+ The result of a pointer lookup as a Nullable reference, for storing it: null when the lookup found nothing.
+ `$Typeof(#lookup!!)` only names the pointer type; it is never evaluated, so it cannot panic.
+*>
+macro @nullable(#lookup) => ref::nullable(#lookup ?? ($Typeof(#lookup!!))null);
 
 typedef NodeID = inline ulong;
 
@@ -15,6 +40,8 @@ bitstruct NodeFlags : ushort
 	bool is_extern;
 	bool has_attributes;
 	bool has_error;
+	<* Made by the parser, with no source text of its own. *>
+	bool is_synthetic;
 }
 
 struct Node
@@ -24,7 +51,7 @@ struct Node
 	NodeFlags flags;
 	Range range;
 	NodeID id;
-	Type* resolved_type;
+	NullableType resolved_type;
 }
 
 <*
@@ -65,7 +92,6 @@ macro Ast.alloc_node(&self, $Type, Range range)
 	node.kind = NodeKind.$eval(@typename_to_constname($Type::name));
 	node.range = range;
 	node.id = next_node_id++;
-	node.resolved_type = null;
 	self.nodes.push(node);
 
 	return node;

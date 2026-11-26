@@ -110,7 +110,7 @@ fn void parse_macro_params(ContextScope scope, Node* macro_node)
 			body_param_node.params = parse_parameter_list(scope);
 		}
 
-		mac.body_params = (Node*)body_param_node;
+		mac.body_params.set(body_param_node);
 	}
 
 	expect(ctx, mac, RPAREN);
@@ -199,7 +199,7 @@ fn Node* parse_contract_param(ContextScope scope)
 
 	if (ctx.current.kind != ELLIPSIS)
 	{
-		node.ident = ctx.ident(ctx.current);
+		node.ident.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 
@@ -207,7 +207,7 @@ fn Node* parse_contract_param(ContextScope scope)
 	{
 		if (ctx.is(STRING_LITERAL))
 		{
-			node.description = ctx.ident(ctx.current);
+			node.description.set(ctx.ident(ctx.current));
 			advance(ctx);
 		}
 		else
@@ -219,7 +219,7 @@ fn Node* parse_contract_param(ContextScope scope)
 	else if (ctx.is(STRING_LITERAL))
 	{
 		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' before description string");
-		node.description = ctx.ident(ctx.current);
+		node.description.set(ctx.ident(ctx.current));
 		advance(ctx);
 		node.flags.has_error = true;
 	}
@@ -314,7 +314,7 @@ fn Node* parse_short_body(ContextScope scope, bool is_regular)
 		.end = expr ? expr.range.end : ctx.peek(-1).range.end
 	};
 
-	bool is_macro_call = (expr.kind == CALL_EXPR && expr.as(CallExpr).macro_body_expr);
+	bool is_macro_call = expr.kind == CALL_EXPR && @ok(expr.as(CallExpr).macro_body_expr.get());
 
 	switch (is_macro_call)
 	{
@@ -330,7 +330,7 @@ fn Node* parse_short_body(ContextScope scope, bool is_regular)
 		case false:
 			{
 				ReturnStmt* ret = ctx.ast.alloc_node(ReturnStmt, full_range);
-				ret.expr = expr;
+				ret.expr.set(expr);
 				stmt = (Node*)ret;
 			}
 	}

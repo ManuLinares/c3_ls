@@ -84,9 +84,9 @@ fn void statement_ranges_end_at_their_last_token() @test
 	Node*[] first = mem::temp_array(Node*, NodeKind::values.len);
 	foreach (stmt : sf.ast.statements) cursor::visit(stmt, null, { .on_enter = &first_of_kind }, &first);
 	Node* generic_type;
-	foreach (stmt : first[NodeKind.FN_DECL.ordinal].as(FnDecl).body.as(CompoundStmt).statements)
+	foreach (stmt : first[NodeKind.FN_DECL.ordinal].as(FnDecl).body.get()!!.as(CompoundStmt).statements)
 	{
-		if (stmt.kind == VAR_DECL && stmt.as(VarDecl).name.text == "bx") generic_type = stmt.as(VarDecl).type;
+		if (stmt.kind == VAR_DECL && stmt.as(VarDecl).name.is("bx")) generic_type = stmt.as(VarDecl).type.get()!!;
 	}
 
 	assert(ends_with(first[NodeKind.COMPOUND_STMT.ordinal], "x = 4;\n}"));

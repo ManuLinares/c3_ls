@@ -11,9 +11,9 @@ macro BinaryExpr* init_of(String statement)
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind != FN_DECL) continue;
-		Node* decl = stmt.as(FnDecl).body.as(CompoundStmt).statements[1];
+		Node* decl = stmt.as(FnDecl).body.get()!!.as(CompoundStmt).statements[1];
 		assert(decl.kind == VAR_DECL, "statement: %s", decl.kind);
-		return decl.as(VarDecl).init_expr.as(BinaryExpr);
+		return decl.as(VarDecl).init_expr.get()!!.as(BinaryExpr);
 	}
 	unreachable("no fn");
 }

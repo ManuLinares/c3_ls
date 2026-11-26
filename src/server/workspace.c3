@@ -116,10 +116,10 @@ fn void LspWorkspace.free(&self)
 <*
  Retrieves a parsed SourceFile by its normalized path identifier.
 *>
-fn SourceFile* LspWorkspace.get_source_file_by_path(&self, String path)
+fn SourceFile*? LspWorkspace.get_source_file_by_path(&self, String path)
 {
-	if (!self.ctx) return null;
-	return self.ctx.files.get(path) ?? null;
+	if (!self.ctx) return NOT_FOUND~;
+	return self.ctx.files.get(path);
 }
 
 fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, SourceFile* sf = null, Location loc = { -1, -1 })
@@ -136,56 +136,29 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 			if (!sf || query::is_module_visible_at(self.ctx, sf, loc, mod_name))
 			{
 				String qname = string::tformat("%s::%s", mod_name, name);
-				FunctionInfo* fn_info = self.ctx.registry.functions.get(qname) ?? null;
-				while (fn_info != null)
+				query::@each_declaration(self.ctx.registry.functions, qname; FunctionInfo* fn_info)
 				{
-					if (fn_info.node && fn_info.node.kind != ERROR)
+					if (fn_info.node && fn_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, fn_info.node, mod_name)))
 					{
-						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, fn_info.node, mod_name))
-						{
-							results.push(
-							{
-								.node = fn_info.node,.section_id = 0
-							}
-							);
-						}
+						results.push({ .node = fn_info.node, .section_id = 0 });
 					}
-					fn_info = fn_info.next;
-				}
+				};
 
-				TypeInfo* ty_info = self.ctx.registry.types.get(qname) ?? null;
-				while (ty_info != null)
+				query::@each_declaration(self.ctx.registry.types, qname; TypeInfo* ty_info)
 				{
-					if (ty_info.node && ty_info.node.kind != ERROR)
+					if (ty_info.node && ty_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, ty_info.node, mod_name)))
 					{
-						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, ty_info.node, mod_name))
-						{
-							results.push(
-							{
-								.node = ty_info.node,.section_id = 0
-							}
-							);
-						}
+						results.push({ .node = ty_info.node, .section_id = 0 });
 					}
-					ty_info = ty_info.next;
-				}
+				};
 
-				MacroInfo* mac_info = self.ctx.registry.macros.get(qname) ?? null;
-				while (mac_info != null)
+				query::@each_declaration(self.ctx.registry.macros, qname; MacroInfo* mac_info)
 				{
-					if (mac_info.node && mac_info.node.kind != ERROR)
+					if (mac_info.node && mac_info.node.kind != ERROR && (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, mac_info.node, mod_name)))
 					{
-						if (!sf || query::is_symbol_accessible_at(self.ctx, sf, loc, mac_info.node, mod_name))
-						{
-							results.push(
-							{
-								.node = mac_info.node,.section_id = 0
-							}
-							);
-						}
+						results.push({ .node = mac_info.node, .section_id = 0 });
 					}
-					mac_info = mac_info.next;
-				}
+				};
 			}
 		};
 	}
@@ -208,7 +181,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 							{
 								if (!variant || variant.kind != VAR_DECL) continue;
 								VarDecl* vd = variant.as(VarDecl);
-								if (vd.name && vd.name.text == name)
+								if (vd.name.is(name))
 								{
 									results.push(
 									{
@@ -225,7 +198,7 @@ fn List{SymbolEntry} LspWorkspace.find_symbol_by_name(&self, String name, Source
 							{
 								if (!field || field.kind != VAR_DECL) continue;
 								VarDecl* vd = field.as(VarDecl);
-								if (vd.name && vd.name.text == name)
+								if (vd.name.is(name))
 								{
 									results.push(
 									{
@@ -304,32 +277,19 @@ fn LspDiagnostic[] LspWorkspace.get_diagnostics(&self, String path)
 {
 	String norm_path = uri::normalize_path(tmem, path);
 
-	List{LspDiagnostic}* analyzer_list = self.diagnostics.get_ref(path) ?? (norm_path != path ? self.diagnostics.get_ref(norm_path) : null) ?? null;
-	List{LspDiagnostic}* c3c_list = self.c3c_diagnostics.get_ref(norm_path) ?? (norm_path != path ? self.c3c_diagnostics.get_ref(path) : null) ?? null;
-
-	if (!c3c_list || c3c_list.len() == 0)
-	{
-		if (analyzer_list) return analyzer_list.array_view();
-		return {};
-	}
-
-	if (!analyzer_list || analyzer_list.len() == 0)
-	{
-		return c3c_list.array_view();
-	}
+	LspDiagnostic[] analyzer_diags = (self.diagnostics.get_ref(path) ?? self.diagnostics.get_ref(norm_path)).array_view() ?? {};
+	LspDiagnostic[] c3c_diags = (self.c3c_diagnostics.get_ref(norm_path) ?? self.c3c_diagnostics.get_ref(path)).array_view() ?? {};
+	if (!c3c_diags.len) return analyzer_diags;
+	if (!analyzer_diags.len) return c3c_diags;
 
 	List{LspDiagnostic} merged;
 	merged.tinit();
+	merged.push_all(analyzer_diags);
 
-	foreach (d : *analyzer_list)
-	{
-		merged.push(d);
-	}
-
-	foreach (cd : *c3c_list)
+	foreach (cd : c3c_diags)
 	{
 		bool overlaps = false;
-		foreach (ad : *analyzer_list)
+		foreach (ad : analyzer_diags)
 		{
 			if (ranges_overlap(ad.range, cd.range))
 			{
@@ -495,8 +455,7 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 
 		LspRange range = { .start = { .line = l_0, .character = c_0 }, .end = { .line = l_0, .character = c_0 + (span_len ?: 1) } };
 		// Without a length, as from a c3c without `--lsp2`, the range is the token where the error starts.
-		SourceFile* sf = self.get_source_file_by_path(norm_file);
-		if (!span_len && sf && sf.lexer)
+		if (try sf = self.get_source_file_by_path(norm_file) && !span_len && sf.lexer)
 		{
 			sz i = sf.lexer.token_at({ .line = (int)l_0, .column = (int)c_0 });
 			if (i >= 0) range = analysis::to_lsp_range(sf.lexer.tokens[i].range);

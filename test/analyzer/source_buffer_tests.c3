@@ -32,5 +32,5 @@ fn void file_of_skips_file_without_nodes() @test
 	SourceFile* empty = context.files.get("empty.c3")!!;
 	SourceFile* app = context.files.get("app.c3")!!;
 	assert(empty.min_node_id == empty.max_node_id && empty.max_node_id == app.min_node_id);
-	foreach (stmt : app.ast.statements) assert(source_file::file_of(context, stmt) == app);
+	foreach (stmt : app.ast.statements) assert(source_file::file_of(context, stmt)!! == app);
 }

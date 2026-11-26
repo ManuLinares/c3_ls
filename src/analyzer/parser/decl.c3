@@ -18,19 +18,19 @@ fn Node* parse_module_decl(ContextScope scope)
 
 	ModuleDecl* node = ctx.ast.alloc_node(ModuleDecl, start);
 	defer node.range.end = ctx.peek(-1).range.end;
-	node.path = parse_path_expr(scope);
-
-	if (!node.path || node.path.kind != PATH_EXPR)
+	Node* path = parse_path_expr(scope);
+	if (!path || path.kind != PATH_EXPR)
 	{
 		diagnostics::error(ctx.context, ctx.current.range, "Expected a valid path");
 		node.flags.has_error = true;
 		synchronize(ctx, DECLARATION);
 		return (Node*)node;
 	}
+	node.path.set(path);
 
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
@@ -39,9 +39,6 @@ fn Node* parse_module_decl(ContextScope scope)
 	}
 
 	(void)expect(ctx, node, EOS);
-
-	PathExpr* path = node.path.as(PathExpr);
-	String mod_name = path.path.text;
 
 	return (Node*)node;
 }
@@ -64,7 +61,7 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 
 	if (ctx.is(DOCS_TEXT))
 	{
-		node.comment = ctx.ident(ctx.current);
+		node.comment.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 
@@ -94,8 +91,8 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 				case DEPRECATED:
 					diagnostics::log_debug("parse_contract_decl - @deprecated");
 					AttributeDecl* n = ctx.ast.alloc_node(AttributeDecl, ctx.current.range);
-					node.deprecated = (Node*)n;
-					n.name = ctx.ident_string(attr);
+					node.deprecated.set(n);
+					n.name.set(ctx.ident_string(attr));
 					n.attribute_kind = DEPRECATED;
 					if (ctx.current.kind == EOS && ctx.peek(1).kind == STRING_LITERAL)
 					{
@@ -126,7 +123,7 @@ fn Node* parse_contract_decl(ContextScope scope) => @pool()
 					}
 					else
 					{
-						node.return_desc = parse_expr(scope);
+						node.return_desc.set(parse_expr(scope));
 					}
 				default:
 					advance(ctx);
@@ -230,7 +227,7 @@ fn Node* parse_alias_decl(ContextScope scope)
 		case TYPE_IDENT:
 		case CONST_IDENT:
 		case AT_IDENT:
-			node.name = ctx.ident(t);
+			node.name.set(ctx.ident(t));
 			node.name_kind = t.kind;
 			advance(ctx);
 			break;
@@ -243,7 +240,7 @@ fn Node* parse_alias_decl(ContextScope scope)
 
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 	List{Node*} attributes;
 	attributes.init(tmem, 4);
@@ -260,17 +257,17 @@ fn Node* parse_alias_decl(ContextScope scope)
 	{
 		node.alias_kind = MODULE_ALIAS;
 		advance(ctx);
-		node.target = parse_path_expr(scope);
+		node.target.set(parse_path_expr(scope));
 	}
 	else if (node.name_kind == TYPE_IDENT)
 	{
 		node.alias_kind = TYPE_ALIAS;
-		node.target = parse_alias_type_target(scope);
+		node.target.set(parse_alias_type_target(scope));
 	}
 	else
 	{
 		node.alias_kind = IDENT_ALIAS;
-		node.target = parse_expr(scope);
+		node.target.set(parse_expr(scope));
 	}
 
 	parse_attributes_into(scope, (Node*)node, &attributes, { .allow_type_ident });
@@ -306,13 +303,13 @@ fn Node* parse_typedef_decl(ContextScope scope)
 	}
 	else
 	{
-		node.name = ctx.ident(name);
+		node.name.set(ctx.ident(name));
 		advance(ctx);
 	}
 
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 	if (ctx.is(LPAREN))
 	{
@@ -344,8 +341,9 @@ fn Node* parse_typedef_decl(ContextScope scope)
 		}
 		else
 		{
-			node.base_type = parse_type_expr(scope);
-			if (!node.base_type) node.flags.has_error = true;
+			Node* base_type = parse_type_expr(scope);
+			node.base_type.set(base_type);
+			if (!base_type) node.flags.has_error = true;
 		}
 
 		parse_attributes_into(scope, (Node*)node, &attributes);
@@ -400,7 +398,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 
 	if (ctx.is(AT_IDENT) || ctx.is(IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 	else
@@ -421,7 +419,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
@@ -437,7 +435,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 			node.flags.has_error = true;
 			return (Node*)node;
 		}
-		node.body = parse_compound_stmt(scope);
+		node.body.set(parse_compound_stmt(scope));
 	}
 	else if (consume(ctx, IMPLIES))
 	{
@@ -448,7 +446,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 			return (Node*)node;
 		}
 
-		node.body = parse_short_body(scope, true);
+		node.body.set(parse_short_body(scope, true));
 	}
 	else
 	{
@@ -514,14 +512,14 @@ fn Node* parse_param_decl(ContextScope scope, ParamParseFlags flags = {})
 		parse_attributes_into(scope, (Node*)node, &attributes);
 	}
 
-	node.type = parsed_type;
+	node.type.set(parsed_type);
 
 	Token t = ctx.current;
 	switch (t.kind)
 	{
 		case CT_CONST_IDENT:
 		case CT_IDENT:
-			node.name = ctx.ident(t);
+			node.name.set(ctx.ident(t));
 			node.var_kind = VAR_PARAM_CT;
 			advance(ctx);
 			if (consume(ctx, ELLIPSIS))
@@ -531,7 +529,7 @@ fn Node* parse_param_decl(ContextScope scope, ParamParseFlags flags = {})
 			}
 			break;
 		case IDENT:
-			node.name = ctx.ident(t);
+			node.name.set(ctx.ident(t));
 			node.var_kind = VAR_PARAM;
 			node.var_flags.is_ref = is_ref;
 			node.var_flags.is_self_by_ref = is_ref;
@@ -545,18 +543,18 @@ fn Node* parse_param_decl(ContextScope scope, ParamParseFlags flags = {})
 					node.flags.has_error = true;
 				}
 				node.var_flags.is_variadic = true;
-				node.type = alloc_any_type_expr(ctx);
+				node.type.set(alloc_any_type_expr(ctx));
 			}
 			break;
 		case HASH_IDENT:
 		case HASH_TYPE_IDENT:
 		case HASH_CONST_IDENT:
-			node.name = ctx.ident(t);
+			node.name.set(ctx.ident(t));
 			node.var_kind = VAR_PARAM_EXPR;
 			advance(ctx);
 			break;
 		case CT_TYPE_IDENT:
-			node.name = ctx.ident(t);
+			node.name.set(ctx.ident(t));
 			node.var_kind = (parsed_type && parsed_type.kind != ERROR) ? VAR_PARAM : VAR_PARAM_CT_TYPE;
 			advance(ctx);
 			break;
@@ -579,7 +577,7 @@ fn Node* parse_param_decl(ContextScope scope, ParamParseFlags flags = {})
 		}
 		else
 		{
-			node.init_expr = parse_expr(scope);
+			node.init_expr.set(parse_expr(scope));
 		}
 		parse_attributes_into(scope, (Node*)node, &attributes);
 	}
@@ -680,7 +678,7 @@ fn Node* parse_var_decl(ContextScope scope, Node* type = null)
 				diagnostics::error(ctx.context, ctx.current.range, "Extern cannot have initializer");
 			}
 
-			var_node.init_expr = parse_value_expr(scope);
+			var_node.init_expr.set(parse_value_expr(scope));
 		}
 		else if (flags.is_const && !flags.is_extern)
 		{
@@ -688,8 +686,8 @@ fn Node* parse_var_decl(ContextScope scope, Node* type = null)
 			var_node.flags.has_error = true;
 		}
 
-		var_node.name = name;
-		var_node.type = type_node;
+		var_node.name.set(name);
+		var_node.type.set(type_node);
 		var_node.next = null;
 
 		var_node.var_flags.is_extern = flags.is_extern;
@@ -744,7 +742,8 @@ fn Node* parse_var_decl(ContextScope scope, Node* type = null)
 		}
 	}
 
-	return head_node;
+	if (!head_node) return ctx.ast.error({ start.start, ctx.peek(-1).range.end });
+	return (Node*)head_node;
 }
 
 fn sz callable_param_count(Node* node) @local
@@ -782,7 +781,7 @@ fn NodeArray parse_attributes(ContextScope scope, Node* parent_node, AttributePa
 
 		AttributeDecl* attr_node = ctx.ast.alloc_node(AttributeDecl, t.range);
 		defer attr_node.range.end = ctx.peek(-1).range.end;
-		attr_node.name = ctx.ident(t);
+		attr_node.name.set(ctx.ident(t));
 		attr_node.attribute_kind = AttributeKind::lookup_field(str, t.value) ?? AttributeKind.NONE;
 
 		if (parent_node)
@@ -929,11 +928,6 @@ fn Node* parse_expand_decl(ContextScope scope)
 	}
 
 	node.expr = parse_constant_expr(scope);
-	if (!node.expr)
-	{
-		node.flags.has_error = true;
-		skip_until(ctx, { RPAREN, EOS });
-	}
 
 	expect(ctx, (Node*)node, RPAREN);
 
@@ -967,7 +961,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 	{
 		if (ctx.is(TYPE_IDENT))
 		{
-			node.name = ctx.ident(ctx.current);
+			node.name.set(ctx.ident(ctx.current));
 			advance(ctx);
 		}
 		else
@@ -978,7 +972,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 	}
 	else if (ctx.is(IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 
@@ -988,7 +982,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 	}
 	if (ctx.is(LESS))
 	{
-		node.generics = parse_generic_decl(scope);
+		node.generics.set(parse_generic_decl(scope));
 	}
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
 	{
@@ -1100,7 +1094,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 	{
 		if (ctx.is(IDENT) || ctx.is(TYPE_IDENT))
 		{
-			node.name = ctx.ident(ctx.current);
+			node.name.set(ctx.ident(ctx.current));
 			advance(ctx);
 		}
 		else
@@ -1121,11 +1115,11 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 	if (consume(ctx, COLON))
 	{
-		node.type = parse_type_expr(scope.with_only_flags(
+		node.type.set(parse_type_expr(scope.with_only_flags(
 		{
 			.no_generics
 		}
-		), null);
+		), null));
 		node.attributes = parse_attributes(scope, node);
 	}
 
@@ -1155,12 +1149,12 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 		if (ctx.is(DOCS_START)) field_node.contract.set(parse_contract_decl(scope));
 
-		field_node.type = parse_type_expr(scope);
+		field_node.type.set(parse_type_expr(scope));
 		field_node.attributes = parse_attributes(scope, field_node);
 
 		if (ctx.is(IDENT))
 		{
-			field_node.name = ctx.ident(ctx.current);
+			field_node.name.set(ctx.ident(ctx.current));
 			advance(ctx);
 		}
 		else
@@ -1171,10 +1165,10 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 		if (consume(ctx, COLON))
 		{
-			field_node.init_expr = parse_constant_expr(scope);
+			field_node.init_expr.set(parse_constant_expr(scope));
 			if (consume(ctx, DOTDOT))
 			{
-				field_node.bit_end = parse_constant_expr(scope);
+				field_node.bit_end.set(parse_constant_expr(scope));
 			}
 		}
 
@@ -1244,7 +1238,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 			}
 
 			FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
-			fault_node.name = ctx.ident(ctx.current);
+			fault_node.name.set(ctx.ident(ctx.current));
 			fault_node.contract.set(contract);
 			advance(ctx);
 
@@ -1300,7 +1294,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 
 		FaultDecl* fault_node = ctx.ast.alloc_node(FaultDecl, ctx.current.range);
 		fault_node.contract.set(contract);
-		fault_node.name = ctx.ident(ctx.current);
+		fault_node.name.set(ctx.ident(ctx.current));
 
 		advance(ctx);
 
@@ -1337,7 +1331,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 
 	if (ctx.is(TYPE_IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 	else
@@ -1428,7 +1422,7 @@ fn Node* parse_attrdef_decl(ContextScope scope) => @pool()
 
 	if (ctx.is(AT_TYPE_IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 	else
@@ -1485,7 +1479,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 	if (ctx.is(TYPE_IDENT))
 	{
-		node.name = ctx.ident(ctx.current);
+		node.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 	}
 	else
@@ -1506,11 +1500,11 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 		if (!ctx.is(LPAREN))
 		{
-			node.backing_type = parse_type_expr(scope.with_only_flags(
+			node.backing_type.set(parse_type_expr(scope.with_only_flags(
 			{
 				.no_generics
 			}
-			), null);
+			), null));
 		}
 
 		if (consume(ctx, LPAREN))
@@ -1521,10 +1515,10 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 			{
 				VarDecl* param = ctx.ast.alloc_node(VarDecl, ctx.current.range);
 
-				param.type = parse_type_expr(scope);
+				param.type.set(parse_type_expr(scope));
 				if (is_non_type_ident(ctx.current.kind))
 				{
-					param.name = ctx.ident(ctx.current);
+					param.name.set(ctx.ident(ctx.current));
 					advance(ctx);
 				}
 				if (ctx.is(AT_IDENT))
@@ -1581,7 +1575,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 		variant.var_kind = VAR_GLOBAL;
 		variant.contract.set(contract);
 		variant.var_flags.is_const = true;
-		variant.name = ctx.ident(ctx.current);
+		variant.name.set(ctx.ident(ctx.current));
 		advance(ctx);
 
 		if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
@@ -1591,12 +1585,12 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 		if (consume(ctx, EQ))
 		{
-			variant.init_expr = parse_expr(scope);
+			variant.init_expr.set(parse_expr(scope));
 		}
 
 		if (ctx.is(LBRACE))
 		{
-			variant.assoc_values = parse_expr(scope);
+			variant.assoc_values.set(parse_expr(scope));
 		}
 		variant.range.end = ctx.peek(-1).range.end;
 

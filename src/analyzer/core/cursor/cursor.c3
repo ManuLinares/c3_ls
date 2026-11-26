@@ -2,63 +2,59 @@ module analyzer::cursor;
 import analyzer, std::collections::list, std::io;
 
 <*
+ Name of the declaration `node`.
+*>
+fn Ident*? decl_name(Node* node)
+{
+	switch (node.kind)
+	{
+		case VAR_DECL: return node.as(VarDecl).name.get();
+		case FN_DECL: return node.as(FnDecl).name.get();
+		case MACRO_DECL: return node.as(MacroDecl).name.get();
+		case STRUCT_DECL: return node.as(StructDecl).name.get();
+		case ENUM_DECL: return node.as(EnumDecl).name.get();
+		case TYPEDEF_DECL: return node.as(TypedefDecl).name.get();
+		case ALIAS_DECL: return node.as(AliasDecl).name.get();
+		case FAULT_DECL: return node.as(FaultDecl).name.get();
+		case INTERFACE_DECL: return node.as(InterfaceDecl).name.get();
+		case ATTRDEF_DECL: return node.as(AttrdefDecl).name.get();
+		default: return NOT_FOUND~;
+	}
+}
+
+<*
+ Type whose fields and methods a struct takes through its inline member `vd`.
+ Only a member of a plain or generic type gives them, not a pointer, array, slice or vector.
+*>
+fn String? inline_type(VarDecl* vd)
+{
+	if (!vd.var_flags.is_inline) return NOT_FOUND~;
+	Node* type = vd.type.get()!;
+	if (type.kind != TYPE_EXPR) return NOT_FOUND~;
+	switch (type.as(TypeExpr).type_kind)
+	{
+		case TYPE_IDENTIFIER:
+		case TYPE_GENERIC:
+			return instance_name(type);
+		default:
+			return NOT_FOUND~;
+	}
+}
+
+<*
+ Spelling of the field's node, or "" when there is none.
+*>
+fn String NullableNode.spelling(self, Allocator allocator = tmem) => spelling(self.get(), allocator) ?? "";
+
+<*
  Get the spelling/text for the current node. Always returns a valid String view.
 *>
 fn String spelling(Node* node, Allocator allocator = tmem)
 {
 	if (!node) return "";
+	if (try name = decl_name(node)) return name.text;
 	switch (node.kind)
 	{
-		case STRUCT_DECL:
-			{
-				StructDecl* s = node.as(StructDecl);
-				return s.name ? s.name.text : "";
-			}
-		case ENUM_DECL:
-			{
-				EnumDecl* ed = node.as(EnumDecl);
-				return ed.name ? ed.name.text : "";
-			}
-		case VAR_DECL:
-			{
-				VarDecl* v = node.as(VarDecl);
-				return v.name ? v.name.text : "";
-			}
-		case FN_DECL:
-			{
-				FnDecl* func = node.as(FnDecl);
-				return func.name ? func.name.text : "";
-			}
-		case MACRO_DECL:
-			{
-				MacroDecl* mac = node.as(MacroDecl);
-				return mac.name ? mac.name.text : "";
-			}
-		case TYPEDEF_DECL:
-			{
-				TypedefDecl* td = node.as(TypedefDecl);
-				return td.name ? td.name.text : "";
-			}
-		case ALIAS_DECL:
-			{
-				AliasDecl* ad = node.as(AliasDecl);
-				return ad.name ? ad.name.text : "";
-			}
-		case INTERFACE_DECL:
-			{
-				InterfaceDecl* id = node.as(InterfaceDecl);
-				return id.name ? id.name.text : "";
-			}
-		case FAULT_DECL:
-			{
-				FaultDecl* fd = node.as(FaultDecl);
-				return fd.name ? fd.name.text : "";
-			}
-		case ATTRDEF_DECL:
-			{
-				AttrdefDecl* ad = node.as(AttrdefDecl);
-				return ad.name ? ad.name.text : "";
-			}
 		case TYPE_EXPR:
 			{
 				TypeExpr* type_data = node.as(TypeExpr);
@@ -66,12 +62,12 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 				{
 				case TYPE_IDENTIFIER:
 					{
-						if (!type_data.unresolved.name) return "";
-						String type_name = type_data.unresolved.name.text;
-						if (type_data.unresolved.path != null)
+						Ident*? name = type_data.unresolved.name.get();
+						if (catch name) return "";
+						String type_name = name.text;
+						if (try prefix_path = type_data.unresolved.path.get())
 						{
-							PathExpr* prefix_path = type_data.unresolved.path.as(PathExpr);
-							String prefix_str     = (prefix_path && prefix_path.path) ? prefix_path.path.text : "";
+							String prefix_str = prefix_path.as(PathExpr).path.text;
 							return string::format(allocator, "%s%s%s", prefix_str, type_name, type_data.optional ? "?" : "");
 						}
 						return type_data.optional ? string::format(allocator, "%s?", type_name) : type_name;
@@ -89,13 +85,13 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 				case TYPE_ARRAY:
 					{
 						String base = spelling(type_data.array.base, allocator);
-						String len = type_data.array.len_expr ? spelling(type_data.array.len_expr, allocator) : "*";
+						String len = type_data.array.len_expr.spelling(allocator) ?: "*";
 						return string::format(allocator, "%s[%s]%s", base, len, type_data.optional ? "?" : "");
 					}
 				case TYPE_VECTOR:
 					{
 						String base = spelling(type_data.array.base, allocator);
-						String len = type_data.array.len_expr ? spelling(type_data.array.len_expr, allocator) : "*";
+						String len = type_data.array.len_expr.spelling(allocator) ?: "*";
 						return string::format(allocator, "%s[<%s>]%s", base, len, type_data.optional ? "?" : "");
 					}
 				case TYPE_GENERIC:
@@ -133,8 +129,8 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 							if (p && p.kind == VAR_DECL)
 							{
 								VarDecl* vd = p.as(VarDecl);
-								String pt = vd.type ? spelling(vd.type, allocator) : "";
-								String pn = vd.name ? vd.name.text : "";
+								String pt = vd.type.spelling(allocator);
+								String pn = vd.name.text();
 								if (pt.len > 0 && pn.len > 0)
 								{
 									fn_str.appendf("%s %s", pt, pn);
@@ -159,7 +155,7 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 		case IDENT_EXPR:
 			{
 				IdentExpr* ident = node.as(IdentExpr);
-				return ident.ident ? ident.ident.text : "";
+				return ident.ident.text;
 			}
 		case LITERAL_EXPR:
 			{
@@ -185,27 +181,23 @@ fn String spelling(Node* node, Allocator allocator = tmem)
 		case TRY_EXPR:
 			{
 				TryExpr* te = node.as(TryExpr);
-				if (te.variable && te.variable.kind == IDENT_EXPR)
+				if (te.variable.kind == IDENT_EXPR)
 				{
 					IdentExpr* ie = te.variable.as(IdentExpr);
-					return ie.ident ? ie.ident.text : "";
+					return ie.ident.text;
 				}
 				return "";
 			}
 		case CATCH_EXPR:
 			{
 				CatchExpr* ce = node.as(CatchExpr);
-				if (ce.variable && ce.variable.kind == IDENT_EXPR)
-				{
-					IdentExpr* ie = ce.variable.as(IdentExpr);
-					return ie.ident ? ie.ident.text : "";
-				}
+				if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR) return variable.as(IdentExpr).ident.text;
 				return "";
 			}
 		case ATTRIBUTE_DECL:
 			{
 				AttributeDecl* ad = node.as(AttributeDecl);
-				return ad.name ? ad.name.text : "";
+				return ad.name.text();
 			}
 		default:
 			return "";
@@ -280,7 +272,7 @@ fn void append_type(DString* out, Node* node) @local
 	switch (te.type_kind)
 	{
 		case TYPE_IDENTIFIER:
-			if (te.unresolved.name) out.append(te.unresolved.name.text);
+			if (try name = te.unresolved.name.get()) out.append(name.text);
 		case TYPE_POINTER:
 			append_type(out, te.modify.base);
 			out.append('*');
@@ -289,10 +281,10 @@ fn void append_type(DString* out, Node* node) @local
 			out.append("[]");
 		case TYPE_ARRAY:
 			append_type(out, te.array.base);
-			out.appendf("[%s]", te.array.len_expr ? spelling(te.array.len_expr, tmem) : "*");
+			out.appendf("[%s]", te.array.len_expr.spelling(tmem) ?: "*");
 		case TYPE_VECTOR:
 			append_type(out, te.array.base);
-			out.appendf("[<%s>]", te.array.len_expr ? spelling(te.array.len_expr, tmem) : "*");
+			out.appendf("[<%s>]", te.array.len_expr.spelling(tmem) ?: "*");
 		case TYPE_GENERIC:
 			append_type(out, te.generic.base);
 			out.append('{');
@@ -327,8 +319,7 @@ fn String? raw_type_identifier(Node* node)
 		{
 			case TYPE_IDENTIFIER:
 				{
-					if (!data.unresolved.name) return "";
-					return data.unresolved.name.text;
+					return data.unresolved.name.text();
 				}
 			case TYPE_POINTER:
 			case TYPE_SLICE:
@@ -381,7 +372,7 @@ fn ChildVisitResult find_at_callback(Node* cursor, Node* parent, void* user_data
 	return CONTINUE;
 }
 
-fn Node* find_at(Node*[] slice, Range range)
+fn Node*? find_at(Node*[] slice, Range range)
 {
 	FindAtContext ctx = {
 		.target = range,
@@ -400,12 +391,12 @@ fn Node* find_at(Node*[] slice, Range range)
 		}
 	}
 
-	return ctx.best_match;
+	return ctx.best_match ?: NOT_FOUND~;
 }
 
 fn Node*? contract(Node* node)
 {
-	if (!node) return null;
+	if (!node) return NOT_FOUND~;
 	switch (node.kind)
 	{
 		case MODULE_DECL:
@@ -488,21 +479,21 @@ fn Node*? contract(Node* node)
 			break;
 	}
 
-	return null;
+	return NOT_FOUND~;
 }
 
 fn String? docs(Node* node)
 {
 	if (!node) return "";
 
-	if (try val = contract(node) && val)
+	if (try val = contract(node))
 	{
 		if (val.kind == CONTRACT_DECL)
 		{
 			ContractDecl* cdecl = val.as(ContractDecl);
-			if (cdecl.comment)
+			if (try comment = cdecl.comment.get())
 			{
-				return cdecl.comment.text;
+				return comment.text;
 			}
 		}
 	}
@@ -510,9 +501,9 @@ fn String? docs(Node* node)
 	return "";
 }
 
-fn Node* find_member_in_type(Node* node, String name)
+fn Node*? find_member_in_type(Node* node, String name)
 {
-	if (!node) return null;
+	if (!node) return NOT_FOUND~;
 	switch (node.kind)
 	{
 		case STRUCT_DECL:
@@ -526,22 +517,24 @@ fn Node* find_member_in_type(Node* node, String name)
 						VarDecl* vd = field.as(VarDecl);
 						while (vd != null)
 						{
-							if (vd.name && vd.name.text == name) return (Node*)vd;
+							if (vd.name.is(name)) return (Node*)vd;
 							vd = vd.next ? vd.next.as(VarDecl) : null;
 						}
 					}
 					else if (field.kind == STRUCT_DECL)
 					{
 						StructDecl* sub = field.as(StructDecl);
-						if (sub.name && sub.name.text == name) return field;
-						if (sub.name == null)
+						if (try sub_name = sub.name.get())
 						{
-							Node* nested = find_member_in_type(field, name);
-							if (nested) return nested;
+							if (sub_name.text == name) return field;
+						}
+						else if (try nested = find_member_in_type(field, name))
+						{
+							return nested;
 						}
 					}
 				}
-				return null;
+				return NOT_FOUND~;
 			}
 		case ENUM_DECL:
 			{
@@ -550,7 +543,7 @@ fn Node* find_member_in_type(Node* node, String name)
 				{
 					if (!variant || variant.kind != VAR_DECL) continue;
 					VarDecl* vd = variant.as(VarDecl);
-					if (vd.name && vd.name.text == name)
+					if (vd.name.is(name))
 					{
 						return variant;
 					}
@@ -559,14 +552,14 @@ fn Node* find_member_in_type(Node* node, String name)
 				{
 					if (!param || param.kind != VAR_DECL) continue;
 					VarDecl* vd = param.as(VarDecl);
-					if (vd.name && vd.name.text == name)
+					if (vd.name.is(name))
 					{
 						return param;
 					}
 				}
-				return null;
+				return NOT_FOUND~;
 			}
 		default:
-			return null;
+			return NOT_FOUND~;
 	}
 }

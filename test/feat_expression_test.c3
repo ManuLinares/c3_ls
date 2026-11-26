@@ -10,10 +10,10 @@ macro bool enabled(String source, String name, String[] features)
 	proj.init(mem);
 	defer proj.free();
 	proj.workspace.process_file("/virtual/feat.c3", source);
-	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/feat.c3");
+	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/feat.c3")!!;
 	foreach (stmt : sf.ast.statements)
 	{
-		if (stmt && stmt.kind == FN_DECL && stmt.as(FnDecl).name.text == name) return query::feat_enabled_with(proj.workspace.ctx, features, null, stmt);
+		if (stmt && stmt.kind == FN_DECL && stmt.as(FnDecl).name.is(name)) return query::feat_enabled_with(proj.workspace.ctx, features, null, stmt);
 	}
 	unreachable("no function %s", name);
 }

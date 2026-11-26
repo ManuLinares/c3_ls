@@ -20,7 +20,7 @@ constset KeyFlags : uint {
 	Node* n1 = mod.nodes[1];
 	test::eq(n1.kind, NodeKind.ENUM_DECL);
 	EnumDecl* ed1 = n1.as(EnumDecl);
-	test::eq(ed1.name.text, "KeyFlags");
+	test::eq(ed1.name.text(), "KeyFlags");
 	test::eq(ed1.variants.len, 2);
 }
 
@@ -45,7 +45,7 @@ fn void? check() {
 	test::eq(n1.kind, NodeKind.FAULTDEF_DECL);
 	FaultdefDecl* fd1 = n1.as(FaultdefDecl);
 	test::eq(fd1.faults.len, 2);
-	test::eq(fd1.faults[0].as(FaultDecl).name.text, "MALFORMED_REQUEST");
+	test::eq(fd1.faults[0].as(FaultDecl).name.text(), "MALFORMED_REQUEST");
 }
 
 fn void test_attrmacro_keyword()
@@ -68,7 +68,7 @@ struct Foo {
 	Node* n1 = mod.nodes[1];
 	test::eq(n1.kind, NodeKind.ATTRDEF_DECL);
 	AttrdefDecl* ad1 = n1.as(AttrdefDecl);
-	test::eq(ad1.name.text, "@TagField");
+	test::eq(ad1.name.text(), "@TagField");
 }
 
 fn void test_ct_feat_keyword()

@@ -11,15 +11,15 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 	{
 		case PATH_EXPR:
 			PathExpr* pe = node.as(PathExpr);
-			return string::tformat("module %s", pe.path ? pe.path.text.strip_suffix("::") : name);
+			return string::tformat("module %s", pe.path.text.strip_suffix("::"));
 		case TYPE_EXPR:
 			return string::tformat("type %s", name);
 		case TRY_EXPR:
-			String vtype = cursor::spelling(node.as(TryExpr).type, tmem);
-			if (!vtype.len && node.resolved_type) vtype = node.resolved_type.name;
+			String vtype = type_text(ctx, node.as(TryExpr).type);
+			if (!vtype.len) vtype = node.resolved_type.get().name ?? "";
 			return string::tformat("try %s %s", vtype ?: "var", name);
 		case CATCH_EXPR:
-			return string::tformat("catch %s %s", cursor::spelling(node.as(CatchExpr).type, tmem) ?: "fault", name);
+			return string::tformat("catch %s %s", type_text(ctx, node.as(CatchExpr).type) ?: "fault", name);
 		case ATTRIBUTE_DECL:
 			AttributeDecl* attr = node.as(AttributeDecl);
 			if (!attr.exprs.len) return string::tformat("attribute %s", name);
@@ -29,28 +29,27 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 			foreach (i, expr : attr.exprs)
 			{
 				if (i > 0) out.append(", ");
-				out.append(cursor::spelling(expr, tmem) ?: "...");
+				out.append(node_text(ctx, expr));
 			}
 			out.append(")");
 			return out.str_view();
 		case VAR_DECL:
 			VarDecl* vd = node.as(VarDecl);
-			if (vd.var_flags.is_self) return string::tformat("%s %s", cursor::spelling(vd.type, tmem), name);
+			if (vd.var_flags.is_self) return string::tformat("%s %s", type_text(ctx, vd.type), name);
 			// `b` in `int a, b;` shares the type written before `a`.
-			if (vd.type && !node.range.contains(vd.type.range.start)) return string::tformat("%s %s", cursor::spelling(vd.type, tmem), text(ctx, node, single_line) ?: name);
-			SourceFile* sf = source_file::file_of(ctx, node);
-			if (sf && vd.var_kind == VAR_LOCAL)
+			if (try type = vd.type.get() && !node.range.contains(type.range.start)) return string::tformat("%s %s", node_text(ctx, type), text(ctx, node, single_line) ?: name);
+			if (try sf = source_file::file_of(ctx, node) && vd.var_kind == VAR_LOCAL)
 			{
 				List{Node*} stack = query::ancestors_of(sf, node);
 				sz n = stack.len();
 				ForeachStmt* fst = n >= 2 && stack[n - 2].kind == FOREACH_STMT ? stack[n - 2].as(ForeachStmt) : null;
-				if (fst && (fst.index == node || fst.variable == node))
+				if (fst && (fst.variable == node || fst.index.is(node)))
 				{
 					String type = query::foreach_binding_type(ctx, sf, fst, node);
-					if (type.len) return string::tformat("%s %s", type, vd.name ? vd.name.text : name);
+					if (type.len) return string::tformat("%s %s", type, vd.name.get().text ?? name);
 				}
 			}
-			if (EnumDecl* owner = owner_enum(ctx, node)) return string::tformat("%s.%s", owner.name.text, text(ctx, node, single_line) ?: name);
+			if (try owner = owner_enum_name(ctx, node)) return string::tformat("%s.%s", owner.text, text(ctx, node, single_line) ?: name);
 		case FAULT_DECL:
 			return string::tformat("fault %s", text(ctx, node, single_line) ?: name);
 		default:
@@ -66,7 +65,7 @@ fn String signature(AnalyzerContext* ctx, Node* node, String name, bool single_l
 fn String header(AnalyzerContext* ctx, Node* node, String name, GenericBinding binding = {})
 {
 	String sig = query::substitute(signature(ctx, node, name), binding.params, binding.args);
-	if (query::label_of(node)) return string::tformat("```c3\n%s\n```\nline %d", sig, node.range.start.line + 1);
+	if (@ok(query::label_of(node))) return string::tformat("```c3\n%s\n```\nline %d", sig, node.range.start.line + 1);
 	String mod = module_name(ctx, node);
 	if (!mod.len) return string::tformat("```c3\n%s\n```", sig);
 	return string::tformat("```c3\n%s\n```\nmodule `%s`", sig, mod);
@@ -82,19 +81,18 @@ fn String docs(Node* node)
 }
 
 <*
- Enum or constdef declaring the value `node`, or null.
+ Name of the enum or constdef declaring the value `node`.
 *>
-fn EnumDecl* owner_enum(AnalyzerContext* ctx, Node* node) @local
+fn Ident*? owner_enum_name(AnalyzerContext* ctx, Node* node) @local
 {
-	SourceFile* sf = source_file::file_of(ctx, node);
-	if (!sf) return null;
+	SourceFile* sf = source_file::file_of(ctx, node)!;
 	foreach (stmt : sf.ast.statements)
 	{
 		if (!stmt || stmt.kind != ENUM_DECL || !stmt.range.contains_range(node.range)) continue;
 		EnumDecl* ed = stmt.as(EnumDecl);
-		foreach (v : ed.variants) if (v == node) return ed.name ? ed : null;
+		foreach (v : ed.variants) if (v == node) return ed.name.get();
 	}
-	return null;
+	return NOT_FOUND~;
 }
 
 <*
@@ -116,9 +114,32 @@ fn String module_name(AnalyzerContext* ctx, Node* node) @local
 		default:
 			break;
 	}
-	SourceFile* sf = source_file::file_of(ctx, node);
-	if (!sf) return "";
+	SourceFile*? sf = source_file::file_of(ctx, node);
+	if (catch sf) return "";
 	return query::get_module_name_at_location(sf, node.range.start);
+}
+
+<*
+ Type as written in its file, on one line; its spelling when the parser made it. Empty when there is none.
+*>
+fn String type_text(AnalyzerContext* ctx, NullableNode type) => node_text(ctx, type.get()) ?? "";
+
+<*
+ `node` as written in its file, on one line; its spelling when the parser made it.
+*>
+fn String node_text(AnalyzerContext* ctx, Node* node)
+{
+	if (node.flags.is_synthetic) return cursor::spelling(node);
+	SourceFile*? sf = source_file::file_of(ctx, node);
+	if (catch sf) return cursor::spelling(node);
+	if (!sf.lexer) return cursor::spelling(node);
+	Token[] tokens = sf.lexer.tokens.array_view();
+	sz first = sf.lexer.first_token_at(node.range.start);
+	if (first >= tokens.len) return cursor::spelling(node);
+	sz last = first;
+	while (last + 1 < tokens.len && tokens[last + 1].range.start.before(node.range.end)) last++;
+	FormattingOptions options = { .tab_size = 4, .insert_spaces = true };
+	return formatting::format_tokens_range(tmem, sf.content, tokens, first, last, 0, options, true).trim();
 }
 
 <*
@@ -128,13 +149,13 @@ fn String module_name(AnalyzerContext* ctx, Node* node) @local
 *>
 fn String text(AnalyzerContext* ctx, Node* decl, bool single_line = false)
 {
-	SourceFile* sf = source_file::file_of(ctx, decl);
-	if (!sf || !sf.lexer) return "";
+	SourceFile*? sf = source_file::file_of(ctx, decl);
+	if (catch sf) return "";
+	if (!sf.lexer) return "";
 	Token[] tokens = sf.lexer.tokens.array_view();
 
 	Location start = decl.range.start;
-	Node* contract = cursor::contract(decl) ?? null;
-	if (contract && start.before(contract.range.end)) start = contract.range.end;
+	if (try contract = cursor::contract(decl) && start.before(contract.range.end)) start = contract.range.end;
 	sz first = sf.lexer.first_token_at(start);
 	if (first >= tokens.len) return "";
 	sz last = last_header_token(tokens, first, decl);
@@ -154,19 +175,19 @@ fn sz last_header_token(Token[] tokens, sz first, Node* decl) @local
 	switch (decl.kind)
 	{
 		case FN_DECL:
-			if (Node* body = decl.as(FnDecl).body) end = body.range.start;
+			if (try body = decl.as(FnDecl).body.get()) end = body.range.start;
 		case MACRO_DECL:
-			if (Node* body = decl.as(MacroDecl).body) end = body.range.start;
+			if (try body = decl.as(MacroDecl).body.get()) end = body.range.start;
 		case IF_STMT:
-			if (Node* body = decl.as(IfStmt).then_body) end = body.range.start;
+			end = decl.as(IfStmt).then_body.range.start;
 		case FOR_STMT:
-			if (Node* body = decl.as(ForStmt).body) end = body.range.start;
+			end = decl.as(ForStmt).body.range.start;
 		case WHILE_STMT:
-			if (Node* body = decl.as(WhileStmt).body) end = body.range.start;
+			end = decl.as(WhileStmt).body.range.start;
 		case DO_WHILE_STMT:
-			if (Node* body = decl.as(DoWhileStmt).body) end = body.range.start;
+			end = decl.as(DoWhileStmt).body.range.start;
 		case FOREACH_STMT:
-			if (Node* body = decl.as(ForeachStmt).body) end = body.range.start;
+			end = decl.as(ForeachStmt).body.range.start;
 		case SWITCH_STMT:
 		case STRUCT_DECL:
 		case ENUM_DECL:

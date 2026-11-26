@@ -178,8 +178,6 @@ struct Type
 
 	union data
 	{
-		Node* node;
-
 		bitstruct builtin : uint
 		{
 			char bitsize: 0..7;

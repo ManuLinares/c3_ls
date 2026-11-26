@@ -71,8 +71,8 @@ fn void method_with_params()
 	FunctionInfo* func_info = context.registry.functions.get("hello::greet")!!;
 	test::ne(func_info, null);
 	FnDecl* func = func_info.node.as(FnDecl);
-	TypeExpr* type = func.associated_type.as(TypeExpr);
-	test::eq(type.unresolved.name.text, "Foo");
+	TypeExpr* type = func.associated_type.get()!!.as(TypeExpr);
+	test::eq(type.unresolved.name.text(), "Foo");
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, FN_DECL), 2);
@@ -98,15 +98,15 @@ fn void macro_with_params()
 
 	MacroInfo* macro_info = context.registry.macros.get("hello::greet")!!;
 	MacroDecl* macro_decl = macro_info.node.as(MacroDecl);
-	test::eq(macro_decl.name.text, "greet");
+	test::eq(macro_decl.name.text(), "greet");
 
 	macro_info = context.registry.macros.get("hello::foo")!!;
 	macro_decl = macro_info.node.as(MacroDecl);
-	test::eq(macro_decl.name.text, "foo");
+	test::eq(macro_decl.name.text(), "foo");
 
 	macro_info = context.registry.macros.get("hello::bar")!!;
 	macro_decl = macro_info.node.as(MacroDecl);
-	test::eq(macro_decl.name.text, "bar");
+	test::eq(macro_decl.name.text(), "bar");
 
 	test::eq(parser_tests::count_kind(mod, MODULE_DECL), 1);
 	test::eq(parser_tests::count_kind(mod, MACRO_DECL), 3);
@@ -157,30 +157,30 @@ fn void alias_declarations_parse()
 	AliasDecl* type_alias = type_node.as(AliasDecl);
 	test::eq(type_alias.alias_kind, AliasDeclKind.TYPE_ALIAS);
 	test::eq(type_alias.name_kind, TokenKind.TYPE_IDENT);
-	test::eq(type_alias.name.text, "IntList");
-	test::eq(type_alias.target.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_target = type_alias.target.as(TypeExpr);
+	test::eq(type_alias.name.text(), "IntList");
+	test::eq(type_alias.target.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_target = type_alias.target.get()!!.as(TypeExpr);
 	test::eq(type_target.type_kind, TypeExprKind.TYPE_GENERIC);
 	test::eq(type_target.generic.params.len, 1);
 	TypeExpr* type_base = type_target.generic.base.as(TypeExpr);
 	test::eq(type_base.type_kind, TypeExprKind.TYPE_IDENTIFIER);
-	test::eq(type_base.unresolved.name.text, "List");
+	test::eq(type_base.unresolved.name.text(), "List");
 
 	AliasDecl* stack_node = mod.nodes[2].as(AliasDecl);
 	test::eq(stack_node.alias_kind, AliasDeclKind.TYPE_ALIAS);
-	GenericDecl* generic = stack_node.generics.as(GenericDecl);
+	GenericDecl* generic = stack_node.generics.get()!!.as(GenericDecl);
 	test::eq(generic.params.len, 1);
 	TypeExpr* first_type = generic.params[0].as(TypeExpr);
 	test::eq(first_type.type_kind, TypeExprKind.TYPE_IDENTIFIER);
-	test::eq(first_type.unresolved.name.text, "Ty");
-	test::eq(stack_node.target.as(TypeExpr).type_kind, TypeExprKind.TYPE_GENERIC);
+	test::eq(first_type.unresolved.name.text(), "Ty");
+	test::eq(stack_node.target.get()!!.as(TypeExpr).type_kind, TypeExprKind.TYPE_GENERIC);
 
 	Node* module_node       = mod.nodes[3];
 	AliasDecl* module_alias = module_node.as(AliasDecl);
 	test::eq(module_alias.alias_kind, AliasDeclKind.MODULE_ALIAS);
 	test::eq(module_alias.name_kind, TokenKind.IDENT);
-	test::eq(module_alias.target.kind, NodeKind.PATH_EXPR);
-	PathExpr* module_path = module_alias.target.as(PathExpr);
+	test::eq(module_alias.target.get()!!.kind, NodeKind.PATH_EXPR);
+	PathExpr* module_path = module_alias.target.get()!!.as(PathExpr);
 	test::eq(module_path.path.text, "my::collection");
 
 	Node* ident_node       = mod.nodes[4];
@@ -194,25 +194,25 @@ fn void alias_declarations_parse()
 
 	AliasDecl* generic_target_alias = mod.nodes[7].as(AliasDecl);
 	test::eq(generic_target_alias.alias_kind, AliasDeclKind.IDENT_ALIAS);
-	GenericIdentExpr* generic_target_path = generic_target_alias.target.as(GenericIdentExpr);
+	GenericIdentExpr* generic_target_path = generic_target_alias.target.get()!!.as(GenericIdentExpr);
 	test::eq(generic_target_path.exprs.len, 2);
 
 	AliasDecl* fn_ptr_alias = mod.nodes[8].as(AliasDecl);
 	test::eq(fn_ptr_alias.alias_kind, AliasDeclKind.TYPE_ALIAS);
-	test::eq(fn_ptr_alias.name.text, "ElementPredicate");
-	TypeExpr* fn_ptr_type = fn_ptr_alias.target.as(TypeExpr);
+	test::eq(fn_ptr_alias.name.text(), "ElementPredicate");
+	TypeExpr* fn_ptr_type = fn_ptr_alias.target.get()!!.as(TypeExpr);
 	test::eq(fn_ptr_type.type_kind, TypeExprKind.TYPE_FUNCTION);
 	TypeExpr* fn_ret_type = fn_ptr_type.func.ret_type.as(TypeExpr);
 	test::eq(fn_ret_type.type_kind, TypeExprKind.TYPE_IDENTIFIER);
-	test::eq(fn_ret_type.unresolved.name.text, "bool");
+	test::eq(fn_ret_type.unresolved.name.text(), "bool");
 	test::eq(fn_ptr_type.func.params.len, 1);
 	VarDecl* fn_param = fn_ptr_type.func.params[0].as(VarDecl);
 	test::eq(fn_param.var_kind, VarDeclKind.VAR_PARAM);
-	test::eq(fn_param.name.text, "type");
-	TypeExpr* param_type = fn_param.type.as(TypeExpr);
+	test::eq(fn_param.name.text(), "type");
+	TypeExpr* param_type = fn_param.type.get()!!.as(TypeExpr);
 	test::eq(param_type.type_kind, TypeExprKind.TYPE_POINTER);
 	TypeExpr* param_base_type = param_type.modify.base.as(TypeExpr);
-	test::eq(param_base_type.unresolved.name.text, "Type");
+	test::eq(param_base_type.unresolved.name.text(), "Type");
 
 	Node* node            = mod.nodes[9];
 	AliasDecl* alias_decl = node.as(AliasDecl);
@@ -220,7 +220,7 @@ fn void alias_declarations_parse()
 	test::eq(alias_decl.generics, null);
 	test::eq(alias_decl.attributes.len, 2);
 	test::eq(parser_tests::@attr(alias_decl, 0).attribute_kind, AttributeKind.PRIVATE);
-	test::eq(parser_tests::@attr(alias_decl, 1).name.text, "@AliasAttr");
+	test::eq(parser_tests::@attr(alias_decl, 1).name.get()!!.text, "@AliasAttr");
 	test::eq(node.flags.has_attributes, true);
 	test::eq(node.visibility, Visibility.PRIVATE);
 }
@@ -246,51 +246,51 @@ fn void typedef_declarations_parse()
 	test::eq(mod.nodes.len(), 9);
 
 	TypedefDecl* my_id = mod.nodes[2].as(TypedefDecl);
-	test::eq(my_id.name.text, "MyId");
+	test::eq(my_id.name.text(), "MyId");
 	test::eq(my_id.is_inline, false);
 	test::eq(my_id.attributes.len, 0);
-	TypeExpr* my_id_base = my_id.base_type.as(TypeExpr);
+	TypeExpr* my_id_base = my_id.base_type.get()!!.as(TypeExpr);
 	test::eq(my_id_base.type_kind, TypeExprKind.TYPE_IDENTIFIER);
-	test::eq(my_id_base.unresolved.name.text, "int");
+	test::eq(my_id_base.unresolved.name.text(), "int");
 
 	TypedefDecl* my_id2 = mod.nodes[3].as(TypedefDecl);
-	test::eq(my_id2.name.text, "MyId2");
+	test::eq(my_id2.name.text(), "MyId2");
 	test::eq(my_id2.attributes.len, 1);
 
 	TypedefDecl* bcd = mod.nodes[4].as(TypedefDecl);
-	test::eq(bcd.name.text, "Bcd");
+	test::eq(bcd.name.text(), "Bcd");
 	test::eq(bcd.is_inline, true);
 	test::eq(bcd.attributes.len, 1);
 
 	TypedefDecl* int_align = mod.nodes[5].as(TypedefDecl);
-	test::eq(int_align.name.text, "IntAlign2");
+	test::eq(int_align.name.text(), "IntAlign2");
 	test::eq(int_align.attributes.len, 1);
 
 	TypedefDecl* float4 = mod.nodes[6].as(TypedefDecl);
-	test::eq(float4.name.text, "Float4");
+	test::eq(float4.name.text(), "Float4");
 	test::eq(float4.attributes.len, 1);
-	TypeExpr* float4_base = float4.base_type.as(TypeExpr);
+	TypeExpr* float4_base = float4.base_type.get()!!.as(TypeExpr);
 	test::eq(float4_base.type_kind, TypeExprKind.TYPE_VECTOR);
-	test::eq(float4_base.array.len_expr.kind, NodeKind.LITERAL_EXPR);
+	test::eq(float4_base.array.len_expr.get()!!.kind, NodeKind.LITERAL_EXPR);
 
 	TypedefDecl* enum_set = mod.nodes[7].as(TypedefDecl);
-	test::eq(enum_set.name.text, "EnumSet");
+	test::eq(enum_set.name.text(), "EnumSet");
 	test::eq(enum_set.interfaces.len, 1);
 	TypeExpr* interface_type = enum_set.interfaces[0].as(TypeExpr);
-	test::eq(interface_type.unresolved.name.text, "Printable");
-	TypeExpr* enum_set_base = enum_set.base_type.as(TypeExpr);
-	test::eq(enum_set_base.unresolved.name.text, "uint");
+	test::eq(interface_type.unresolved.name.text(), "Printable");
+	TypeExpr* enum_set_base = enum_set.base_type.get()!!.as(TypeExpr);
+	test::eq(enum_set_base.unresolved.name.text(), "uint");
 
 	TypedefDecl* option = mod.nodes[8].as(TypedefDecl);
-	test::eq(option.name.text, "Option");
-	GenericDecl* option_generics = option.generics.as(GenericDecl);
+	test::eq(option.name.text(), "Option");
+	GenericDecl* option_generics = option.generics.get()!!.as(GenericDecl);
 	test::eq(option_generics.params.len, 1);
 	TypeExpr* option_generic_param = option_generics.params[0].as(TypeExpr);
-	test::eq(option_generic_param.unresolved.name.text, "Type");
-	TypeExpr* option_base = option.base_type.as(TypeExpr);
+	test::eq(option_generic_param.unresolved.name.text(), "Type");
+	TypeExpr* option_base = option.base_type.get()!!.as(TypeExpr);
 	test::eq(option_base.type_kind, TypeExprKind.TYPE_POINTER);
 	TypeExpr* option_inner = option_base.modify.base.as(TypeExpr);
-	test::eq(option_inner.unresolved.name.text, "Type");
+	test::eq(option_inner.unresolved.name.text(), "Type");
 }
 
 fn void function_pointer_types_are_alias_only()
@@ -306,11 +306,11 @@ fn void function_pointer_types_are_alias_only()
 	Module* mod = context.modules.get("hello")!!;
 
 	AliasDecl* alias_decl  = mod.nodes[1].as(AliasDecl);
-	TypeExpr* alias_target = alias_decl.target.as(TypeExpr);
+	TypeExpr* alias_target = alias_decl.target.get()!!.as(TypeExpr);
 	test::eq(alias_target.type_kind, TypeExprKind.TYPE_FUNCTION);
 	test::eq(alias_target.func.params.len, 1);
 	VarDecl* alias_param = alias_target.func.params[0].as(VarDecl);
-	test::eq(alias_param.init_expr.kind, NodeKind.LITERAL_EXPR);
+	test::eq(alias_param.init_expr.get()!!.kind, NodeKind.LITERAL_EXPR);
 }
 
 fn void global_var_const()
@@ -330,8 +330,8 @@ fn void global_var_const()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 }
 
 fn void global_var_multi_decl()
@@ -351,23 +351,23 @@ fn void global_var_multi_decl()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	test::eq(decl.name.text, "foo");
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	test::eq(decl.name.text(), "foo");
 	test::eq(decl.init_expr, null);
-	test::eq(decl.type.as(TypeExpr).unresolved.name.text, "int");
+	test::eq(decl.type.get()!!.as(TypeExpr).unresolved.name.get()!!.text, "int");
 
 	test::ne(decl.next, null);
 	VarDecl* decl_2 = decl.next.as(VarDecl);
-	test::eq(decl_2.name.text, "bar");
+	test::eq(decl_2.name.text(), "bar");
 	test::eq(decl_2.init_expr, null);
-	test::eq(decl_2.type.as(TypeExpr).unresolved.name.text, "int");
+	test::eq(decl_2.type.get()!!.as(TypeExpr).unresolved.name.get()!!.text, "int");
 
 	test::ne(decl_2.next, null);
 	VarDecl* decl_3 = decl_2.next.as(VarDecl);
-	test::eq(decl_3.name.text, "z");
+	test::eq(decl_3.name.text(), "z");
 	test::eq(decl_3.next, null);
 	test::eq(decl_3.init_expr, null);
-	test::eq(decl_3.type.as(TypeExpr).unresolved.name.text, "int");
+	test::eq(decl_3.type.get()!!.as(TypeExpr).unresolved.name.get()!!.text, "int");
 }
 
 fn void global_var()
@@ -387,8 +387,8 @@ fn void global_var()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 }
 
 fn void global_var_tlocal()
@@ -408,8 +408,8 @@ fn void global_var_tlocal()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 }
 
 fn void global_var_extern()
@@ -429,8 +429,8 @@ fn void global_var_extern()
 	Node* target_node = mod.nodes[1];
 	VarDecl* decl     = target_node.as(VarDecl);
 	test::eq(decl.var_kind, VarDeclKind.VAR_GLOBAL);
-	test::eq(decl.type.kind, NodeKind.TYPE_EXPR);
-	TypeExpr* type_data = decl.type.as(TypeExpr);
+	test::eq(decl.type.get()!!.kind, NodeKind.TYPE_EXPR);
+	TypeExpr* type_data = decl.type.get()!!.as(TypeExpr);
 }
 
 fn void expand()
@@ -515,7 +515,7 @@ fn void struct_decl()
 	StructDecl* head = null;
 	foreach (n : mod.nodes)
 	{
-		if (n && n.kind == STRUCT_DECL && n.as(StructDecl).name.text == "Foo") head = n.as(StructDecl);
+		if (n && n.kind == STRUCT_DECL && n.as(StructDecl).name.is("Foo")) head = n.as(StructDecl);
 	}
 	test::ne(head, null);
 
@@ -524,7 +524,7 @@ fn void struct_decl()
 	test::eq(head.fields[0].as(VarDecl).var_flags.is_inline, true);
 
 	StructDecl* sub = head.fields[2].as(StructDecl);
-	test::eq(sub.name.text, "sub");
+	test::eq(sub.name.text(), "sub");
 	test::eq(sub.is_union, false);
 	test::eq(sub.fields.len, 2);
 	StructDecl* sub_union = sub.fields[1].as(StructDecl);
@@ -664,17 +664,17 @@ fn void faultset_decl()
 
 	FaultdefDecl* fd1 = mod.nodes[1].as(FaultdefDecl);
 	test::eq(fd1.faults.len, 2);
-	test::eq(fd1.faults[0].as(FaultDecl).name.text, "RESULT_ERROR");
-	test::eq(fd1.faults[1].as(FaultDecl).name.text, "RESULT_OK");
+	test::eq(fd1.faults[0].as(FaultDecl).name.text(), "RESULT_ERROR");
+	test::eq(fd1.faults[1].as(FaultDecl).name.text(), "RESULT_OK");
 
 	FaultdefDecl* fd2 = mod.nodes[2].as(FaultdefDecl);
 	test::eq(fd2.faults.len, 2);
-	test::eq(fd2.faults[0].as(FaultDecl).name.text, "NAMED_ONE");
-	test::eq(fd2.faults[1].as(FaultDecl).name.text, "NAMED_TWO");
+	test::eq(fd2.faults[0].as(FaultDecl).name.text(), "NAMED_ONE");
+	test::eq(fd2.faults[1].as(FaultDecl).name.text(), "NAMED_TWO");
 
 	FaultdefDecl* fd3 = mod.nodes[3].as(FaultdefDecl);
 	test::eq(fd3.faults.len, 1);
-	test::eq(fd3.faults[0].as(FaultDecl).name.text, "SINGLE");
+	test::eq(fd3.faults[0].as(FaultDecl).name.text(), "SINGLE");
 }
 
 fn void interface_decl()
@@ -765,14 +765,14 @@ fn void param_inline_fn_type_and_sigils()
 	Module* mod = context.modules.get("hello")!!;
 
 	AliasDecl* cb_alias = mod.nodes[1].as(AliasDecl);
-	test::eq(cb_alias.name.text, "Callback");
-	test::eq(cb_alias.target.as(TypeExpr).type_kind, TypeExprKind.TYPE_FUNCTION);
+	test::eq(cb_alias.name.text(), "Callback");
+	test::eq(cb_alias.target.get()!!.as(TypeExpr).type_kind, TypeExprKind.TYPE_FUNCTION);
 
 	FnDecl* fn_cb = mod.nodes[2].as(FnDecl);
 	test::eq(fn_cb.params.len, 2);
 	VarDecl* cb_param = fn_cb.params[0].as(VarDecl);
-	test::eq(cb_param.name.text, "cb");
-	test::eq(cb_param.type.as(TypeExpr).unresolved.name.text, "Callback");
+	test::eq(cb_param.name.text(), "cb");
+	test::eq(cb_param.type.get()!!.as(TypeExpr).unresolved.name.get()!!.text, "Callback");
 
 	FnDecl* fn_ref = mod.nodes[4].as(FnDecl);
 	VarDecl* ref_param = fn_ref.params[0].as(VarDecl);
@@ -782,11 +782,11 @@ fn void param_inline_fn_type_and_sigils()
 	test::eq(mac.params.len, 2);
 	VarDecl* param0 = mac.params[0].as(VarDecl);
 	test::eq(param0.var_kind, VarDeclKind.VAR_PARAM_EXPR);
-	test::eq(param0.name.text, "#type");
+	test::eq(param0.name.text(), "#type");
 
 	VarDecl* param1 = mac.params[1].as(VarDecl);
 	test::eq(param1.var_kind, VarDeclKind.VAR_PARAM_CT);
-	test::eq(param1.name.text, "$count");
+	test::eq(param1.name.text(), "$count");
 }
 
 
@@ -827,20 +827,20 @@ fn void test_faultdef_and_excuse_block_syntax() @test
 	// 1. excuse { ... } block without semicolon
 	FaultdefDecl* fd1 = mod.nodes[1].as(FaultdefDecl);
 	test::eq(fd1.faults.len, 2);
-	test::eq(fd1.faults[0].as(FaultDecl).name.text, "POOL_SHUTDOWN");
-	test::eq(fd1.faults[1].as(FaultDecl).name.text, "POOL_SPAWN_FAILED");
+	test::eq(fd1.faults[0].as(FaultDecl).name.text(), "POOL_SHUTDOWN");
+	test::eq(fd1.faults[1].as(FaultDecl).name.text(), "POOL_SPAWN_FAILED");
 
 	// 2. faultdef { ... } block without semicolon
 	FaultdefDecl* fd2 = mod.nodes[2].as(FaultdefDecl);
 	test::eq(fd2.faults.len, 2);
-	test::eq(fd2.faults[0].as(FaultDecl).name.text, "ERR_TIMEOUT");
-	test::eq(fd2.faults[1].as(FaultDecl).name.text, "ERR_IO");
+	test::eq(fd2.faults[0].as(FaultDecl).name.text(), "ERR_TIMEOUT");
+	test::eq(fd2.faults[1].as(FaultDecl).name.text(), "ERR_IO");
 
 	// 3. excuse { ... }; block with semicolon
 	FaultdefDecl* fd3 = mod.nodes[3].as(FaultdefDecl);
 	test::eq(fd3.faults.len, 2);
-	test::eq(fd3.faults[0].as(FaultDecl).name.text, "CLOSED");
-	test::eq(fd3.faults[1].as(FaultDecl).name.text, "EOF");
+	test::eq(fd3.faults[0].as(FaultDecl).name.text(), "CLOSED");
+	test::eq(fd3.faults[1].as(FaultDecl).name.text(), "EOF");
 }
 
 <*
@@ -911,7 +911,7 @@ fn void test_core_substruct_hierarchical_fields_and_lookup() @test
 	StructDecl* parent = null;
 	foreach (node : mod.nodes)
 	{
-		if (node && node.kind == STRUCT_DECL && node.as(StructDecl).name && node.as(StructDecl).name.text == "Parent")
+		if (node && node.kind == STRUCT_DECL && (node.as(StructDecl).name.get().text ?? "") == "Parent")
 		{
 			parent = node.as(StructDecl);
 			break;
@@ -922,36 +922,31 @@ fn void test_core_substruct_hierarchical_fields_and_lookup() @test
 	// 1. Parent.fields must contain direct member fields and sub-struct declarations
 	test::eq(parent.fields.len, 3);
 	test::eq(parent.fields[0].kind, NodeKind.VAR_DECL);
-	test::eq(parent.fields[0].as(VarDecl).name.text, "root_field");
+	test::eq(parent.fields[0].as(VarDecl).name.text(), "root_field");
 
 	test::eq(parent.fields[1].kind, NodeKind.STRUCT_DECL);
-	test::eq(parent.fields[1].as(StructDecl).name.text, "inner");
+	test::eq(parent.fields[1].as(StructDecl).name.text(), "inner");
 
 	test::eq(parent.fields[2].kind, NodeKind.STRUCT_DECL);
 	test::eq(parent.fields[2].as(StructDecl).name, null); // Anonymous union
 
 	// 2. Member lookup on Parent
-	Node* root_mem = cursor::find_member_in_type((Node*)parent, "root_field");
-	assert(root_mem != null);
+	Node* root_mem = cursor::find_member_in_type((Node*)parent, "root_field")!!;
 	test::eq(root_mem.kind, NodeKind.VAR_DECL);
 
-	Node* inner_mem = cursor::find_member_in_type((Node*)parent, "inner");
-	assert(inner_mem != null);
+	Node* inner_mem = cursor::find_member_in_type((Node*)parent, "inner")!!;
 	test::eq(inner_mem.kind, NodeKind.STRUCT_DECL);
 
-	Node* anon_mem = cursor::find_member_in_type((Node*)parent, "anon_u_int");
-	assert(anon_mem != null);
+	Node* anon_mem = cursor::find_member_in_type((Node*)parent, "anon_u_int")!!;
 	test::eq(anon_mem.kind, NodeKind.VAR_DECL);
 
 	// 3. Named sub-struct fields must NOT leak into Parent
-	Node* leaked = cursor::find_member_in_type((Node*)parent, "inner_field");
-	test::eq(leaked, null);
+	assert(!@ok(cursor::find_member_in_type((Node*)parent, "inner_field")));
 
 	// 4. Member lookup on inner sub-struct
-	Node* sub_mem = cursor::find_member_in_type(inner_mem, "inner_field");
-	assert(sub_mem != null);
+	Node* sub_mem = cursor::find_member_in_type(inner_mem, "inner_field")!!;
 	test::eq(sub_mem.kind, NodeKind.VAR_DECL);
-	test::eq(sub_mem.as(VarDecl).name.text, "inner_field");
+	test::eq(sub_mem.as(VarDecl).name.text(), "inner_field");
 }
 
 fn void path_prefixed_method_declarations() @test
@@ -975,24 +970,24 @@ fn void path_prefixed_method_declarations() @test
 	test::eq(parser_tests::count_kind(mod, MACRO_DECL), 1);
 
 	FnDecl* fn1 = mod.nodes[2].as(FnDecl);
-	test::eq(fn1.name.text, "do_something1");
+	test::eq(fn1.name.text(), "do_something1");
 	test::ne(fn1.associated_type, null);
-	test::eq(cursor::spelling(fn1.associated_type, tmem), "std::gfx::GfxSurface");
-	test::eq(cursor::raw_type_identifier(fn1.associated_type)!!, "GfxSurface");
+	test::eq(cursor::spelling(fn1.associated_type.get()!!, tmem), "std::gfx::GfxSurface");
+	test::eq(cursor::raw_type_identifier(fn1.associated_type.get()!!)!!, "GfxSurface");
 
 	FnDecl* fn2 = mod.nodes[3].as(FnDecl);
-	test::eq(fn2.name.text, "do_something2");
+	test::eq(fn2.name.text(), "do_something2");
 	test::ne(fn2.associated_type, null);
-	test::eq(cursor::spelling(fn2.associated_type, tmem), "gfx::GfxSurface");
-	test::eq(cursor::raw_type_identifier(fn2.associated_type)!!, "GfxSurface");
+	test::eq(cursor::spelling(fn2.associated_type.get()!!, tmem), "gfx::GfxSurface");
+	test::eq(cursor::raw_type_identifier(fn2.associated_type.get()!!)!!, "GfxSurface");
 
 	FnDecl* fn3 = mod.nodes[4].as(FnDecl);
-	test::eq(fn3.name.text, "do_something3");
+	test::eq(fn3.name.text(), "do_something3");
 	test::ne(fn3.associated_type, null);
-	test::eq(cursor::spelling(fn3.associated_type, tmem), "GfxSurface");
+	test::eq(cursor::spelling(fn3.associated_type.get()!!, tmem), "GfxSurface");
 
 	MacroDecl* mac = mod.nodes[5].as(MacroDecl);
-	test::eq(mac.name.text, "do_macro");
+	test::eq(mac.name.text(), "do_macro");
 	assert(@ok(mac.associated_type.get()));
 	test::eq(cursor::spelling(mac.associated_type.get()!!, tmem), "std::gfx::GfxSurface");
 }

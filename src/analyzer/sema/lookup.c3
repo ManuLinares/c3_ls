@@ -26,11 +26,10 @@ fn void free(AnalyzerContext* context, Lookup* lookup)
 	alloc::free(context.allocator, lookup);
 }
 
-fn void register_type(Lookup* lookup, Allocator alloc, String name, Node* node)
+fn void register_type(Lookup* lookup, Allocator alloc, String name)
 {
 	if (try old_type = lookup.types.get(name))
 	{
-		old_type.data.node = node;
 		old_type.status = UNRESOLVED;
 		return;
 	}
@@ -38,7 +37,6 @@ fn void register_type(Lookup* lookup, Allocator alloc, String name, Node* node)
 	Type* type = alloc::new(&lookup.arena, Type);
 
 	type.name = name.copy(&lookup.arena);
-	type.data.node = node;
 	type.status = UNRESOLVED;
 
 	lookup.types.set(type.name, type);
@@ -67,8 +65,8 @@ fn void init_builtin_types(Lookup* lookup)
 	}
 }
 
-fn Type* get_type_by_name(Lookup* lookup, String name)
+fn Type*? get_type_by_name(Lookup* lookup, String name)
 {
-	if (!lookup || name.len == 0) return null;
-	return lookup.types.get(name) ?? null;
+	if (!lookup || name.len == 0) return NOT_FOUND~;
+	return lookup.types.get(name);
 }

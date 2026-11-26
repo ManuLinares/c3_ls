@@ -9,7 +9,7 @@ import std::collections::map;
 struct TypeReferenceCheck
 {
 	TypeNameScope scope;
-	HashMap{String, Node*} anywhere; // name -> declaration in any module, or null
+	HashMap{String, NullableNode} anywhere; // name -> declaration in any module, or null
 }
 
 <*
@@ -38,25 +38,26 @@ fn ChildVisitResult check_type_reference(Node* node, Node* parent, void* user_da
 	if (node.kind != TYPE_EXPR) return RECURSE;
 
 	TypeExpr* te = node.as(TypeExpr);
-	if (te.type_kind != TYPE_IDENTIFIER || !te.unresolved.name || te.unresolved.path) return RECURSE;
+	if (te.type_kind != TYPE_IDENTIFIER || @ok(te.unresolved.path.get())) return RECURSE;
 
-	Ident* name = te.unresolved.name;
+	Ident*? name = te.unresolved.name.get();
+	if (catch name) return RECURSE;
 	if (constants::is_primitive(name.text)) return RECURSE;
 
 	TypeReferenceCheck* check = (TypeReferenceCheck*)user_data;
-	if (check.scope.resolve(name)) return RECURSE;
+	if (@ok(check.scope.resolve(name))) return RECURSE;
 
-	Node* decl;
+	Node*? decl;
 	if (try cached = check.anywhere.get(name.text))
 	{
-		decl = cached;
+		decl = cached.get();
 	}
 	else
 	{
 		decl = query::find_type_node_in_context(check.scope.context, null, name.text);
-		check.anywhere.set(name.text, decl);
+		check.anywhere.set(name.text, ast::@nullable(decl));
 	}
-	if (!decl) return RECURSE;
+	if (catch decl) return RECURSE;
 
 	String mod = module_of(check.scope.context, decl);
 	if (mod.len == 0) return RECURSE;

@@ -103,8 +103,8 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 				advance(ctx);
 
 				current_type.type_kind = TYPE_IDENTIFIER;
-				current_type.unresolved.name = ctx.ident(t);
-				current_type.unresolved.path = null;
+				current_type.unresolved.name.set(ctx.ident(t));
+				current_type.unresolved.path.set(null);
 				break;
 			}
 		default:
@@ -115,8 +115,8 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 				{
 				case TYPE_IDENT:
 					current_type.type_kind = TYPE_IDENTIFIER;
-					current_type.unresolved.name = ctx.ident(ctx.current);
-					current_type.unresolved.path = path;
+					current_type.unresolved.name.set(ctx.ident(ctx.current));
+					current_type.unresolved.path.set(path);
 					advance(ctx);
 				default:
 					diagnostics::error(ctx.context, ctx.current.range, "Expected type identifier");
@@ -159,7 +159,7 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 
 				if (!consume(ctx, ASTERISK))
 				{
-					vec_node.array.len_expr = parse_expr(scope, ADDITIVE);
+					vec_node.array.len_expr.set(parse_expr(scope, ADDITIVE));
 				}
 
 				expect(ctx, vec_node, RVEC);
@@ -185,7 +185,7 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 						advance(ctx, 2);
 						arr_node.type_kind = TYPE_ARRAY;
 						arr_node.array.base = current_type;
-						arr_node.array.len_expr = null;
+						arr_node.array.len_expr.set(null);
 						break;
 					}
 					nextcase
@@ -193,7 +193,7 @@ fn Node* parse_type_expr(ContextScope scope, Node* path_expr = null)
 				default:
 					arr_node.type_kind = TYPE_ARRAY;
 					arr_node.array.base = current_type;
-					arr_node.array.len_expr = parse_expr(scope);
+					arr_node.array.len_expr.set(parse_expr(scope));
 					expect(ctx, arr_node, RBRACKET);
 					break;
 			}
@@ -251,7 +251,7 @@ fn Node* parse_ident_expr(ContextScope scope)
 				Range full_range = path_prefix ? (Range){ path_prefix.range.start, t.range.end } : (Range){ start.start, t.range.end };
 				IdentExpr* ident = ctx.ast.alloc_node(IdentExpr, full_range);
 				ident.ident = ctx.ident(t);
-				ident.path_expr = path_prefix;
+				ident.path_expr.set(path_prefix);
 
 				advance(ctx);
 				ident.range.end = ctx.peek(-1).range.end;
@@ -725,7 +725,7 @@ fn Node* parse_contract_expr(ContextScope scope)
 		{
 			IdentExpr* pinpoint = ctx.ast.alloc_node(IdentExpr, ctx.current.range);
 			pinpoint.ident = ctx.ident(ctx.current);
-			node.pinpoint = (Node*)pinpoint;
+			node.pinpoint.set(pinpoint);
 			advance(ctx);
 		}
 		(void)consume(ctx, RBRACKET);
@@ -745,7 +745,7 @@ fn Node* parse_contract_expr(ContextScope scope)
 			error_node(ctx, node);
 		}
 
-		node.expr_string = parse_expr(scope);
+		node.expr_string.set(parse_expr(scope));
 	}
 
 	return (Node*)node;
@@ -814,8 +814,8 @@ fn Node* parse_call_expr(ContextScope scope, Node* callee)
 		};
 		MacroBodyExpr* body_node = ctx.ast.alloc_node(MacroBodyExpr, range);
 		body_node.args = body_args;
-		body_node.body = body;
-		node.macro_body_expr = body_node;
+		body_node.body.set(body);
+		node.macro_body_expr.set(body_node);
 	}
 
 	return (Node*)node;
@@ -855,33 +855,31 @@ fn Node* parse_catch_expr(ContextScope scope) => @pool()
 		return node;
 	}
 
-	switch (sub_expr.kind)
+	Node* variable = sub_expr;
+	if (sub_expr.kind == TYPE_EXPR)
 	{
-		case TYPE_EXPR:
-			node.type = sub_expr;
-			node.variable = parse_try_chain_expr(scope);
+		node.type.set(sub_expr);
+		variable = parse_try_chain_expr(scope);
 
-			if (node.variable.kind != IDENT_EXPR)
-			{
-				diagnostics::error(ctx.context, node.variable.range, "Expected variable name");
-				node.flags.has_error = true;
-			}
-		default:
-			node.variable = sub_expr;
+		if (variable.kind != IDENT_EXPR)
+		{
+			diagnostics::error(ctx.context, variable.range, "Expected variable name");
+			node.flags.has_error = true;
+		}
 	}
 
 	if (!consume(ctx, EQ))
 	{
-		if (node.type)
+		if (@ok(node.type.get()))
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected '=' in catch-unwrap");
 			node.flags.has_error = true;
 		}
 
-		node.exprs = alloc::clone_slice(ctx.allocator, (Node*[]){ node.variable });
-		node.variable = null;
+		node.exprs = alloc::clone_slice(ctx.allocator, (Node*[]){ variable });
 		return node;
 	}
+	node.variable.set(variable);
 
 	while (!ctx.eof())
 	{
@@ -947,7 +945,7 @@ fn Node* parse_try_expr(ContextScope scope)
 	switch (lhs.kind)
 	{
 		case TYPE_EXPR:
-			node.type = lhs;
+			node.type.set(lhs);
 			node.variable = parse_try_chain_expr(scope);
 
 			if (node.variable.kind != IDENT_EXPR)
@@ -961,7 +959,7 @@ fn Node* parse_try_expr(ContextScope scope)
 
 	if (consume(ctx, EQ))
 	{
-		node.init = parse_try_chain_expr(scope);
+		node.init.set(parse_try_chain_expr(scope));
 	}
 
 	return (Node*)node;
@@ -1096,7 +1094,7 @@ fn Node* parse_vasplat_expr(ContextScope scope)
 
 	if (consume(ctx, LBRACKET))
 	{
-		node.range_expr = parse_range_expr(scope, null, start);
+		node.range_expr.set(parse_range_expr(scope, null, start));
 	}
 
 	return (Node*)node;
@@ -1128,11 +1126,11 @@ fn Node* parse_lambda_expr(ContextScope scope)
 	advance(ctx);
 	if (!ctx.is(LPAREN))
 	{
-		node.return_type = parse_type_expr(scope.with_only_flags(
+		node.return_type.set(parse_type_expr(scope.with_only_flags(
 		{
 			.no_generics
 		}
-		), null);
+		), null));
 	}
 	node.params = parse_parameter_list(scope.with_only_flags({ .is_function }));
 	if (ctx.is(AT_IDENT) || ctx.is(AT_TYPE_IDENT))
@@ -1154,6 +1152,7 @@ fn Node* parse_lambda_expr(ContextScope scope)
 		default:
 			diagnostics::error(ctx.context, ctx.current.range, "Expected the beginning of a block or a shortbody");
 			error_node(ctx, node);
+			node.body = ctx.ast.error(ctx.current.range);
 	}
 
 	return (Node*)node;
@@ -1248,8 +1247,8 @@ fn Node* parse_designator_expr(ContextScope scope)
 					node.range.end = ctx.peek(-1).range.end;
 
 					node.designator_kind = DesignatorKind.PERIOD;
-					node.path = path;
-					node.data.field = field;
+					node.path.set(path);
+					node.data.field.set(field);
 
 					path = (Node*)node;
 					continue;
@@ -1381,7 +1380,7 @@ fn Node* parse_access_expr(ContextScope scope, Node* left)
 	switch (member_token.kind)
 	{
 		case CT_EVAL:
-			node.member = parse_ct_eval_expr(scope.with_only_flags({ .type_as_expression }));
+			node.member.set(parse_ct_eval_expr(scope.with_only_flags({ .type_as_expression })));
 			break;
 		case IDENT:
 		case CONST_IDENT:
@@ -1409,18 +1408,18 @@ fn Node* parse_access_expr(ContextScope scope, Node* left)
 				IdentExpr* ident = ctx.ast.alloc_node(IdentExpr, member_token.range);
 				ident.ident = ctx.ident(member_token);
 				advance(ctx);
-				node.member = (Node*)ident;
+				node.member.set((Node*)ident);
 				break;
 			}
 		default:
 			if (!can_start_expression(member_token.kind))
 			{
 				node.flags.has_error = true;
-				node.member = null;
+				node.member.set(null);
 				return (Node*)node;
 			}
 			diagnostics::error(ctx.context, member_token.range, "Expected member identifier after '.'");
-			node.member = ctx.ast.error(member_token.range);
+			node.member.set(ctx.ast.error(member_token.range));
 			break;
 	}
 
@@ -1436,7 +1435,7 @@ fn Node* parse_range_expr(ContextScope scope, Node* left, Range start)
 
 	RangeExpr* range_node = ctx.ast.alloc_node(RangeExpr, ctx.current.range);
 
-	designator_node.path = left;
+	designator_node.path.set(left);
 	designator_node.data.range = range_node;
 
 	bool is_slice = false;
@@ -1455,7 +1454,7 @@ fn Node* parse_range_expr(ContextScope scope, Node* left, Range start)
 			range_node.start_from_end = true;
 		}
 
-		range_node.start = parse_expr(scope, LOWEST);
+		range_node.start.set(parse_expr(scope, LOWEST));
 
 		if (ctx.is(COLON) || ctx.is(DOTDOT))
 		{
@@ -1472,7 +1471,7 @@ fn Node* parse_range_expr(ContextScope scope, Node* left, Range start)
 			range_node.end_from_end = true;
 		}
 
-		range_node.end = parse_expr(scope, LOWEST);
+		range_node.end.set(parse_expr(scope, LOWEST));
 	}
 
 	expect(ctx, designator_node, RBRACKET);
@@ -1490,9 +1489,9 @@ fn Node* parse_range_expr(ContextScope scope, Node* left, Range start)
 			default:
 				switch (true)
 				{
-				case range_node.start != null && range_node.end != null:
+				case @ok(range_node.start.get()) && @ok(range_node.end.get()):
 					range_node.range_kind = RangeKind.CONST_RANGE;
-				case range_node.end != null:
+				case @ok(range_node.end.get()):
 					range_node.range_kind = RangeKind.CONST_END;
 				default:
 					range_node.range_kind = RangeKind.DYNAMIC;
@@ -1625,7 +1624,7 @@ fn Node* parse_vaarg_expr(ContextScope scope)
 
 	expect(ctx, node, LBRACKET);
 	node.start_from_end = consume(ctx, BIT_XOR);
-	node.expr = parse_expr(scope);
+	node.expr.set(parse_expr(scope));
 	expect(ctx, node, RBRACKET);
 	return (Node*)node;
 }

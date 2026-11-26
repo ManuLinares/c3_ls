@@ -12,8 +12,7 @@ const sz MAX_WORKSPACE_SYMBOLS = 512;
 
 fn SymbolInformation[]? get_document_symbols(LspProject* project, Uri uri)
 {
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf) return {};
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
 
 	List{SymbolInformation} symbols;
 	symbols.tinit();

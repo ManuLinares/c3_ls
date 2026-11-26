@@ -51,7 +51,7 @@ fn void test_interface_methods_population_and_doc_comments()
 		if (node && node.kind == INTERFACE_DECL)
 		{
 			InterfaceDecl* id = node.as(InterfaceDecl);
-			if (id.name && id.name.text == "Stream")
+			if ((id.name.get().text ?? "") == "Stream")
 			{
 				stream_iface = id;
 				break;
@@ -63,8 +63,8 @@ fn void test_interface_methods_population_and_doc_comments()
 
 	// 1. Parent interfaces must contain Printable and Serializable
 	test::eq(stream_iface.interfaces.len, 2);
-	test::eq(stream_iface.interfaces[0].as(TypeExpr).unresolved.name.text, "Printable");
-	test::eq(stream_iface.interfaces[1].as(TypeExpr).unresolved.name.text, "Serializable");
+	test::eq(stream_iface.interfaces[0].as(TypeExpr).unresolved.name.text(), "Printable");
+	test::eq(stream_iface.interfaces[1].as(TypeExpr).unresolved.name.text(), "Serializable");
 
 	// 2. Methods must be populated with FnDecl* nodes, NOT the parent interface types
 	test::eq(stream_iface.methods.len, 2);
@@ -72,11 +72,11 @@ fn void test_interface_methods_population_and_doc_comments()
 	test::eq(stream_iface.methods[1].kind, NodeKind.FN_DECL);
 
 	FnDecl* fn_flush = stream_iface.methods[0].as(FnDecl);
-	test::eq(fn_flush.name.text, "flush");
+	test::eq(fn_flush.name.text(), "flush");
 	assert(@ok(fn_flush.contract.get()));
 
 	FnDecl* fn_close = stream_iface.methods[1].as(FnDecl);
-	test::eq(fn_close.name.text, "close");
+	test::eq(fn_close.name.text(), "close");
 	test::eq(fn_close.params.len, 1);
 	assert(@ok(fn_close.contract.get()));
 }
@@ -359,7 +359,7 @@ fn void test_change_file_path_survives_tmem_reset() @test
 	// FAILS on current code: SourceFile is registered under corrupted 'X' path,
 	// causing get_source_file_by_path to return null!
 	proj.update();
-	SourceFile* sf = proj.workspace.get_source_file_by_path(file_path);
+	SourceFile* sf = proj.workspace.get_source_file_by_path(file_path)!!;
 	assert(sf != null);
 	test::eq(sf.path, file_path);
 }

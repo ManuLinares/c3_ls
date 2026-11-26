@@ -14,23 +14,22 @@ fn LspRange? prepare_rename(LspProject* project, Uri uri, LspPosition pos)
 		.column = (int)pos.character
 	};
 
-	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path);
-	if (!sf || !project.workspace.ctx) return NOT_FOUND~;
+	SourceFile* sf = project.workspace.get_source_file_by_path(uri.path)!;
+	if (!project.workspace.ctx) return NOT_FOUND~;
 
-	Node* target = query::node_at(sf, loc);
-	if (!target || target.kind == ERROR) return NOT_FOUND~;
+	Node* target = query::node_at(sf, loc)!;
+	if (target.kind == ERROR) return NOT_FOUND~;
 
-	Ident* name = references::decl_name(target) ?: references::ref_name(target);
-	if (!name || !name.range.touches(loc)) return NOT_FOUND~;
+	Ident* name = references::declared_name(target) ?? references::ref_name(target)!;
+	if (!name.range.touches(loc)) return NOT_FOUND~;
 
-	Node* decl = query::resolve_symbol_at(project.workspace.ctx, sf, loc);
-	if (!decl || decl.kind == MODULE_DECL) return NOT_FOUND~;
+	Node* decl = query::resolve_symbol_at(project.workspace.ctx, sf, loc)!;
+	if (decl.kind == MODULE_DECL) return NOT_FOUND~;
 	if (decl.kind == TYPE_EXPR && constants::is_primitive(name.text)) return NOT_FOUND~;
 	if (references::decl_symbol_name(decl) != name.text) return NOT_FOUND~;
 
 	// Stdlib symbols are only renamed while editing the stdlib itself.
-	SourceFile* decl_file = source_file::file_of(project.workspace.ctx, decl);
-	if (decl_file && server::is_stdlib_file(decl_file.path) && !server::is_stdlib_file(uri.path)) return NOT_FOUND~;
+	if (try decl_file = source_file::file_of(project.workspace.ctx, decl) && server::is_stdlib_file(decl_file.path) && !server::is_stdlib_file(uri.path)) return NOT_FOUND~;
 
 	return {
 		.start = {
