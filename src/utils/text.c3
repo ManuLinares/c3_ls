@@ -119,6 +119,16 @@ fn String extract_line_prefix(String text, sz offset)
 	return text[line_start : offset - line_start].trim_left();
 }
 
+<*
+ Whether the character at `idx` follows an odd number of backslashes.
+*>
+fn bool is_escaped(String text, sz idx) @local
+{
+	sz backslashes = 0;
+	while (idx > backslashes && text[idx - backslashes - 1] == '\\') backslashes++;
+	return backslashes % 2 == 1;
+}
+
 fn sz find_enclosing_bracket(String text, sz idx, char open_ch = '{', char close_ch = '}')
 {
 	int depth = 0;
@@ -134,9 +144,9 @@ fn sz find_enclosing_bracket(String text, sz idx, char open_ch = '{', char close
 		char c = text[i - 1];
 		if (c == '`') { in_raw = !in_raw; continue; }
 		if (in_raw) continue;
-		if (c == '"' && (i < 2 || text[i - 2] != '\\')) { in_str = !in_str; continue; }
+		if (c == '"' && !is_escaped(text, i - 1)) { in_str = !in_str; continue; }
 		if (in_str) continue;
-		if (c == '\'' && (i < 2 || text[i - 2] != '\\')) { in_char = !in_char; continue; }
+		if (c == '\'' && !is_escaped(text, i - 1)) { in_char = !in_char; continue; }
 		if (in_char) continue;
 
 		if (c == close_ch)

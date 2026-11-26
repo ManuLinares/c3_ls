@@ -187,3 +187,40 @@ fn void test_user_repro_issue4_second_arg_named_arg_colon_ranks_above_local()
     test::eq(named_arg_sort, "0002_physicsScene");
     assert(local_var_sort.compare_to(named_arg_sort) < 0);
 }
+fn void bindings_match_like_locals()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn int? g() => 1;\nfn void f(int[] arr)\n{\n\tint local_value;\n\tforeach (idx_value, item_value : arr)\n\t{\n\t\tif (try try_value = g())\n\t\t{\n\t\t\tval\n\t\t}\n\t}\n}\n";
+	proj.workspace.process_file("/virtual/bindings.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/bindings.c3");
+	defer doc_uri.free();
+
+	DString labels;
+	labels.tinit();
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 9, .character = 6 })!!) labels.appendf("%s ", item.label);
+	String got = labels.str_view();
+	foreach (name : (String[]){ "local_value", "idx_value", "item_value", "try_value" })
+	{
+		assert(got.contains(name), "%s missing from: %s", name, got);
+	}
+}
+
+fn void designator_after_escaped_backslash_string()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nstruct Foo { String a; int b; int c; }\nfn void f()\n{\n\tFoo x = { .a = \"\\\\\", .b = 1, . };\n}\n";
+	proj.workspace.process_file("/virtual/designator.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/designator.c3");
+	defer doc_uri.free();
+
+	DString labels;
+	labels.tinit();
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 4, .character = 31 })!!) labels.appendf("%s ", item.label);
+	test::eq(labels.str_view().trim(), "c");
+}

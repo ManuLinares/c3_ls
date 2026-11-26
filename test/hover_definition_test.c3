@@ -1268,3 +1268,87 @@ fn void test_hover_on_top_level_include_without_node()
 	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/include.c3")!!;
 	(void)query::member_binding_at(proj.workspace.ctx, sf, { .line = 1, .column = 0 }, null);
 }
+
+fn void definition_skips_locals_out_of_scope()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nint counter = 0;\nfn void f()\n{\n\tfloat counter = 1;\n}\nfn void g()\n{\n\tcounter++;\n}\nfn void h()\n{\n\t{\n\t\tfloat counter = 2;\n\t}\n\tcounter++;\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/scopes.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/scopes.c3", source);
+
+	foreach (uint line : (uint[]){ 8, 15 })
+	{
+		LspLocation[] locs = definition::goto_definition(&proj, doc_uri, { .line = line, .character = 2 })!!;
+		assert(locs.len == 1 && locs[0].range.start.line == 1, "line %d: %d results, first at %d", line, locs.len, locs.len ? (int)locs[0].range.start.line : -1);
+		String hover_res = hover::hover(&proj, doc_uri, { .line = line, .character = 2 })!!;
+		assert(hover_res.contains("int counter") && !hover_res.contains("float"), "line %d: %s", line, hover_res);
+	}
+}
+
+fn void member_completion_ignores_undeclared_name()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nstruct Bar { int bar_field; }\nfn void f()\n{\n\tBar counter;\n\tcounter.bar_field = 1;\n}\nfn void g()\n{\n\tcounter.\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/undeclared.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/undeclared.c3", source);
+
+	foreach (item : completion::resolve(&proj, doc_uri, { .line = 9, .character = 9 })!!)
+	{
+		assert(item.label != "bar_field", "offered a member of f's local");
+	}
+}
+
+fn void try_binding_not_visible_in_else()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nint a;\nfn int? g() => 1;\nfn void f()\n{\n\tif (try a = g())\n\t{\n\t\ta++;\n\t}\n\telse\n\t{\n\t\ta++;\n\t}\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/try_else.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/try_else.c3", source);
+
+	LspLocation[] then_locs = definition::goto_definition(&proj, doc_uri, { .line = 7, .character = 2 })!!;
+	assert(then_locs.len == 1 && then_locs[0].range.start.line == 5, "then: %d results", then_locs.len);
+	LspLocation[] else_locs = definition::goto_definition(&proj, doc_uri, { .line = 11, .character = 2 })!!;
+	assert(else_locs.len == 1 && else_locs[0].range.start.line == 1, "else: %d results, first at %d", else_locs.len, else_locs.len ? (int)else_locs[0].range.start.line : -1);
+}
+
+fn void catch_binding_visible_in_else()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn int? g() => 1;\nfn void f()\n{\n\tif (catch e = g())\n\t{\n\t\treturn;\n\t}\n\telse\n\t{\n\t\tfault x = e;\n\t}\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/catch_else.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/catch_else.c3", source);
+
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, { .line = 10, .character = 12 })!!;
+	assert(locs.len == 1 && locs[0].range.start.line == 4, "%d results", locs.len);
+}
+
+fn void local_declared_later_not_visible()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nint a;\nfn void f()\n{\n\ta++;\n\tfloat a = 1;\n}\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/later.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/later.c3", source);
+
+	LspLocation[] locs = definition::goto_definition(&proj, doc_uri, { .line = 4, .character = 1 })!!;
+	assert(locs.len == 1 && locs[0].range.start.line == 1, "%d results, first at %d", locs.len, locs.len ? (int)locs[0].range.start.line : -1);
+}

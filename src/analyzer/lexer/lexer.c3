@@ -37,7 +37,8 @@ struct Token
 struct Comment
 {
 	Range range;
-	bool is_line;
+	<* LINE_COMMENT, BLOCK_COMMENT, or DOCS_TEXT for the prose of a doc block. *>
+	TokenKind kind;
 }
 
 struct Lexer
@@ -56,7 +57,7 @@ struct Lexer
  Whether `loc` is in the comment. The end of a line comment is too, as
  typing there continues the comment.
 *>
-fn bool Comment.contains(&self, Location loc) => self.range.contains(loc) || (self.is_line && loc == self.range.end);
+fn bool Comment.contains(&self, Location loc) => self.range.contains(loc) || (self.kind == LINE_COMMENT && loc == self.range.end);
 
 <*
  Index of the first token starting at or after `loc`.
@@ -540,7 +541,7 @@ fn void lex_contract(Lexer* self)
 		};
 		self.tokens.push(t);
 		// Only the prose is a comment; contract clauses are code.
-		self.comments.push({ t.range, false });
+		self.comments.push({ t.range, DOCS_TEXT });
 	}
 
 	while (self.current != 0)
@@ -617,7 +618,7 @@ fn void tokenize(Lexer* lexer)
 		Token t = next(lexer);
 		if (t.kind == LINE_COMMENT || t.kind == BLOCK_COMMENT)
 		{
-			lexer.comments.push({ t.range, t.kind == LINE_COMMENT });
+			lexer.comments.push({ t.range, t.kind });
 			if (!lexer.emit_comments) continue;
 		}
 		lexer.tokens.push(t);

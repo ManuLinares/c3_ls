@@ -1687,7 +1687,7 @@ fn TextEdit[]? format_range(LspProject* project, Uri uri, LspRange range, Format
 		}
 	}
 
-	if (start_tok_idx > end_tok_idx) return {};
+	if (!found_start || start_tok_idx > end_tok_idx) return {};
 
 	Token first_tok = lexer.tokens[start_tok_idx];
 	Token last_tok = lexer.tokens[end_tok_idx];

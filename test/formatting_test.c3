@@ -153,3 +153,20 @@ fn void test_format_range_selective_lines()
 	assert(edits.len == 1);
 	assert(edits[0].range.start.line == 3);
 }
+
+fn void format_range_past_last_token_changes_nothing()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String unformatted = "module app;\n\nfn void a() { int x=1; }\n\n\n\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/fmt_tail.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/fmt_tail.c3", unformatted);
+
+	LspRange range = { .start = { .line = 5, .character = 0 }, .end = { .line = 5, .character = 0 } };
+	FormattingOptions options = { .tab_size = 4, .insert_spaces = false, .insert_final_newline = false };
+	TextEdit[] edits = formatting::format_range(&proj, doc_uri, range, options)!!;
+	test::eq(edits.len, 0);
+}

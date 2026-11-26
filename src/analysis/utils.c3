@@ -99,17 +99,15 @@ fn Module*? find_module_by_identifier(LspWorkspace* ws, String current_module_na
 {
 	if (!ws.ctx) return NOT_FOUND~;
 
-	String scoped_path = "";
+	if (try mod = ws.ctx.modules.get(identifier)) return mod;
 	if (current_module_name.len > 0)
 	{
-		scoped_path = string::tformat("%s::%s", current_module_name, identifier);
+		if (try mod = ws.ctx.modules.get(string::tformat("%s::%s", current_module_name, identifier))) return mod;
 	}
 	String suffix_path = string::tformat("::%s", identifier);
 
 	ws.ctx.modules.@each(; mod_name, mod)
 	{
-		if (mod_name == identifier) return mod;
-		if (scoped_path.len > 0 && mod_name == scoped_path) return mod;
 		if (mod_name.ends_with(suffix_path)) return mod;
 	};
 

@@ -8,19 +8,59 @@ struct LocalSearchContext
 	String name;
 	Node* found_decl;
 	String found_type;
+	<* Only declarations in scope here count; none when the line is negative. *>
+	Location loc;
+	bool skip_try_bindings;
+}
+
+<*
+ Whether declarations inside a node of `kind` are invisible outside it. Compile-time blocks are not scopes.
+*>
+fn bool opens_scope(NodeKind kind) @local
+{
+	switch (kind)
+	{
+		case FN_DECL:
+		case MACRO_DECL:
+		case LAMBDA_EXPR:
+		case MACRO_BODY_EXPR:
+		case COMPOUND_STMT:
+		case IF_STMT:
+		case SWITCH_STMT:
+		case CASE_STMT:
+		case DEFAULT_STMT:
+		case FOR_STMT:
+		case FOREACH_STMT:
+		case WHILE_STMT:
+		case DO_WHILE_STMT:
+			return true;
+		default:
+			return false;
+	}
 }
 
 fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 {
 	if (!c || c.kind == ERROR) return CONTINUE;
 	LocalSearchContext* ctx = (LocalSearchContext*)user_data;
+	if (ctx.loc.line >= 0 && opens_scope(c.kind) && !c.range.contains(ctx.loc)) return CONTINUE;
+	if (ctx.loc.line >= 0 && c.kind == IF_STMT && c.as(IfStmt).else_body.contains(ctx.loc))
+	{
+		// The `else` branch sees `catch` bindings of the c0ondition, not `try` ones, I'm tired.
+		IfStmt* if_stmt = c.as(IfStmt);
+		ctx.skip_try_bindings = true;
+		cursor::visit(if_stmt.condition, c, {.on_enter = &find_local_decl_callback }, ctx);
+		ctx.skip_try_bindings = false;
+		if (!ctx.found_decl) cursor::visit(if_stmt.else_body.get()!!, c, {.on_enter = &find_local_decl_callback }, ctx);
+		return ctx.found_decl ? BREAK : CONTINUE;
+	}
 
 	switch (c.kind)
 	{
 		case VAR_DECL:
 			{
 				VarDecl* vd = c.as(VarDecl);
-				if (vd.name.is(ctx.name))
+				if (vd.name.is(ctx.name) && (vd.var_kind != VAR_LOCAL || ctx.loc.line < 0 || !ctx.loc.before(c.range.start)))
 				{
 					ctx.found_decl = c;
 					if (try type = vd.type.get())
@@ -37,7 +77,7 @@ fn ChildVisitResult find_local_decl_callback(Node* c, Node* p, void* user_data)
 		case TRY_EXPR:
 			{
 				TryExpr* te = c.as(TryExpr);
-				if (te.variable.kind != IDENT_EXPR) return RECURSE;
+				if (ctx.skip_try_bindings || te.variable.kind != IDENT_EXPR) return RECURSE;
 				IdentExpr* ie = te.variable.as(IdentExpr);
 				if (ie.ident.text != ctx.name) return RECURSE;
 				ctx.found_decl = c;
@@ -100,7 +140,7 @@ fn String foreach_binding_type(AnalyzerContext* context, SourceFile* sf, Foreach
 fn Node*? find_local_decl_in_file(SourceFile* sf, String name, String* out_type = null, AnalyzerContext* context = null, Location loc = { -1, -1 })
 {
 	if (!sf || name.len == 0) return NOT_FOUND~;
-	LocalSearchContext loc_search = {.context = context,.sf = sf,.name = name,.found_decl = null,.found_type = "" };
+	LocalSearchContext loc_search = {.context = context,.sf = sf,.name = name,.found_decl = null,.found_type = "", .loc = loc };
 	if (loc.line >= 0)
 	{
 		foreach (stmt : sf.ast.statements)
@@ -119,6 +159,7 @@ fn Node*? find_local_decl_in_file(SourceFile* sf, String name, String* out_type 
 				break;
 			}
 		}
+		return NOT_FOUND~;
 	}
 
 	foreach (stmt : sf.ast.statements)
@@ -3208,7 +3249,7 @@ fn Node*? resolve_name(AnalyzerContext* context, SourceFile* sf, Node* target_no
 	{
 		if (try enclosing_decl)
 		{
-			LocalSearchContext loc_search = {.context = context,.sf = sf,.name = symbol_name,.found_decl = null,.found_type = "" };
+			LocalSearchContext loc_search = {.context = context,.sf = sf,.name = symbol_name,.found_decl = null,.found_type = "", .loc = loc };
 			cursor::visit(enclosing_decl, null, {.on_enter = &find_local_decl_callback }, &loc_search);
 			if (loc_search.found_decl) return loc_search.found_decl;
 		}

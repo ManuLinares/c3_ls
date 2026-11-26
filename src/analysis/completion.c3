@@ -841,7 +841,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 				if (te.variable.kind != IDENT_EXPR) break;
 				IdentExpr* ie = te.variable.as(IdentExpr);
 				String vname = ie.ident.text;
-				if (vname.len == 0 || (lctx.ctx.prefix.len > 0 && !vname.starts_with(lctx.ctx.prefix))) break;
+				if (vname.len == 0 || !fuzzy_match(vname, lctx.ctx.prefix)) break;
 				if (!lctx.seen.add(vname)) break;
 
 				String vtype = declaration::type_text(lctx.ctx.ws.ctx, te.type) ?: "var";
@@ -874,7 +874,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 				if (try variable = ce.variable.get() && variable.kind == IDENT_EXPR)
 				{
 					String vname = variable.as(IdentExpr).ident.text;
-					if (vname.len > 0 && (lctx.ctx.prefix.len == 0 || vname.starts_with(lctx.ctx.prefix)))
+					if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
 					{
 						if (lctx.seen.add(vname))
 						{
@@ -906,7 +906,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 				{
 					VarDecl* ivd = index.as(VarDecl);
 					String iname = ivd.name.text();
-					if (iname.len > 0 && (lctx.ctx.prefix.len == 0 || iname.starts_with(lctx.ctx.prefix)))
+					if (iname.len > 0 && fuzzy_match(iname, lctx.ctx.prefix))
 					{
 						if (lctx.seen.add(iname))
 						{
@@ -928,7 +928,7 @@ fn ChildVisitResult collect_locals_callback(Node* c, Node* p, void* user_data)
 				{
 					VarDecl* vvd = fst.variable.as(VarDecl);
 					String vname = vvd.name.text();
-					if (vname.len > 0 && (lctx.ctx.prefix.len == 0 || vname.starts_with(lctx.ctx.prefix)))
+					if (vname.len > 0 && fuzzy_match(vname, lctx.ctx.prefix))
 					{
 						if (lctx.seen.add(vname))
 						{
@@ -1820,12 +1820,26 @@ fn void collect_already_set_fields(String text, sz open_brace_idx, sz cursor_off
 	for (sz i = open_brace_idx + 1; i < limit && i < text.len; i++)
 	{
 		char c = text[i];
-		if (c == '`') { in_raw = !in_raw; continue; }
-		if (in_raw) continue;
-		if (c == '"' && (i == 0 || text[i - 1] != '\\')) { in_str = !in_str; continue; }
-		if (in_str) continue;
-		if (c == '\'' && (i == 0 || text[i - 1] != '\\')) { in_char = !in_char; continue; }
-		if (in_char) continue;
+		if (in_raw)
+		{
+			if (c == '`') in_raw = false;
+			continue;
+		}
+		if (in_str || in_char)
+		{
+			if (c == '\\')
+			{
+				i++;
+			}
+			else if (c == (in_str ? '"' : '\''))
+			{
+				in_str = in_char = false;
+			}
+			continue;
+		}
+		if (c == '`') { in_raw = true; continue; }
+		if (c == '"') { in_str = true; continue; }
+		if (c == '\'') { in_char = true; continue; }
 
 		switch (c)
 		{

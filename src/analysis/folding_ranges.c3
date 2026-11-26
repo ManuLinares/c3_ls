@@ -2,6 +2,7 @@ module lsp::analysis::folding_ranges;
 
 import analyzer::core;
 import analyzer::cursor;
+import analyzer::lexer;
 
 import std::collections::list, std::collections::set;
 import std::io;
@@ -56,62 +57,28 @@ fn ChildVisitResult collect_folding_callback(Node* c, Node* p, void* user_data)
 	return RECURSE;
 }
 
-fn void collect_comment_folds(String content, Folds* folds)
+fn void collect_comment_folds(Lexer* lexer, Folds* folds)
 {
-	sz i = 0;
-	uint line = 0;
-	while (i < content.len)
+	foreach (comment : lexer.comments)
 	{
-		if (content[i] == '\n')
+		if (comment.kind == BLOCK_COMMENT && comment.range.end.line > comment.range.start.line)
 		{
-			line++;
-			i++;
-			continue;
+			folds.add((uint)comment.range.start.line, (uint)comment.range.end.line, "comment");
 		}
-		// Block comments: /* ... */
-		if (i + 1 < content.len && content[i] == '/' && content[i + 1] == '*')
+	}
+	int docs_start = -1;
+	foreach (tok : lexer.tokens)
+	{
+		switch (tok.kind)
 		{
-			uint start_line = line;
-			i += 2;
-			while (i + 1 < content.len && !(content[i] == '*' && content[i + 1] == '/'))
-			{
-				if (content[i] == '\n') line++;
-				i++;
-			}
-			if (i + 1 < content.len)
-			{
-				i += 2;
-			}
-			uint end_line = line;
-			if (end_line > start_line)
-			{
-				folds.add(start_line, end_line, "comment");
-			}
-			continue;
+			case DOCS_START:
+				docs_start = tok.range.start.line;
+			case DOCS_END:
+				if (docs_start >= 0 && tok.range.end.line > docs_start) folds.add((uint)docs_start, (uint)tok.range.end.line, "comment");
+				docs_start = -1;
+			default:
+				break;
 		}
-		// Doc comments: <* ... *>
-		if (i + 1 < content.len && content[i] == '<' && content[i + 1] == '*')
-		{
-			uint start_line = line;
-			i += 2;
-			while (i + 1 < content.len && !(content[i] == '*' && content[i + 1] == '>'))
-			{
-				if (content[i] == '\n') line++;
-				i++;
-			}
-			if (i + 1 < content.len)
-			{
-				i += 2;
-			}
-			uint end_line = line;
-			if (end_line > start_line)
-			{
-				folds.add(start_line, end_line, "comment");
-			}
-			continue;
-		}
-
-		i++;
 	}
 }
 
@@ -157,7 +124,7 @@ fn FoldingRange[]? get_folding_ranges(LspProject* project, Uri uri)
 		cursor::visit(stmt, null, {.on_enter = &collect_folding_callback }, &folds);
 	}
 
-	collect_comment_folds(sf.content, &folds);
+	collect_comment_folds(sf.lexer, &folds);
 
 	return folds.ranges.array_view();
 }

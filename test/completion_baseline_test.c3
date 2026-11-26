@@ -286,3 +286,23 @@ fn void main() {
 
 	assert(found_red);
 }
+fn void resolve_item_module_docs_use_exact_module()
+{
+	foreach (name : (String[]){ "foo", "bar", "baz", "qux", "io", "net", "gfx", "ui" })
+	{
+		LspProject proj;
+		proj.init(mem);
+		defer proj.free();
+
+		foreach (prefix : (String[]){ "a", "b", "c", "d" })
+		{
+			String path = string::tformat("/virtual/%s_%s.c3", prefix, name);
+			proj.workspace.process_file(path, string::tformat("<*\n Nested\n*>\nmodule %s::%s;\nint y;\n", prefix, name));
+		}
+		proj.workspace.process_file(string::tformat("/virtual/%s.c3", name), string::tformat("<*\n Top\n*>\nmodule %s;\nint x;\n", name));
+
+		CompletionItem item = { .label = name, .kind = MODULE, .data = string::tformat("module:%s", name) };
+		completion::resolve_item(&proj, &item);
+		assert(item.documentation.value.contains("Top"), "%s: %s", name, item.documentation.value);
+	}
+}
