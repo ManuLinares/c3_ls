@@ -357,6 +357,8 @@ fn bool visit_decls(Node* node, Node* parent, VisitorHooks hooks, void* data) @p
 				if (ca.stmt && !visit(ca.stmt, parent, hooks, data)) return false;
 				break;
 			}
+		case CT_INCLUDE_DECL:
+			if (!visit_all(node.as(CtIncludeDecl).args, parent, hooks, data)) return false;
 		case CT_EXPAND_DECL:
 			{
 				CtExpandDecl* ce = node.as(CtExpandDecl);

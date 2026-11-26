@@ -48,6 +48,8 @@ fn bool is_token_start_of_decl(TokenKind kind)
 		case CT_ASSERT:
 		case CT_ECHO:
 		case CT_ERROR:
+		case CT_INCLUDE:
+		case CT_EXEC:
 		case EXTERN:
 		case TLOCAL:
 		case INLINE:
@@ -522,6 +524,16 @@ fn Node* parse_top_level_statement(ParseContext* ctx)
 			node = parse_ct_echo_stmt(scope);
 		case CT_ERROR:
 			node = parse_ct_error_stmt(scope);
+		case CT_INCLUDE:
+		case CT_EXEC:
+			CtIncludeDecl* include = ctx.ast.alloc_node(CtIncludeDecl, ctx.current.range);
+			advance(ctx);
+			expect(ctx, include, LPAREN);
+			include.args = parse_arg_list(scope);
+			expect(ctx, include, RPAREN);
+			expect(ctx, include, EOS);
+			include.range.end = ctx.peek(-1).range.end;
+			node = include;
 		default:
 			diagnostics::error(ctx.context, ctx.current.range, "Expected the start of a global declaration here");
 			ctx.error_count++;

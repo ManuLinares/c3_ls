@@ -238,6 +238,15 @@ struct CtAssertDecl
 	Node* stmt;
 }
 
+<*
+ A top-level `$include(...)` or `$exec(...)`, which compiles a file's text or a command's output in place.
+*>
+struct CtIncludeDecl
+{
+	inline Node node;
+	NodeArray args;
+}
+
 struct GenericDecl
 {
 	inline Node node;

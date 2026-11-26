@@ -9,6 +9,8 @@ import std::collections::maybe;
 import uri;
 import lsp::server;
 import std::os::env;
+import lsp::core::cache;
+import lsp::analysis::code_actions;
 
 fn void test_c3c_lsp_output_parsing()
 {
@@ -279,6 +281,11 @@ fn void test_c3c_checks_stdlib_and_standalone_files() => @pool()
 		test::eq(@c3c_args_for(d, d, string::tformat("%s/lib/dep.c3l/dep.c3", d), sources), project_build);
 		test::eq(@c3c_args_for(d, d, string::tformat("%s/lib/std/io/formatter.c3", d), sources), project_build);
 
+		// The trust level the user chose for the project, from its LSP cache folder.
+		cache::save_trust_level(d, "include")!!;
+		test::eq(@c3c_args_for(d, d, string::tformat("%s/src/main.c3", d), sources), string::tformat("--path %s build --lsp --warn-builtin=no --trust=include", d));
+		(void)file::delete(string::tformat("%s/build/.lsp-cache/.trust", d));
+
 		// A file in the project folder that its build does not compile is checked alone.
 		String stray = string::tformat("%s/ahh.c3", d);
 		test::eq(@c3c_args_for(d, d, stray, sources), string::tformat("compile -C %s --lsp --warn-builtin=no", stray));
@@ -386,4 +393,40 @@ fn void test_c3c_uses_lsp2_when_supported() => @pool()
 		test::eq(diags.len, 1);
 		test::eq(diags[0].message, string::tformat("compile -C %s --lsp2 --warn-builtin=no", file));
 	$endif
+}
+
+fn void test_trust_level_file() => @pool()
+{
+	Path dir = path::temp_directory(tmem)!!.tappend("c3_ls_trust_test")!!;
+	(void)path::rmtree(dir);
+	(void)path::mkdir(dir, true);
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+
+	test::eq(cache::trust_level(root), "");
+	cache::save_trust_level(root, "full")!!;
+	test::eq(cache::trust_level(root), "full");
+	file::save(string::tformat("%s/build/.lsp-cache/.trust", root), "everything")!!;
+	test::eq(cache::trust_level(root), "");
+}
+
+fn void test_trust_error_offers_quick_fix() => @pool()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.config.root_path = "/home/mb/project".copy(mem);
+	Uri doc_uri = uri::from_file_path(tmem, "/home/mb/project/src/main.c3");
+
+	LspDiagnostic[] diags = {
+		{ .severity = 1, .source = "c3c", .message = "'$include' not permitted, trust level must be set to '--trust=include' or '--trust=full' to permit it." },
+		{ .severity = 1, .source = "c3c", .message = "'$exec' not permitted, trust level must be set to '--trust=full' to permit it." },
+	};
+	CodeAction[] actions = code_actions::get_code_actions(&proj, doc_uri, { .context = { .diagnostics = diags } })!!;
+	test::eq(actions.len, 2);
+	test::eq(actions[0].command.command, code_actions::CMD_SET_TRUST);
+	test::eq(actions[0].command.arguments[0], "/home/mb/project");
+	test::eq(actions[0].command.arguments[1], "include");
+	test::eq(actions[0].command.arguments[2], doc_uri.to_raw_string(tmem));
+	test::eq(actions[1].command.arguments[1], "full");
 }

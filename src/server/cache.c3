@@ -5,6 +5,7 @@ import std::io;
 import std::time;
 
 const String CACHE_DIR_NAME = ".lsp-cache";
+const String TRUST_FILE_NAME = ".trust";
 
 struct MetaData
 {
@@ -27,6 +28,24 @@ fn Path? get_or_create_cache_dir(String workspace_root)
 	}
 
 	return cache_dir;
+}
+
+<*
+ The trust level the user allowed for the project at `workspace_root`, `include` or `full`, kept
+ in its cache folder and passed to c3c as `--trust`; empty when none was allowed.
+*>
+fn String trust_level(String workspace_root)
+{
+	Path? file = path::tnew(workspace_root).tappend("build").tappend(CACHE_DIR_NAME).tappend(TRUST_FILE_NAME);
+	if (catch file) return "";
+	String level = ((String)file::load_temp((String)file) ?? "").trim();
+	return level == "include" || level == "full" ? level : "";
+}
+
+fn void? save_trust_level(String workspace_root, String level)
+{
+	Path dir = get_or_create_cache_dir(workspace_root)!;
+	file::save((String)dir.tappend(TRUST_FILE_NAME)!, level)!;
 }
 
 <*

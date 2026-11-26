@@ -438,7 +438,7 @@ fn void? on_initialize(LspMessage* message, InitializeParams* params)
 			.documentRangeFormattingProvider = true,
 			.codeActionProvider = true,
 			.executeCommandProvider = {
-				.commands = { code_actions::CMD_GENERATE_BINDINGS }
+				.commands = { code_actions::CMD_GENERATE_BINDINGS, code_actions::CMD_SET_TRUST }
 			}
 		},
 		.serverInfo = {
@@ -641,6 +641,18 @@ fn void? on_code_action(LspMessage* message, CodeActionParams* params)
 fn void? on_execute_command(LspMessage* message, ExecuteCommandParams* params)
 {
 	String cmd_name = params.command;
+	if (cmd_name == code_actions::CMD_SET_TRUST && params.arguments.len >= 3)
+	{
+		String level = params.arguments[1];
+		if (level == "include" || level == "full")
+		{
+			if (catch err = cache::save_trust_level(params.arguments[0], level))
+			{
+				log::error("Could not save the trust level of %s: %s", params.arguments[0], err);
+			}
+			get_project_for_raw_uri(params.arguments[2]).save_file(params.arguments[2]);
+		}
+	}
 	if (cmd_name == code_actions::CMD_GENERATE_BINDINGS)
 	{
 		String[] args = params.arguments;

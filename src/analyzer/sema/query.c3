@@ -1649,13 +1649,14 @@ fn ChildVisitResult ancestor_exit(Node* c, Node* p, void* user_data) @local
 
 <*
  Path from a top-level statement down to `target` (inclusive), or empty.
+ @require target != null
 *>
 fn List{Node*} ancestors_of(SourceFile* sf, Node* target)
 {
 	AncestorSearch s = {.target = target };
 	s.stack.tinit();
 	// The declaration holding `target` is found by binary search; scanning every statement is the fallback.
-	Node* top = target ? enclosing_top_level(sf, target.range.start) : null;
+	Node* top = enclosing_top_level(sf, target.range.start);
 	if (top && top.kind != ERROR)
 	{
 		cursor::visit(top, null, {.on_enter = &ancestor_enter,.on_exit = &ancestor_exit }, &s);
@@ -2550,7 +2551,9 @@ fn void operator_overloads_at(AnalyzerContext* context, SourceFile* sf, Location
 	sz token = sf.lexer.token_at(loc);
 	if (token < 0) return;
 	Location at = sf.lexer.tokens[token].range.start;
-	List{Node*} stack = ancestors_of(sf, node_at(sf, loc));
+	Node* at_node = node_at(sf, loc);
+	if (!at_node) return;
+	List{Node*} stack = ancestors_of(sf, at_node);
 	foreach_r (i, node : stack)
 	{
 		if (!node || at.before(node.range.start)) continue;
@@ -2791,6 +2794,7 @@ fn GenericBinding member_binding(AnalyzerContext* context, SourceFile* sf, Strin
 fn GenericBinding member_binding_at(AnalyzerContext* context, SourceFile* sf, Location loc, Node* member)
 {
 	Node* node = node_at(sf, loc);
+	if (!node) return {};
 	List{Node*} stack = ancestors_of(sf, node);
 	sz n = stack.len();
 	if (n < 2 || stack[n - 2].kind != ACCESS_EXPR) return {};

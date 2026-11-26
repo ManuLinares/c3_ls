@@ -10,6 +10,10 @@ import std::io::path;
 import std::collections::set;
 
 const String CMD_GENERATE_BINDINGS = "c3.generateBindings";
+<*
+ Arguments: project root, trust level (`include` or `full`), and the URI of the file to check again.
+*>
+const String CMD_SET_TRUST = "c3.setTrust";
 
 <*
  Standard search paths for C headers.
@@ -267,6 +271,37 @@ fn CodeAction[]? get_code_actions(LspProject* project, Uri uri, CodeActionParams
 
 	foreach (diag : params.context.diagnostics)
 	{
+		// c3c names the trust level its error needs, as in "trust level must be set to '--trust=include'".
+		if (diag.source == "c3c" && project.config.root_path.len)
+		{
+			if (try at = diag.message.index_of("'--trust="))
+			{
+				String level = diag.message[at + "'--trust=".len..];
+				if (try end = level.index_of_char('\''))
+				{
+					level = level[:end];
+					String[] cmd_args = alloc::alloc_array(tmem, String, 3);
+					cmd_args[0] = project.config.root_path;
+					cmd_args[1] = level;
+					cmd_args[2] = uri.to_raw_string(tmem);
+					LspDiagnostic[] related = alloc::alloc_array(tmem, LspDiagnostic, 1);
+					related[0] = diag;
+					actions.push({
+						.title = string::tformat("Allow this in the project: check with --trust=%s", level),
+						.kind = "quickfix",
+						.diagnostics = related,
+						.isPreferred = true,
+						.command = {
+							.title = "Set the project's trust level",
+							.command = CMD_SET_TRUST,
+							.arguments = cmd_args
+						}
+					});
+					continue;
+				}
+			}
+		}
+
 		String missing_mod = extract_missing_module_from_diagnostic(diag.message);
 		if (missing_mod.len == 0)
 		{

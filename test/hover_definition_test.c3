@@ -1,6 +1,6 @@
 module lsp::hover_definition_test @test;
 
-import lsp, uri, std::io;
+import lsp, uri, std::io, analyzer::core, analyzer::sema::query;
 
 fn void test_hover_on_function()
 {
@@ -1251,4 +1251,20 @@ fn void test_hover_on_import_attributes()
 	test::eq(r.end.character, 21u);
 	String public = hover::hover(&proj, doc_uri, { .line = 1, .character = 24 })!!;
 	assert(public.contains("`@private`"), "%s", public);
+}
+
+fn void test_hover_on_top_level_include_without_node()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\n$include(\"other.c3\");\n";
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/include.c3");
+	defer doc_uri.free();
+	proj.workspace.process_file("/virtual/include.c3", source);
+
+	(void)hover::hover(&proj, doc_uri, { .line = 1, .character = 0 })!!;
+	SourceFile* sf = proj.workspace.get_source_file_by_path("/virtual/include.c3");
+	(void)query::member_binding_at(proj.workspace.ctx, sf, { .line = 1, .column = 0 }, null);
 }

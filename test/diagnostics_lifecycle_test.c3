@@ -4,6 +4,7 @@ import lsp::core;
 import lsp;
 import uri;
 import std::io;
+import analyzer::core;
 
 fn void test_diagnostics_clear_on_valid_change()
 {
@@ -47,4 +48,23 @@ fn void test_diagnostics_clear_on_valid_change()
 
 	LspDiagnostic[] fixed_diags = proj.workspace.get_diagnostics("/virtual/diag_test.c3");
 	assert(fixed_diags.len == 0);
+}
+
+fn void test_top_level_include_and_exec_parse()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String path = "/virtual/include_exec.c3";
+	proj.workspace.process_file(path, "module t;\n$include(\"other.c3\");\n$exec(\"echo\", { \"fn void x() {}\" });\nfn void main() {}\n");
+	test::eq(proj.workspace.get_diagnostics(path).len, 0);
+
+	SourceFile* sf = proj.workspace.get_source_file_by_path(path);
+	int includes;
+	foreach (stmt : sf.ast.statements)
+	{
+		if (stmt && stmt.kind == CT_INCLUDE_DECL) includes++;
+	}
+	test::eq(includes, 2);
 }

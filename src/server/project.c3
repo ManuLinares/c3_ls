@@ -532,6 +532,11 @@ fn void LspProject.run_c3c_diagnostics(&self, String user_file_path) => @pool()
 
 	cmd.push(has_lsp2(comp) ? "--lsp2" : "--lsp");
 	cmd.push("--warn-builtin=no");
+	if (self.config.root_path.len)
+	{
+		String trust = cache::trust_level(self.config.root_path);
+		if (trust.len) cmd.push(string::tformat("--trust=%s", trust));
+	}
 
 	self.workspace.parse_c3c_lsp_output(capture_output(cmd.array_view(), stdlib_only), self.config.root_path);
 }
