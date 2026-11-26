@@ -213,15 +213,7 @@ fn Token lex_char(Lexer* self)
 
 		if (c == '\\')
 		{
-			char next_ch = self.peek();
-			if (next_ch == 'x')
-			{
-				advance(self, 4);
-			}
-			else
-			{
-				advance(self, 2);
-			}
+			advance(self, 2);
 			continue;
 		}
 
@@ -265,7 +257,7 @@ fn Token lex_string(Lexer* self)
 	}
 
 	return {
-		.kind = STRING_LITERAL,
+		.kind = ERROR,
 		.value = self.get_string(start_index, self.index - start_index),
 		.range = {.start = start,.end = self.location }
 	};
@@ -406,7 +398,7 @@ fn Token lex_number(Lexer* self)
 	{
 		kind = INT_OCTAL_LITERAL;
 		advance(self, 2);
-		while (self.current != 0 && (ascii::is_odigit(self.current) || self.peek() == '_'))
+		while (self.current != 0 && (ascii::is_odigit(self.current) || self.current == '_'))
 		{
 			advance(self);
 		}

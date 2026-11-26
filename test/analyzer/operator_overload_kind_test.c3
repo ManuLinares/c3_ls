@@ -1,6 +1,6 @@
 module operator_overload_kind_test;
 
-import analyzer;
+import analyzer, diag_capture;
 
 macro OverloadKind overload_of(String params, String attribute)
 {
@@ -27,3 +27,10 @@ fn void len_overload() @test
 	assert(overload_of("&self", "@operator(len)") == OV_LEN);
 }
 
+
+fn void derived_comparison_operator_reports_one_error() @test
+{
+	String src = "module t;\nstruct Foo { int a; }\nfn bool Foo.ne(self, Foo o) @operator(!=) => self.a != o.a;\n";
+	Diag[] errs = diag_capture::errors_for(src);
+	assert(errs.len == 1, "%s", errs);
+}

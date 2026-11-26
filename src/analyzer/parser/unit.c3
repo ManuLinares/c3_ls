@@ -343,7 +343,7 @@ fn Node* parse_short_body(ContextScope scope, bool is_regular)
 	{
 		if (!consume(ctx, EOS))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected valid interface type");
+			diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
 			error_node(ctx, node_comp);
 		}
 	}

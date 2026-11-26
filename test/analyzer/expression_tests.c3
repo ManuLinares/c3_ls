@@ -859,3 +859,11 @@ fn void negative_int_literal_keeps_sign()
 	test::eq(sum.left.as(UnaryExpr).operator, UnaryOpKind.UNARYOP_NEG);
 	test::eq(sum.right.as(LiteralExpr).integer, 3u);
 }
+
+fn void unterminated_string_at_eof()
+{
+	String source_code = "module hello;\nString s = \"";
+
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, source_code, "test");
+}

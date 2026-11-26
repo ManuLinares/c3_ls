@@ -868,13 +868,19 @@ fn NodeArray parse_attributes(ContextScope scope, Node* parent_node, AttributePa
 					case GREATER_EQ:
 						diagnostics::error(ctx.context, ctx.current.range, "use '<' and '==', other comparison operations will be derived from those");
 						attr_node.flags.has_error = true;
+						expr = ctx.ast.error(ctx.current.range);
+						advance(ctx);
 					case PLUSPLUS:
 					case MINUSMINUS:
 						diagnostics::error(ctx.context, ctx.current.range, "Increment and decrement operators '++' and '--' cannot be directly overloaded, use '+=' and '-=' instead");
 						attr_node.flags.has_error = true;
+						expr = ctx.ast.error(ctx.current.range);
+						advance(ctx);
 					case DOT:
 						diagnostics::error(ctx.context, ctx.current.range, "Cannot overload '.'");
 						attr_node.flags.has_error = true;
+						expr = ctx.ast.error(ctx.current.range);
+						advance(ctx);
 					case IDENT:
 						bool is_operator = attr_node.attribute_kind == OPERATOR || attr_node.attribute_kind == OPERATOR_R || attr_node.attribute_kind == OPERATOR_S;
 						if (!is_operator || !next_is_rparen || ctx.current.value != "len") nextcase default;
@@ -919,10 +925,7 @@ fn Node* parse_expand_decl(ContextScope scope)
 	if (!consume(ctx, LPAREN))
 	{
 		node.flags.has_error = true;
-		diagnostics::error(ctx.context, ctx.current.range,
-		"Expected '%s' got '%s'",
-		ctx.current.kind.description,
-		ctx.current.kind.description);
+		diagnostics::error(ctx.context, ctx.current.range, "Expected '('");
 
 		skip_until(ctx, { RPAREN, EOS });
 	}
@@ -1298,7 +1301,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 
 		advance(ctx);
 
-		fault_node.attributes = parse_attributes(scope, node);
+		fault_node.attributes = parse_attributes(scope, (Node*)fault_node);
 		fault_node.range.end = ctx.peek(-1).range.end;
 
 		faults.push((Node*)fault_node);
@@ -1561,6 +1564,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 		{
 			diagnostics::error(ctx.context, ctx.current.range, "Expected enum variant or contract");
 			skip_until(ctx, { COMMA, RBRACE });
+			if (is_token_start_of_decl(ctx.current.kind)) break;
 			consume(ctx, COMMA);
 			continue;
 		}

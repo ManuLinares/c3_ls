@@ -255,8 +255,9 @@ fn Node* parse_prefix_expr(ContextScope scope)
 			return parse_group_expr(scope);
 		default:
 			diagnostics::error(ctx.context, ctx.current.range, "Expected expression, got: %s", ctx.current.kind.description);
+			Node* error = ctx.ast.error(ctx.current.range);
 			advance(ctx);
-			return ctx.ast.error(ctx.current.range);
+			return error;
 	}
 }
 
@@ -341,8 +342,9 @@ fn Node* parse_infix(ContextScope scope, Node* left, Precedence rbp)
 			return parse_range_expr(scope, left, left.range);
 		default:
 			diagnostics::error(ctx.context, ctx.current.range, "Expected expression");
+			Node* error = ctx.ast.error(ctx.current.range);
 			advance(ctx);
-			return ctx.ast.error(ctx.current.range);
+			return error;
 	}
 }
 

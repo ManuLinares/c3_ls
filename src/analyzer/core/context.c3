@@ -65,10 +65,7 @@ fn bool parse_and_register(AnalyzerContext* context, String buffer, String path)
 		source_file::free(context, existing);
 	}
 
-	Lexer* lexer = lexer::create(context, buffer);
-	lexer::tokenize(lexer);
-
-	SourceFile* source = source_file::create(context, lexer, path);
+	SourceFile* source = source_file::create(context, buffer, path);
 
 	ParseContext parse_ctx = { .context = context };
 	bool parse_ok = parser::parse(&parse_ctx, source);

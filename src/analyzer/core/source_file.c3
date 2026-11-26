@@ -10,32 +10,33 @@ import std::collections::list;
 import std::sort;
 import std::io;
 
-fn SourceFile* create(AnalyzerContext* context, Lexer* lexer, String path, Allocator alloc = null)
+fn SourceFile* create(AnalyzerContext* context, String buffer, String path, Allocator alloc = null)
 {
 	SourceFile* source_file = alloc::new(context.allocator, SourceFile);
 
 	source_file.arena.init(context.allocator, 4096);
 
-	source_file.content = lexer.buffer.copy(&source_file.arena);
+	source_file.content = buffer.copy(&source_file.arena);
+	source_file.path = path.copy(&source_file.arena);
+
+	context.files.set(path, source_file);
+	context.current_source_file = source_file;
+
+	Lexer* lexer = lexer::create(context, source_file.content);
+	lexer::tokenize(lexer);
 	source_file.lexer = lexer;
 
 	source_file.identifiers.init(&source_file.arena);
-	foreach (&tok : lexer.tokens)
+	foreach (tok : lexer.tokens)
 	{
-		sz offset = tok.value.ptr - lexer.buffer.ptr;
-		if (offset >= 0 && offset + tok.value.len <= lexer.buffer.len) tok.value = source_file.content[offset : tok.value.len];
 		if (tok.kind.is_identifier()) source_file.identifiers.add(tok.value);
 	}
-	lexer.buffer = source_file.content;
-
-	context.files.set(path, source_file);
 
 	source_file.ast.allocator = &source_file.arena;
 	source_file.ast.nodes.init(&source_file.arena);
 	source_file.ast.statements.init(&source_file.arena);
 	source_file.ast.module_decls.init(&source_file.arena);
 	source_file.ast.import_decls.init(&source_file.arena);
-	source_file.path = path.copy(&source_file.arena);
 	source_file.min_node_id = ast::next_node_id;
 	context.files_by_node_id.push(source_file);
 

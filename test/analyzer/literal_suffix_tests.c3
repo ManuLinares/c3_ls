@@ -49,3 +49,27 @@ fn void invalid_suffixes_reported() @test
 			"%s: range %s", lit, r);
 	}
 }
+
+fn void octal_with_separator_not_reported() @test
+{
+	Diag[] errs = diag_capture::errors_for("module t;\nint x = 0o7_7;\n");
+	assert(errs.len == 0, "%s", errs);
+}
+
+fn void unicode_char_escapes_not_reported() @test
+{
+	Diag[] errs = diag_capture::errors_for("module t;\nuint a = '\\u00e9';\nuint b = '\\U0001F600';\n");
+	assert(errs.len == 0, "%s", errs);
+}
+
+fn void short_hex_escape_reports_one_error() @test
+{
+	Diag[] errs = diag_capture::errors_for("module t;\nchar c = '\\x4';\nint y = 1;\n");
+	assert(errs.len == 1, "%s", errs);
+}
+
+fn void hex_escape_not_reported() @test
+{
+	Diag[] errs = diag_capture::errors_for("module t;\nchar c = '\\x41';\nchar d = '\\x2f';\n");
+	assert(errs.len == 0, "%s", errs);
+}

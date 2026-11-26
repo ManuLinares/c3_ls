@@ -226,7 +226,8 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 	stmt_scope.flags.is_expr = false;
 	stmt_scope.flags.skip_eos = false;
 
-	while (!ctx.is(RBRACE) && !ctx.eof())
+	// A declaration that cannot be a statement means the `}` is missing.
+	while (!ctx.is(RBRACE) && !ctx.eof() && !(is_token_start_of_decl(ctx.current.kind) && !is_token_start_of_stmt(ctx.current.kind)))
 	{
 		int start_pos = ctx.pos;
 		Node* stmt = parse_stmt(stmt_scope);
@@ -271,7 +272,7 @@ fn bool parse_switch_body(ContextScope scope, List{Node*} * cases)
 			default:
 				diagnostics::error(ctx.context, ctx.current.range, "Expected 'case', 'nextcase', or 'default' inside switch body");
 				skip_until(ctx, { CASE, DEFAULT, NEXTCASE, RBRACE });
-				if (ctx.is(RBRACE) || ctx.eof()) return true;
+				if (ctx.is(RBRACE) || ctx.eof() || is_token_start_of_decl(ctx.current.kind)) return true;
 		}
 
 		Node* result = null;
@@ -731,7 +732,7 @@ fn Node* parse_ct_if_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after $switch expression");
+		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after $if expression");
 		node.flags.has_error = true;
 	}
 

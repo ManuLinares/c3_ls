@@ -566,6 +566,41 @@ fn void err_while_body_var_without_name()
 	test::eq(while_stmt.body.flags.has_error, true);
 }
 
+fn void unfinished_switch_body()
+{
+	String source_code = `
+		module hello;
+		fn void foo(int x)
+		{
+			switch (x) {
+		fn void bar() {}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, source_code, "test");
+	test::eq(@ok(context.registry.functions.get("hello::foo")), true);
+}
+
+fn void unclosed_body_ends_at_declaration()
+{
+	String source_code = `
+		module hello;
+		fn void foo()
+		{
+			const int A = 1;
+			static int b;
+		fn void bar() {}
+		struct Baz { int x; }
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, source_code, "test");
+	test::eq(@ok(context.registry.functions.get("hello::bar")), true);
+	test::eq(@ok(context.registry.types.get("hello::Baz")), true);
+	FnDecl* foo = context.registry.functions.get("hello::foo")!!.node.as(FnDecl);
+	test::eq(foo.body.get()!!.as(CompoundStmt).statements.len, 2);
+}
+
 fn void defer_stmt()
 {
 	String source_code = `

@@ -539,6 +539,7 @@ fn Node* parse_literal_expr(ContextScope scope) => @pool()
 					if (clean_char.len < 4)
 					{
 						diagnostics::error(ctx.context, token.range, "Malformed hex escape sequence");
+						advance(ctx);
 						return ctx.ast.error(start);
 					}
 
@@ -546,6 +547,19 @@ fn Node* parse_literal_expr(ContextScope scope) => @pool()
 					char lo = clean_char[3];
 
 					literal.integer = (uint128)((char.from_hex(hi) << 4) | char.from_hex(lo));
+					break;
+				case 'u':
+				case 'U':
+					sz digits = clean_char[1] == 'u' ? 4 : 8;
+					if (clean_char.len < 2 + digits)
+					{
+						diagnostics::error(ctx.context, token.range, "Malformed unicode escape sequence");
+						advance(ctx);
+						return ctx.ast.error(start);
+					}
+					uint code_point;
+					foreach (c : clean_char[2 : digits]) code_point = code_point << 4 | char.from_hex(c);
+					literal.integer = (uint128)code_point;
 					break;
 				default:
 					diagnostics::error(ctx.context, token.range, "Unsupported escape sequence '\\%c'", clean_char[1]);
@@ -665,7 +679,7 @@ fn Node* parse_unary_expr(ContextScope scope)
 	node.expr = parse_expr(scope, UNARY);
 	if (is_bang_bang)
 	{
-		UnaryExpr* outer = ctx.ast.alloc_node(UnaryExpr, { start.start, ctx.current.range.end });
+		UnaryExpr* outer = ctx.ast.alloc_node(UnaryExpr, { start.start, node.expr.range.end });
 		outer.expr = node;
 		outer.operator = UNARYOP_NOT;
 		return (Node*)outer;
@@ -968,39 +982,26 @@ fn Node* parse_try_expr(ContextScope scope)
 fn Node* parse_try_unwrap_chain_expr(ContextScope scope)
 {
 	ParseContext* ctx = scope.ctx;
-	Node* first_try      = parse_try_expr(scope);
-	Node* current        = first_try;
-	TryExpr* current_try = current.as(TryExpr);
+	Node* first_try = parse_try_expr(scope);
+	Node** tail = &first_try.as(TryExpr).next;
 
 	while (consume(ctx, AND))
 	{
-		Node* next_expr = null;
-
-		switch (ctx.current.kind)
+		Node* next_expr = ctx.is(TRY) ? parse_try_expr(scope) : parse_try_chain_expr(scope);
+		if (*tail)
 		{
-			case TRY:
-				next_expr = parse_try_expr(scope);
-			default:
-				next_expr = parse_try_chain_expr(scope);
+			// Only a `try` links to the next condition, so `b && c` after one becomes a single condition.
+			BinaryExpr* and_expr = ctx.ast.alloc_node(BinaryExpr, { (*tail).range.start, next_expr.range.end });
+			and_expr.left = *tail;
+			and_expr.right = next_expr;
+			and_expr.op = core::binaryop_from_token(AND);
+			*tail = (Node*)and_expr;
 		}
-
-		switch (current.kind)
+		else
 		{
-			case TRY_EXPR:
-				current.as(TryExpr).next = next_expr;
-			default:
-				Node* walker = first_try;
-				while (walker.kind == TRY_EXPR && walker.as(TryExpr).next != null)
-				{
-					walker = walker.as(TryExpr).next;
-				}
-				if (walker.kind == TRY_EXPR)
-				{
-					walker.as(TryExpr).next = next_expr;
-				}
+			*tail = next_expr;
 		}
-
-		current = next_expr;
+		if (next_expr.kind == TRY_EXPR) tail = &next_expr.as(TryExpr).next;
 	}
 
 	return first_try;
@@ -1191,13 +1192,13 @@ fn Node* parse_group_expr(ContextScope scope)
 	bool had_error;
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '%s' got '%s'", ctx.current.kind.description, ctx.current.kind.description);
+		diagnostics::error(ctx.context, ctx.current.range, "Expected '('");
 		had_error = true;
 	}
 	Node* inner = parse_expr(scope);
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '%s' got '%s'", ctx.current.kind.description, ctx.current.kind.description);
+		diagnostics::error(ctx.context, ctx.current.range, "Expected ')'");
 		had_error = true;
 	}
 

@@ -992,6 +992,31 @@ fn void path_prefixed_method_declarations() @test
 	test::eq(cursor::spelling(mac.associated_type.get()!!, tmem), "std::gfx::GfxSurface");
 }
 
+fn void unfinished_enum_body()
+{
+	String source_code = `
+		module hello;
+		enum Foo { A,
+		fn void foo() {}
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, source_code, "test");
+	test::eq(@ok(context.registry.functions.get("hello::foo")), true);
+}
+
+fn void enum_body_with_decl_keyword()
+{
+	String source_code = `
+		module hello;
+		enum Foo { A, const }
+	`;
+
+	AnalyzerContext* context = context::create(tmem);
+	context::process(context, source_code, "test");
+	test::eq(@ok(context.registry.types.get("hello::Foo")), true);
+}
+
 fn void test_shebang_and_top_level_ct_echo() @test
 {
 	String source_code = `#!/usr/bin/env c3c
