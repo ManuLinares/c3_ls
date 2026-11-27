@@ -96,7 +96,7 @@ fn Node* parse_stmt(ContextScope scope)
 			if (starts_expression_statement(t.kind)) return parse_decl_or_expr_stmt(scope);
 	}
 
-	diagnostics::error(ctx.context, t.range, "Unexpected '%s' found when expecting a statement, synchronizing!", t.kind.description);
+	diagnostics::error(ctx.context, t.range, "Unexpected '%s' found when expecting a statement.", t.value);
 	Node* error = ctx.ast.error(t.range);
 	synchronize(ctx, STATEMENT);
 	return error;
@@ -128,7 +128,7 @@ fn Node* parse_decl_or_expr_stmt(ContextScope scope)
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate expr_stmt");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'.");
 		node.flags.has_error = true;
 	}
 
@@ -157,7 +157,7 @@ fn Node* parse_decl_stmt(ContextScope scope)
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate decl_stmt");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'.");
 		expr.flags.has_error = true;
 	}
 
@@ -201,7 +201,7 @@ fn Node* parse_compound_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, RBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '}' to terminate compound");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}'.");
 		node.flags.has_error = true;
 	}
 
@@ -332,7 +332,7 @@ fn Node* parse_case_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after case expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after case expression");
 		node.flags.has_error = true;
 	}
 
@@ -364,7 +364,7 @@ fn Node* parse_default_stmt(ContextScope scope)
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after default expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after default expression");
 		node.flags.has_error = true;
 	}
 
@@ -456,7 +456,7 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 		node.cond.set(parse_cond_expr(scope));
 		if (!consume(ctx, RPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close switch condition");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close switch condition");
 			node.flags.has_error = true;
 		}
 	}
@@ -465,7 +465,7 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, LBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '{' to start switch body");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '{' to start switch body");
 		node.flags.has_error = true;
 		skip_until(ctx, { RBRACE });
 	}
@@ -479,7 +479,7 @@ fn Node* parse_switch_stmt(ContextScope scope) => @pool()
 
 		if (!consume(ctx, RBRACE))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected '}' to close switch body");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}' to close switch body");
 			node.flags.has_error = true;
 		}
 	}
@@ -504,7 +504,7 @@ fn Node* parse_return_stmt(ContextScope scope)
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		node.flags.has_error = true;
 	}
 
@@ -530,7 +530,7 @@ fn Node* parse_ct_switch_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after $switch expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after $switch expression");
 		node.flags.has_error = true;
 	}
 
@@ -590,7 +590,7 @@ fn Node* parse_ct_switch_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, CT_ENDSWITCH))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endswitch' to terminate $switch");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '$endswitch' to terminate $switch");
 		node.flags.has_error = true;
 	}
 
@@ -612,7 +612,7 @@ fn Node* parse_if_stmt(ContextScope scope)
 
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '(' after 'if'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' after 'if'");
 		node.flags.has_error = true;
 	}
 
@@ -625,7 +625,7 @@ fn Node* parse_if_stmt(ContextScope scope)
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close if-condition");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close if-condition");
 		node.flags.has_error = true;
 	}
 
@@ -693,7 +693,7 @@ fn Node* parse_ct_if_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after $if expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after $if expression");
 		node.flags.has_error = true;
 	}
 
@@ -702,7 +702,7 @@ fn Node* parse_ct_if_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, CT_ENDIF))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endif' to terminate $if block");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '$endif' to terminate $if block");
 		node.flags.has_error = true;
 	}
 
@@ -723,7 +723,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '(' after 'for'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' after 'for'");
 		node.flags.has_error = true;
 	}
 
@@ -733,7 +733,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 	}
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' in for-loop header");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' in for-loop header");
 		node.flags.has_error = true;
 	}
 
@@ -743,7 +743,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 	}
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' in for-loop header");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' in for-loop header");
 		node.flags.has_error = true;
 	}
 
@@ -753,7 +753,7 @@ fn Node* parse_for_stmt(ContextScope scope)
 	}
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close for-loop header");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close for-loop header");
 		node.flags.has_error = true;
 	}
 
@@ -794,7 +794,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	}
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' after init expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' after init expression");
 		node.flags.has_error = true;
 	}
 
@@ -808,7 +808,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	}
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' after loop condition");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' after loop condition");
 		node.flags.has_error = true;
 	}
 
@@ -822,7 +822,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	}
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after loop update");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after loop update");
 		node.flags.has_error = true;
 	}
 
@@ -834,7 +834,7 @@ fn Node* parse_ct_for_stmt(ContextScope scope) => @pool()
 	comp_node.range.end = ctx.peek(-1).range.end;
 	if (!consume(ctx, CT_ENDFOR))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endfor' to terminate loop");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '$endfor' to terminate loop");
 		node.flags.has_error = true;
 	}
 
@@ -856,7 +856,7 @@ fn Node* parse_while_stmt(ContextScope scope)
 
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '(' to open while header");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' to open while header");
 		node.flags.has_error = true;
 	}
 
@@ -864,7 +864,7 @@ fn Node* parse_while_stmt(ContextScope scope)
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close while header");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close while header");
 		node.flags.has_error = true;
 	}
 
@@ -901,7 +901,7 @@ fn Node* parse_do_while_stmt(ContextScope scope)
 	{
 		if (!consume(ctx, LPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected '()' to open do header");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '()' to open do header");
 			node.flags.has_error = true;
 		}
 
@@ -909,14 +909,14 @@ fn Node* parse_do_while_stmt(ContextScope scope)
 
 		if (!consume(ctx, RPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ')' after do header");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' after do header");
 			node.flags.has_error = true;
 		}
 	}
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		node.flags.has_error = true;
 	}
 
@@ -979,7 +979,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '(' after 'foreach'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' after 'foreach'");
 		error_node(ctx, node);
 	}
 
@@ -1003,7 +1003,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' in foreach");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' in foreach");
 		node.flags.has_error = true;
 	}
 
@@ -1015,7 +1015,7 @@ fn Node* parse_foreach_stmt(ContextScope scope)
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' after foreach statement");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' after foreach statement");
 		node.flags.has_error = true;
 	}
 
@@ -1054,7 +1054,7 @@ fn Node* parse_ct_assert_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		error_node(ctx, node);
 	}
 
@@ -1073,7 +1073,7 @@ fn Node* parse_ct_error_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		error_node(ctx, node);
 	}
 
@@ -1097,7 +1097,7 @@ fn Node* parse_ct_echo_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		error_node(ctx, node);
 	}
 
@@ -1142,7 +1142,7 @@ fn Node* parse_defer_stmt(ContextScope scope)
 
 				if (!consume(ctx, RPAREN))
 				{
-					diagnostics::error(ctx.context, ctx.current.range, "Expected ')'");
+					diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')'");
 					node.flags.has_error = true;
 					skip_until(ctx, { RPAREN });
 				}
@@ -1198,13 +1198,13 @@ fn Node* parse_assert_stmt(ContextScope scope)
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')'");
 		error_node(ctx, node);
 	}
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 		error_node(ctx, node);
 	}
 
@@ -1241,7 +1241,7 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after foreach variables");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after foreach variables");
 		node.flags.has_error = true;
 	}
 
@@ -1249,7 +1249,7 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 
 	if (!consume(ctx, COLON))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' after expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' after expression");
 		node.flags.has_error = true;
 	}
 
@@ -1259,7 +1259,7 @@ fn Node* parse_ct_foreach_stmt(ContextScope scope) => @pool()
 	body.range.end = ctx.peek(-1).range.end;
 	if (!consume(ctx, CT_ENDFOREACH))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '$endforeach' to terminate loop");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '$endforeach' to terminate loop");
 		node.flags.has_error = true;
 	}
 
@@ -1299,7 +1299,7 @@ fn Node* parse_ct_expand_stmt(ContextScope scope)
 
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '(' after '$expand'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' after '$expand'");
 		error_node(ctx, node);
 	}
 
@@ -1311,13 +1311,13 @@ fn Node* parse_ct_expand_stmt(ContextScope scope)
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' after '$expand' expression");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' after '$expand' expression");
 		error_node(ctx, node);
 	}
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' after '$expand' statement");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' after '$expand' statement");
 		error_node(ctx, node);
 	}
 

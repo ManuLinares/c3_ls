@@ -246,7 +246,7 @@ fn Node* parse_alias_decl(ContextScope scope)
 
 	if (!consume(ctx, EQ))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '=' in alias declaration");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '=' in alias declaration");
 		node.flags.has_error = true;
 		synchronize(ctx, STATEMENT);
 	}
@@ -292,7 +292,14 @@ fn Node* parse_typedef_decl(ContextScope scope)
 	Token name = ctx.current;
 	if (name.kind != TYPE_IDENT)
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected 'TYPE_IDENT' for typedef name");
+		if (name.kind == IDENT)
+		{
+			diagnostics::error(ctx.context, ctx.current.range, "Names of types must start with an uppercase letter.");
+		}
+		else
+		{
+			diagnostics::error(ctx.context, ctx.current.range, "'typedef' should be followed by the name of the type.");
+		}
 		node.flags.has_error = true;
 		if (!ctx.is(LESS) && !ctx.is(LPAREN) && !ctx.is(EQ))
 		{
@@ -320,7 +327,7 @@ fn Node* parse_typedef_decl(ContextScope scope)
 
 	if (!consume(ctx, EQ))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '='");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '='");
 		node.flags.has_error = true;
 		synchronize(ctx, STATEMENT);
 	}
@@ -387,7 +394,7 @@ fn Node* parse_macro_decl(ContextScope scope)
 				node.associated_type.set(parse_type_expr(scope));
 				if (!consume(ctx, DOT))
 				{
-					diagnostics::error(ctx.context, ctx.current.range, "Expected '.' after associated type");
+					diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '.' after associated type");
 					node.flags.has_error = true;
 				}
 			}
@@ -923,7 +930,7 @@ fn Node* parse_expand_decl(ContextScope scope)
 	if (!consume(ctx, LPAREN))
 	{
 		node.flags.has_error = true;
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '('");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '('");
 
 		skip_until(ctx, { RPAREN, EOS });
 	}
@@ -992,7 +999,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 
 	if (!consume(ctx, LBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '{' to start struct body");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '{' to start struct body");
 		node.flags.has_error = true;
 		return (Node*)node;
 	}
@@ -1071,7 +1078,7 @@ fn Node* parse_struct_union_decl(ContextScope scope, bool is_sub = false) => @po
 
 	if (!consume(ctx, RBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '}' to terminate struct");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}' to terminate struct");
 		node.flags.has_error = true;
 	}
 
@@ -1126,7 +1133,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 	if (!consume(ctx, LBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '{'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '{'");
 		node.flags.has_error = true;
 		return (Node*)node;
 	}
@@ -1175,7 +1182,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 		if (!consume(ctx, EOS))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 			skip_until(ctx, { EOS, RBRACE });
 			consume(ctx, EOS);
 		}
@@ -1185,7 +1192,7 @@ fn Node* parse_bitstruct_decl(ContextScope scope, bool is_nested = false) => @po
 
 	if (!consume(ctx, RBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '}'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}'");
 		node.flags.has_error = true;
 	}
 
@@ -1254,7 +1261,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 			{
 				if (!ctx.is(RBRACE))
 				{
-					diagnostics::error(ctx.context, ctx.current.range, "Expected ',' or '}' in fault list");
+					diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ',' or '}' in fault list");
 					error_node(ctx, (Node*)node);
 					skip_until(ctx, { COMMA, RBRACE, EOS });
 					if (consume(ctx, COMMA)) continue;
@@ -1293,7 +1300,7 @@ fn Node* parse_faultdef_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate fault declaration");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' to terminate fault declaration");
 		error_node(ctx, (Node*)node);
 	}
 
@@ -1346,7 +1353,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, LBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '{' to start interface body");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '{' to start interface body");
 		node.flags.has_error = true;
 		return (Node*)node;
 	}
@@ -1386,7 +1393,7 @@ fn Node* parse_interface_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, RBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '}' to terminate interface");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}' to terminate interface");
 		node.flags.has_error = true;
 	}
 
@@ -1434,7 +1441,7 @@ fn Node* parse_attrdef_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, EOS))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ';' to terminate attrdef declaration");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';' to terminate attrdef declaration");
 		node.flags.has_error = true;
 		skip_until(ctx, { EOS });
 		consume(ctx, EOS);
@@ -1519,7 +1526,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 			if (!consume(ctx, RPAREN))
 			{
-				diagnostics::error(ctx.context, ctx.current.range, "Expected ')' in parameter list");
+				diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' in parameter list");
 			}
 
 			node.assoc_params = alloc::clone_slice(ctx.allocator, assoc.array_view());
@@ -1533,7 +1540,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, LBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '{'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '{'");
 		node.flags.has_error = true;
 		return (Node*)node;
 	}
@@ -1587,7 +1594,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, RBRACE))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '}'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '}'");
 		node.flags.has_error = true;
 	}
 
@@ -1636,7 +1643,7 @@ fn Node* parse_generic_decl(ContextScope scope) => @pool()
 		{
 			if (!ctx.is(GREATER))
 			{
-				diagnostics::error(ctx.context, ctx.current.range, "Expected ',' or '>'");
+				diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ',' or '>'");
 				node.flags.has_error = true;
 				skip_until(ctx, { GREATER });
 			}
@@ -1646,7 +1653,7 @@ fn Node* parse_generic_decl(ContextScope scope) => @pool()
 
 	if (!consume(ctx, GREATER))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '>' to close generic list");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '>' to close generic list");
 		node.flags.has_error = true;
 	}
 

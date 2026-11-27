@@ -158,7 +158,13 @@ fn sz OffsetCursor.at(&self, Location loc)
 		self.line_start += (self.text[self.line_start..].index_of_char('\n') ?? (rest - 1)) + 1;
 		self.line++;
 	}
-	return min(self.line_start + loc.column, self.text.len);
+	sz offset = self.line_start;
+	for (int units = 0; offset < self.text.len && units < loc.column && self.text[offset] != '\n'; offset++)
+	{
+		units += core::utf16_units_of_byte(self.text[offset]);
+	}
+	while (offset < self.text.len && core::utf16_units_of_byte(self.text[offset]) == 0) offset++;
+	return offset;
 }
 
 <*

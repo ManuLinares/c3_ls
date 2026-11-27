@@ -12,7 +12,6 @@ enum BraceKind : char
 struct FormatterContext
 {
 	String buffer;
-	sz[] line_offsets;
 	FormattingOptions options;
 	DString out;
 	Token[] tokens;
@@ -49,15 +48,6 @@ struct FormatterContext
 	Token prev_token;
 	Token curr_token;
 	Token next_token;
-}
-
-<*
- Line start offsets of the buffer, built on first use.
-*>
-fn sz[] FormatterContext.offsets(&self)
-{
-	if (!self.line_offsets.len) self.line_offsets = utils::build_line_offsets(tmem, self.buffer);
-	return self.line_offsets;
 }
 
 fn void push_brace(FormatterContext* ctx, BraceKind kind)
@@ -920,9 +910,8 @@ bool single_line = false
 				end_doc_idx++;
 			}
 
-			sz[] line_offsets = ctx.offsets();
-			sz start_off = utils::offset_from_line_table(line_offsets, ctx.buffer, (uint)tok.range.start.line, (uint)tok.range.start.column);
-			sz end_off = utils::offset_from_line_table(line_offsets, ctx.buffer, (uint)tokens[end_doc_idx].range.end.line, (uint)tokens[end_doc_idx].range.end.column);
+			sz start_off = utils::token_offset(ctx.buffer, tok);
+			sz end_off = utils::token_offset(ctx.buffer, tokens[end_doc_idx]) + tokens[end_doc_idx].value.len;
 
 			if (start_off < end_off && end_off <= ctx.buffer.len)
 			{

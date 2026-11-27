@@ -297,6 +297,43 @@ fn void advance(ParseContext* ctx, int len = 1)
 	ctx.current = ctx.lexer.tokens[ctx.pos];
 }
 
+<*
+ Where a missing token is reported: right after the previous token, as c3c does.
+*>
+fn Range ParseContext.missing_token_range(&self)
+{
+	if (self.pos == 0) return self.current.range;
+	Location end = self.peek(-1).range.end;
+	return { end, end };
+}
+
+<*
+ How a message names the token `kind` it expected, as written in source.
+*>
+fn String expected_text(TokenKind kind) @local
+{
+	switch (kind)
+	{
+		case IDENT: return "a name";
+		case AT_IDENT: return "an attribute";
+		case EOS: return "';'";
+		case COLON: return "':'";
+		case COMMA: return "','";
+		case DOT: return "'.'";
+		case ELLIPSIS: return "'...'";
+		case BIT_NOT: return "'~'";
+		case LPAREN: return "'('";
+		case RPAREN: return "')'";
+		case LBRACKET: return "'['";
+		case RBRACKET: return "']'";
+		case LBRACE: return "'{'";
+		case RBRACE: return "'}'";
+		case RVEC: return "'>]'";
+		case CT_VAARG: return "'$vaarg'";
+		default: return string::tformat("'%s'", kind.description);
+	}
+}
+
 macro Token expect(ParseContext* ctx, Node* node, TokenKind kind)
 {
 	if (ctx.is(kind))
@@ -305,8 +342,7 @@ macro Token expect(ParseContext* ctx, Node* node, TokenKind kind)
 		return ctx.peek(-1);
 	}
 
-	diagnostics::error(ctx.context, ctx.current.range,
-	"Expected '%s' got '%s'", kind.description, ctx.current.kind.description);
+	diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected %s.", expected_text(kind));
 	node.flags.has_error = true;
 	ctx.error_count++;
 	return {

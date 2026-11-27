@@ -20,14 +20,34 @@ fn bool Location.eq(self, Location other) @operator(==)
 fn bool Location.before(self, Location other) => self.line < other.line || (self.line == other.line && self.column < other.column);
 
 <*
+ UTF-16 code units of the UTF-8 byte `c`: those its character takes when `c` starts it, else 0.
+ Columns count these units, as LSP positions do.
+*>
+fn int utf16_units_of_byte(char c) @inline
+{
+	if ((c & 0xC0) == 0x80) return 0;
+	return c >= 0xF0 ? 2 : 1;
+}
+
+<*
+ UTF-16 code units of the UTF-8 `text`.
+*>
+fn int utf16_units(String text)
+{
+	int units;
+	foreach (c : text) units += utf16_units_of_byte(c);
+	return units;
+}
+
+<*
  Location of byte `offset` in `text`, counted as the lexer counts: lines by
- '\n', columns in bytes.
+ '\n', columns in UTF-16 code units.
 *>
 fn Location location_at(String text, sz offset)
 {
 	String before = text[:offset];
 	sz line_start = (before.rindex_of_char('\n') ?? -1) + 1;
-	return { (int)before.count("\n"), (int)(offset - line_start) };
+	return { (int)before.count("\n"), utf16_units(before[line_start..]) };
 }
 
 struct Range (Printable)

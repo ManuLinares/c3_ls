@@ -115,7 +115,6 @@ fn bool ImportInfo.eq(self, ImportInfo other) @operator(==)
 struct TypeInfo
 {
 	TypeInfo* next;
-	String name;
 	String mod;
 	Node* node;
 }

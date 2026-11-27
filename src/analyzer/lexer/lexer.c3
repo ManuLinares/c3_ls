@@ -198,7 +198,7 @@ fn Token lex_char(Lexer* self)
 	int start_index = self.index;
 	advance(self);
 
-	while (self.current != 0)
+	while (self.current != 0 && self.current != '\n')
 	{
 		char c = self.buffer[self.index];
 
@@ -208,7 +208,7 @@ fn Token lex_char(Lexer* self)
 			return self.token_since(CHAR_LITERAL, start_index, start);
 		}
 
-		if (c == '\\')
+		if (c == '\\' && self.peek() != '\n')
 		{
 			advance(self, 2);
 			continue;
@@ -217,6 +217,14 @@ fn Token lex_char(Lexer* self)
 		advance(self);
 	}
 
+	if (self.current == '\n')
+	{
+		diagnostics::error(self.ctx, { start, self.location }, "A line break is not allowed in a character literal.");
+	}
+	else
+	{
+		diagnostics::error(self.ctx, { start, self.location }, "The character literal did not terminate.");
+	}
 	return self.token_since(ERROR, start_index, start);
 }
 
@@ -226,7 +234,8 @@ fn Token lex_string(Lexer* self)
 	int start_index = self.index;
 	advance(self);
 
-	while (self.current != 0)
+	// A string ends on its line, as in c3c; only raw strings span lines.
+	while (self.current != 0 && self.current != '\n')
 	{
 		char c = self.current;
 
@@ -236,7 +245,7 @@ fn Token lex_string(Lexer* self)
 			return self.token_since(STRING_LITERAL, start_index, start);
 		}
 
-		if (c == '\\')
+		if (c == '\\' && self.peek() != '\n')
 		{
 			advance(self, 2);
 			continue;
@@ -245,6 +254,14 @@ fn Token lex_string(Lexer* self)
 		advance(self);
 	}
 
+	if (self.current == '\n')
+	{
+		diagnostics::error(self.ctx, { start, self.location }, "The end of the line was reached while parsing the string. Did you forget (or accidentally add) a '\"' somewhere?");
+	}
+	else
+	{
+		diagnostics::error(self.ctx, { start, self.location }, "The end of the file was reached while parsing the string. Did you forget (or accidentally add) a '\"' somewhere?");
+	}
 	return self.token_since(ERROR, start_index, start);
 }
 
@@ -269,6 +286,7 @@ fn Token lex_raw_string(Lexer* self)
 		advance(self);
 	}
 
+	diagnostics::error(self.ctx, { start, self.location }, "Reached the end of the file looking for the end of the raw string that starts here. Did you forget a '`' somewhere?");
 	return self.token_since(ERROR, start_index, start);
 }
 
@@ -549,7 +567,7 @@ fn void advance(Lexer* self, int len = 1)
 			}
 			else
 			{
-				self.location.column++;
+				self.location.column += core::utf16_units_of_byte(c);
 			}
 			self.index++;
 		}
@@ -801,7 +819,8 @@ fn Token next(Lexer* lexer)
 					}
 					advance(lexer);
 				}
-				return lexer.emit(ERROR, "");
+				diagnostics::error(lexer.ctx, { start, lexer.location }, "The base64 string seems to be missing a terminating '%c'", quote_char);
+				return lexer.token_since(ERROR, start_index, start);
 			}
 			nextcase;
 		case 'x':

@@ -259,7 +259,7 @@ fn Node* parse_ident_expr(ContextScope scope)
 			}
 		default:
 			advance(ctx);
-			diagnostics::error(ctx.context, t.range, "Expected type or identifier after path - got: %s", t.kind.description);
+			diagnostics::error(ctx.context, t.range, "Expected a type, function or constant.");
 			return ctx.ast.error(t.range);
 	}
 }
@@ -668,7 +668,7 @@ fn Node* parse_unary_expr(ContextScope scope)
 	UnaryOpKind? op  = core::unaryop_from_token(ctx.current.kind);
 	if (catch op)
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Not a unary operator (%s)", ctx.current.kind);
+		diagnostics::error(ctx.context, ctx.current.range, "'%s' is not a unary operator.", ctx.current.value);
 		error_node(ctx, node);
 	}
 	else
@@ -696,7 +696,7 @@ fn Node* parse_post_unary_expr(ContextScope scope, Node* left, Precedence bp)
 	UnaryOpKind? op = core::unaryop_from_token(ctx.current.kind);
 	if (catch op)
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Not a unary operator (%s)", ctx.current.kind);
+		diagnostics::error(ctx.context, ctx.current.range, "'%s' is not a unary operator.", ctx.current.value);
 		error_node(ctx, node);
 	}
 	else
@@ -886,7 +886,7 @@ fn Node* parse_catch_expr(ContextScope scope) => @pool()
 	{
 		if (@ok(node.type.get()))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected '=' in catch-unwrap");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '=' in catch-unwrap");
 			node.flags.has_error = true;
 		}
 
@@ -1194,13 +1194,13 @@ fn Node* parse_group_expr(ContextScope scope)
 	bool had_error;
 	if (!consume(ctx, LPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected '('");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '('");
 		had_error = true;
 	}
 	Node* inner = parse_expr(scope);
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')'");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')'");
 		had_error = true;
 	}
 

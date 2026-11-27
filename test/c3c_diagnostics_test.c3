@@ -430,3 +430,28 @@ fn void test_trust_error_offers_quick_fix() => @pool()
 	test::eq(actions[0].command.arguments[2], doc_uri.to_raw_string(tmem));
 	test::eq(actions[1].command.arguments[1], "full");
 }
+
+fn void c3c_byte_columns_become_utf16()
+{
+	LspWorkspace ws;
+	ws.init(mem);
+	defer ws.free();
+
+	// c3c output for this file, columns in bytes: `🤣` is 4 bytes but 2 UTF-16 units.
+	String file_path = "/home/mb/project/src/emoji.c3";
+	ws.process_file(file_path, "module t;\nfn void main()\n{\n\tString s = \"🤣\"; int x = undefined_name;\n}\n");
+	String sample_output = `> BEGINLSP
+> LSPERR|error|"/home/mb/project/src/emoji.c3"|4|29|14|"'undefined_name' could not be found, did you spell it right?"
+> ENDLSP-ERROR
+`;
+	ws.parse_c3c_lsp_output(sample_output, "/home/mb/project");
+
+	foreach (diag : ws.get_diagnostics(file_path))
+	{
+		if (diag.source == "c3-analyzer") continue;
+		test::eq(diag.range.start.character, (uint)26);
+		test::eq(diag.range.end.character, (uint)40);
+		return;
+	}
+	unreachable("c3c diagnostic missing");
+}

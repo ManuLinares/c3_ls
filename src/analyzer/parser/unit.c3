@@ -23,7 +23,7 @@ fn NodeArray parse_parameter_list(ContextScope scope) => @pool()
 	{
 		if (!consume(ctx, LPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected '(' before parameter list");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected '(' before parameter list");
 			return alloc::clone_slice(ctx.allocator, temp_params.array_view());
 		}
 	}
@@ -67,7 +67,7 @@ fn NodeArray parse_parameter_list(ContextScope scope) => @pool()
 				else if (!ctx.is(RPAREN))
 				{
 					if (flags.is_macro && ctx.is(EOS)) break;
-					diagnostics::error(ctx.context, ctx.current.range, "Expected ',' or ')' in parameter list");
+					diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ',' or ')' in parameter list");
 					skip_until(ctx, { RPAREN, LBRACE, EOS });
 					break;
 				}
@@ -80,7 +80,7 @@ fn NodeArray parse_parameter_list(ContextScope scope) => @pool()
 	{
 		if (!consume(ctx, RPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close parameter list");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close parameter list");
 		}
 	}
 
@@ -176,7 +176,7 @@ fn Node* parse_contract_param(ContextScope scope)
 
 		if (!consume(ctx, RBRACKET))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ']' after contract modifier");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ']' after contract modifier");
 			node.flags.has_error = true;
 			skip_until(ctx, { IDENT, CT_IDENT, TYPE_IDENT, CT_TYPE_IDENT, HASH_IDENT, ELLIPSIS });
 		}
@@ -218,7 +218,7 @@ fn Node* parse_contract_param(ContextScope scope)
 	}
 	else if (ctx.is(STRING_LITERAL))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ':' before description string");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ':' before description string");
 		node.description.set(ctx.ident(ctx.current));
 		advance(ctx);
 		node.flags.has_error = true;
@@ -286,7 +286,7 @@ fn NodeArray parse_arg_list(ContextScope scope) => @pool()
 
 		if (ctx.pos == pos_before)
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Parser loop stalled in argument list at token: %s", ctx.current.kind);
+			diagnostics::error(ctx.context, ctx.current.range, "Unexpected '%s' in the argument list.", ctx.current.value);
 			advance(ctx);
 		}
 
@@ -343,7 +343,7 @@ fn Node* parse_short_body(ContextScope scope, bool is_regular)
 	{
 		if (!consume(ctx, EOS))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ';'");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ';'");
 			error_node(ctx, node_comp);
 		}
 	}
@@ -390,7 +390,7 @@ fn NodeArray parse_interface_type_list(ContextScope scope) => @pool()
 		}
 		else if (!ctx.is(RPAREN))
 		{
-			diagnostics::error(ctx.context, ctx.current.range, "Expected ',' or ')'");
+			diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ',' or ')'");
 			skip_until(ctx, { RPAREN });
 			break;
 		}
@@ -398,7 +398,7 @@ fn NodeArray parse_interface_type_list(ContextScope scope) => @pool()
 
 	if (!consume(ctx, RPAREN))
 	{
-		diagnostics::error(ctx.context, ctx.current.range, "Expected ')' to close interface list");
+		diagnostics::error(ctx.context, ctx.missing_token_range(), "Expected ')' to close interface list");
 	}
 
 	return alloc::clone_slice(ctx.allocator, interfaces.array_view());

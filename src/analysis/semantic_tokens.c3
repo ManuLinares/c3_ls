@@ -96,7 +96,7 @@ fn SemanticTokensResult? compute_semantic_tokens(LspProject* project, Uri uri)
 
 		uint line = tok.range.start.line >= 0 ? (uint)tok.range.start.line : 0;
 		uint col = tok.range.start.column >= 0 ? (uint)tok.range.start.column : 0;
-		uint len = (uint)tok.value.len;
+		uint len = (uint)core::utf16_units(tok.value);
 		if (len == 0) continue;
 
 		SemanticTokenType t_type = KEYWORD;

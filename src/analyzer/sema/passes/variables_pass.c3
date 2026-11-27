@@ -15,15 +15,7 @@ fn void run_variable_pass(SemaContext* ctx) => @pool()
 	SourceFile* sf = ctx.context.current_source_file;
 	if (!sf) return;
 
-	String[] lines = sf.content.tsplit("\n");
-
-	Range range = {
-		.start = {},
-		.end = {
-			.line = lines.len > 0 ? lines.len - 1 : 0,
-			.column = lines.len > 0 ? (lines[^ 1].len > 0 ? lines[^ 1].len - 1 : 0) : 0
-		},
-	};
+	Range range = { .end = core::location_at(sf.content, sf.content.len) };
 
 	String current_mod_name = "";
 	if (sf.path.len > 0)

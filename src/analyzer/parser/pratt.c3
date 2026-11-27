@@ -254,7 +254,8 @@ fn Node* parse_prefix_expr(ContextScope scope)
 		case LPAREN:
 			return parse_group_expr(scope);
 		default:
-			diagnostics::error(ctx.context, ctx.current.range, "Expected expression, got: %s", ctx.current.kind.description);
+			// The lexer has reported its error tokens.
+			if (!ctx.is(ERROR)) diagnostics::error(ctx.context, ctx.current.range, "An expression was expected.");
 			Node* error = ctx.ast.error(ctx.current.range);
 			advance(ctx);
 			return error;

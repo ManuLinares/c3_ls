@@ -382,3 +382,21 @@ fn void member_completion_after_call_with_bracket_in_string()
 	foreach (item : completion::resolve(&proj, doc_uri, { .line = 5, .character = 19 })!!) labels.appendf("%s ", item.label);
 	test::eq(labels.str_view().trim(), "px py");
 }
+
+fn void no_completion_inside_strings()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+
+	String source = "module t;\nfn void main()\n{\n\tString a = \"Hello Wor\";\n\tString b = `raw te`;\n\tString c = \"unfinished\n}\n";
+	proj.workspace.process_file("/virtual/in_string.c3", source);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/in_string.c3");
+	defer doc_uri.free();
+
+	foreach (LspPosition pos : (LspPosition[]){ { 3, 20 }, { 4, 18 }, { 5, 23 } })
+	{
+		CompletionItem[] items = completion::resolve(&proj, doc_uri, pos)!!;
+		assert(items.len == 0, "%d:%d offered %d items, first %s", pos.line, pos.character, items.len, items.len ? items[0].label : "");
+	}
+}

@@ -4,36 +4,6 @@ import std::collections::list;
 import analyzer::core, analyzer::core::constants, analyzer::lexer;
 
 <*
- Precomputes line starting byte offsets in a single linear pass for O(1) lookups.
-*>
-fn sz[] build_line_offsets(Allocator allocator, String content)
-{
-	List{sz} offsets;
-	offsets.init(allocator);
-	offsets.push(0);
-	for (sz i = 0; i < content.len; i++)
-	{
-		if (content[i] == '\n')
-		{
-			offsets.push(i + 1);
-		}
-	}
-
-	return offsets.array_view();
-}
-
-<*
- Converts line and character coordinates into a zero-indexed byte offset in O(1).
-*>
-fn sz offset_from_line_table(sz[] line_offsets, String content, uint target_line, uint target_char)
-{
-	if (target_line >= line_offsets.len) return content.len;
-	sz off = line_offsets[target_line] + (sz)target_char;
-	if (off > content.len) return content.len;
-	return off;
-}
-
-<*
  Byte offset in `content` of the LSP position `target_line`:`target_char`,
  whose character counts UTF-16 code units. A character past the end of its
  line is the line's end.

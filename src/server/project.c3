@@ -89,6 +89,14 @@ fn void LspProject.free(&self)
 }
 
 <*
+ Opens the file at `path` in the project, as `open_file` does for its uri.
+*>
+fn void LspProject.open_path(&self, String path, bool from_disk = true)
+{
+	self.open_file({ .uri = (DocumentUri)uri::from_file_path(tmem, path).to_raw_string(tmem) }, from_disk: from_disk);
+}
+
+<*
  Start tracking a document.
  @param from_disk : "true for a workspace scan, which carries no text and is read off disk; false for a didOpen, which carries the editor's buffer"
 *>
@@ -664,9 +672,7 @@ fn void LspProject.process_stdlib(&self)
 	String[] paths = utils::find_source_files(tmem, base_path);
 	foreach (matched : paths)
 	{
-		Uri file_uri = uri::from_file_path(tmem, matched);
-		DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-		self.open_file({ .uri = uri }, from_disk: true);
+		self.open_path(matched);
 	}
 }
 
@@ -780,9 +786,7 @@ fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk =
 		if (path::is_file(entry_path))
 		{
 			log::info("Found source file in group '%s': %s", group.name, (String)entry_path);
-			Uri file_uri = uri::from_file_path(tmem, (String)entry_path);
-			DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-			self.open_file({ .uri = uri }, from_disk: from_disk);
+			self.open_path((String)entry_path, from_disk);
 			continue;
 		}
 
@@ -798,9 +802,7 @@ fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk =
 			foreach (matched : paths)
 			{
 				log::info("Found source file in group '%s': %s", group.name, matched);
-				Uri file_uri = uri::from_file_path(tmem, matched);
-				DocumentUri uri = (DocumentUri)file_uri.to_raw_string(tmem);
-				self.open_file({ .uri = uri }, from_disk: from_disk);
+				self.open_path(matched, from_disk);
 			}
 		}
 	}
@@ -937,8 +939,7 @@ fn void LspProject.process_libs(&self)
 					if (lib_path.has_extension("c3i"))
 					{
 						log::debug("Found a declaration file (.c3i) at: %s", lib_path);
-						Uri file_uri = uri::from_file_path(tmem, lib_path);
-						self.open_file({ .uri = (DocumentUri)file_uri.to_raw_string(tmem) }, from_disk: true);
+						self.open_path(lib_path);
 					}
 					else
 					{
@@ -985,8 +986,7 @@ fn void LspProject.process_libs(&self)
 				foreach (matched : paths)
 				{
 					log::info("Found internal library source: %s", matched);
-					Uri file_uri = uri::from_file_path(tmem, matched);
-					self.open_file({ .uri = (DocumentUri)file_uri.to_raw_string(tmem) }, from_disk: true);
+					self.open_path(matched);
 				}
 
 				break;

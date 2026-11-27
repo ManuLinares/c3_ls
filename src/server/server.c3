@@ -684,10 +684,8 @@ fn void? on_execute_command(LspMessage* message, ExecuteCommandParams* params)
 			int run_res = bindgen::run_bindgen(opts, is_cli: false);
 			if (run_res == 0)
 			{
-				Uri file_u = uri::from_file_path(tmem, output_path);
-				DocumentUri out_uri = (DocumentUri)file_u.to_raw_string(tmem);
-				LspProject* proj = project_manager.get_or_create_project_for_uri(file_u);
-				proj.open_file({ .uri = out_uri }, from_disk: true);
+				LspProject* proj = project_manager.get_or_create_project_for_uri(uri::from_file_path(tmem, output_path));
+				proj.open_path(output_path);
 
 				// Queue all open user documents for re-analysis so the new module clears diagnostics
 				proj.requeue_user_files();

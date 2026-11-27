@@ -241,3 +241,45 @@ fn void test_semantic_tokens_module_names_are_namespaces()
 	}
 	test::eq(found, 10);
 }
+
+// `🤣️` is 7 bytes but 3 UTF-16 units; LSP columns and lengths count UTF-16 units.
+const String EMOJI_SOURCE = "module mytmp;\nfn void main()\n{\n\tString name = \"Stefanos\";\n\tio::printfn(\"%s🤣️ \", name);\n}\n";
+
+fn void semantic_tokens_count_utf16_units()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/emoji_tokens.c3", EMOJI_SOURCE);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/emoji_tokens.c3");
+	defer doc_uri.free();
+
+	uint[] data = semantic_tokens::compute_semantic_tokens(&proj, doc_uri)!!.data;
+	uint line;
+	uint col;
+	uint string_len;
+	uint name_col;
+	for (sz i = 0; i < data.len; i += 5)
+	{
+		line += data[i];
+		col = data[i] == 0 ? col + data[i + 1] : data[i + 1];
+		if (line != 4) continue;
+		if (col == 13) string_len = data[i + 2];
+		if (data[i + 3] == SemanticTokenType.VARIABLE.ordinal) name_col = col;
+	}
+	test::eq(string_len, (uint)8);
+	test::eq(name_col, (uint)23);
+}
+
+fn void hover_after_emoji_uses_utf16_columns()
+{
+	LspProject proj;
+	proj.init(mem);
+	defer proj.free();
+	proj.workspace.process_file("/virtual/emoji_hover.c3", EMOJI_SOURCE);
+	Uri doc_uri = uri::from_file_path(mem, "/virtual/emoji_hover.c3");
+	defer doc_uri.free();
+
+	String text = hover::hover(&proj, doc_uri, { .line = 4, .character = 24 })!!;
+	assert(text.contains("String name"), "%s", text);
+}

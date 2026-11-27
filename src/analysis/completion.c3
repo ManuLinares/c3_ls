@@ -2730,6 +2730,30 @@ fn void resolve_item(LspProject* project, CompletionItem* item)
 // ---------------------------------------------------------------------------
 
 <*
+ Whether `offset` is inside the text of a string, character or bytes literal, an unterminated
+ one included, where nothing is completed.
+*>
+fn bool in_literal(SourceFile* sf, sz offset) @local
+{
+	sz count = utils::tokens_before(sf, offset);
+	if (count == 0) return false;
+	Token token = sf.lexer.tokens[count - 1];
+	sz end = utils::token_offset(sf.content, token) + token.value.len;
+	switch (token.kind)
+	{
+		case STRING_LITERAL:
+		case CHAR_LITERAL:
+		case BYTES_LITERAL:
+			return offset < end;
+		case ERROR:
+			// An unterminated literal is still being typed at its end.
+			return token.value.len > 0 && (token.value[0] == '"' || token.value[0] == '\'' || token.value[0] == '`') && offset <= end;
+		default:
+			return false;
+	}
+}
+
+<*
  Completion items at `pos`, each showing its `detail` on its row.
 *>
 fn CompletionItem[]? resolve(LspProject* project, Uri uri, LspPosition pos, CompletionContext context = {})
@@ -2753,7 +2777,7 @@ fn CompletionItem[]? collect(LspProject* project, Uri uri, LspPosition pos, Comp
 		.line = (int)pos.line,
 		.column = (int)pos.character
 	};
-	if (sf.lexer && sf.lexer.in_comment(loc)) return items.array_view();
+	if (sf.lexer && (sf.lexer.in_comment(loc) || in_literal(sf, offset))) return items.array_view();
 
 	String caller_mod = query::get_module_name_at_location(sf, loc);
 

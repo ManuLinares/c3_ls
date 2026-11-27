@@ -439,11 +439,20 @@ fn void LspWorkspace.parse_c3c_lsp_output(&self, String output, String root_path
 		}
 
 		LspRange range = { .start = { .line = l_0, .character = c_0 }, .end = { .line = l_0, .character = c_0 + (span_len ?: 1) } };
-		// Without a length, as from a c3c without `--lsp2`, the range is the token where the error starts.
-		if (try sf = self.get_source_file_by_path(norm_file) && !span_len && sf.lexer)
+		if (try sf = self.get_source_file_by_path(norm_file))
 		{
-			sz i = sf.lexer.token_at({ .line = (int)l_0, .column = (int)c_0 });
-			if (i >= 0) range = analysis::to_lsp_range(sf.lexer.tokens[i].range);
+			// c3c counts columns in bytes; LSP and the analyzer count UTF-16 code units.
+			sz line_start = utils::compute_byte_offset(sf.content, l_0, 0);
+			String line_text = sf.content[line_start..];
+			line_text = line_text[:line_text.index_of_char('\n') ?? line_text.len];
+			range.start.character = (uint)core::utf16_units(line_text[:min((sz)c_0, line_text.len)]);
+			range.end.character = (uint)core::utf16_units(line_text[:min((sz)c_0 + (span_len ?: 1), line_text.len)]);
+			// Without a length, as from a c3c without `--lsp2`, the range is the token where the error starts.
+			if (!span_len && sf.lexer)
+			{
+				sz i = sf.lexer.token_at({ .line = (int)l_0, .column = (int)range.start.character });
+				if (i >= 0) range = analysis::to_lsp_range(sf.lexer.tokens[i].range);
+			}
 		}
 
 		LspDiagnostic diag = {
