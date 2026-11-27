@@ -1,8 +1,5 @@
 module lsp;
 
-import std::collections::object;
-import std::collections::maybe;
-
 enum LogLevel : char (String name)
 {
 	NONE  { "none" },

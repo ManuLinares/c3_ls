@@ -3,7 +3,6 @@ module analyzer::core;
 import std::collections;
 import std::core::mem::allocators;
 
-import analyzer::sema;
 import analyzer::lexer;
 
 struct SourceFile

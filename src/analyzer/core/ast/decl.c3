@@ -2,8 +2,6 @@ module analyzer::core::ast;
 
 import analyzer::lexer, analyzer::core::constants;
 
-import std::collections::list;
-
 struct ContractParam
 {
 	inline Node node;

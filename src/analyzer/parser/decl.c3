@@ -1547,7 +1547,7 @@ fn Node* parse_enum_constdef_decl(ContextScope scope) => @pool()
 
 	List{Node*} variants;
 	variants.init(tmem, 4);
-	while ENUM_VARIANT: (!ctx.is(RBRACE) && !ctx.eof())
+	while (!ctx.is(RBRACE) && !ctx.eof())
 	{
 		if (!ctx.is(DOCS_START) && !ctx.is(CONST_IDENT))
 		{

@@ -2,7 +2,6 @@ module lsp::translator;
 
 import std::io;
 import std::encoding::json;
-import std::collections::maybe;
 import std::collections::object;
 import uri;
 

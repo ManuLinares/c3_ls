@@ -3,7 +3,6 @@ module analyzer::core::source_file;
 import analyzer::core::ast;
 import analyzer::core::mod;
 import analyzer::lexer;
-import analyzer::parser;
 import analyzer::sema;
 
 import std::collections::list;

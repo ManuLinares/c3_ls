@@ -1,6 +1,6 @@
 module lsp::server;
 
-import lsp, uri, std::io, std::thread, std::time, std::os::process, std::collections::object, std::collections::list, std::encoding::json;
+import lsp, uri, std::io, std::thread, std::os::process, std::collections::object, std::collections::list, std::encoding::json;
 
 bool is_ready;
 bool cli_std_path_set;

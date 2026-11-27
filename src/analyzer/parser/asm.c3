@@ -2,7 +2,6 @@ module analyzer::parser;
 
 import analyzer::core;
 
-import std::collections::list;
 <*
  @require scope.ctx.current.kind == ASM
 *>

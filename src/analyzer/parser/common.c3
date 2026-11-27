@@ -2,8 +2,6 @@ module analyzer::parser;
 
 import analyzer::core;
 
-import std::collections::list;
-
 bitstruct ParseFlags : ulong
 {
 	bool is_contract;

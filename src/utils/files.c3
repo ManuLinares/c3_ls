@@ -12,22 +12,11 @@ fn String[] find_source_files(Allocator allocator, Path base_path, bool with_c3i
 	List{String} paths;
 	paths.init(allocator);
 
-	if (try c3_files = path::ls(tmem, clean_path, no_dirs: true, mask: "*.c3", recursive: true, rebase: clean_path))
+	if (try files = path::ls(tmem, clean_path, no_dirs: true, recursive: true, rebase: clean_path))
 	{
-		foreach (p : c3_files)
+		foreach (p : files)
 		{
-			paths.push(p.copy(allocator));
-		}
-	}
-
-	if (with_c3i)
-	{
-		if (try c3i_files = path::ls(tmem, clean_path, no_dirs: true, mask: "*.c3i", recursive: true, rebase: clean_path))
-		{
-			foreach (p : c3i_files)
-			{
-				paths.push(p.copy(allocator));
-			}
+			if (p.has_extension("c3") || (with_c3i && p.has_extension("c3i"))) paths.push(p.copy(allocator));
 		}
 	}
 

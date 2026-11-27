@@ -23,7 +23,7 @@ AnalyzerContext* ctx,
 Range range,
 DiagnosticLevel level,
 String fmt,
-args...) => @pool()
+args...) @format(3) => @pool()
 {
 	SourceFile* sf = ctx.current_source_file;
 
@@ -150,7 +150,7 @@ macro void error(AnalyzerContext* ctx, Range range, String fmt, ...)
 macro void log(LogPriority priority, String fmt, ...)
 {
 	$if $feat(ANALYZER_PRINT):
-		std::core::log::call_log(priority, std::core::log::default_category, fmt, ...$vaarg);
+		log::call_log(priority, log::default_category, fmt, ...$vaarg);
 	$endif
 }
 

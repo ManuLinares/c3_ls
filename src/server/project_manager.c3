@@ -4,7 +4,6 @@ import std::collections::map;
 import std::collections::list;
 import std::io;
 import uri;
-import lsp::server;
 import lsp::core::config;
 
 struct ProjectManager

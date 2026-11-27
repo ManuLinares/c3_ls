@@ -3,7 +3,6 @@ module analyzer::sema::lookup;
 import analyzer::core;
 import analyzer::core::arch;
 import analyzer::core::constants;
-import analyzer::cursor;
 
 fn Lookup* create(AnalyzerContext* context, Allocator alloc)
 {

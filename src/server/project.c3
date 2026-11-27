@@ -107,7 +107,7 @@ fn void LspProject.open_file(&self, TextDocumentItem document, bool from_disk = 
 	log::debug("Registering document stream via raw tracking token: %s", raw_uri);
 
 	Uri? file_uri = uri::parse(self.allocator, raw_uri);
-	if (catch err = file_uri)
+	if (catch file_uri)
 	{
 		log::error("Malformed URI received (%s)", raw_uri);
 		return;
@@ -790,20 +790,14 @@ fn void LspProject.load_source_group(&self, SourceGroup* group, bool from_disk =
 			continue;
 		}
 
-		String[2] masks = { "*.c3", "*.c3i" };
-		foreach (mask : masks)
-		{
-			PathList paths;
-			if (catch err = @try(paths, path::ls(tmem, entry_path, no_dirs: true, mask: mask, recursive: recursive, rebase: entry_path)))
-			{
-				continue;
-			}
+		PathList? paths = path::ls(tmem, entry_path, no_dirs: true, recursive: recursive, rebase: entry_path);
+		if (catch paths) continue;
 
-			foreach (matched : paths)
-			{
-				log::info("Found source file in group '%s': %s", group.name, matched);
-				self.open_path(matched, from_disk);
-			}
+		foreach (matched : paths)
+		{
+			if (!matched.has_extension("c3") && !matched.has_extension("c3i")) continue;
+			log::info("Found source file in group '%s': %s", group.name, matched);
+			self.open_path(matched, from_disk);
 		}
 	}
 }

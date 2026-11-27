@@ -644,8 +644,8 @@ macro sz? @parse(#args, ...)
 	ArgParser parser;
 	parser.init(#args, $strict_mode);
 
-	sz[$total_options > 0 ??? $total_options : 1] array_indexes = {};
-	bool[$total_options > 0 ??? $total_options : 1] option_parsed = {};
+	sz[$total_options > 0 ??? $total_options : 1] array_indexes;
+	bool[$total_options > 0 ??? $total_options : 1] option_parsed;
 	sz positional_index = 0;
 	bool print_def = false;
 

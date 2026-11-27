@@ -2,7 +2,6 @@ module analyzer::core::arch;
 
 import analyzer::core;
 import analyzer::core::os;
-import std::collections::list;
 
 fn ArchType current()
 {
