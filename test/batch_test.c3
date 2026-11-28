@@ -49,3 +49,19 @@ fn void queued_edits_are_analyzed_once_with_the_latest_text() @test
 	foreach (item : completion::resolve(&proj, u, { 2, 17 })!!) if (item.label == "three") found = true;
 	assert(found);
 }
+
+fn void request_before_an_edit_of_its_document_is_superseded() @test
+{
+	LspMessage[5] batch = {
+		decoded(`{"jsonrpc":"2.0","id":1,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///a.c3"},"position":{"line":0,"character":0}}}`),
+		decoded(`{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///b.c3"},"position":{"line":0,"character":0}}}`),
+		decoded(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///a.c3","version":2},"contentChanges":[{"text":""}]}}`),
+		decoded(`{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///a.c3"},"position":{"line":0,"character":0}}}`),
+		decoded(`{"jsonrpc":"2.0","id":"s1","method":"shutdown"}`),
+	};
+	assert(server::is_superseded_in(&batch, 0));
+	assert(!server::is_superseded_in(&batch, 1));
+	assert(!server::is_superseded_in(&batch, 2));
+	assert(!server::is_superseded_in(&batch, 3));
+	assert(!server::is_superseded_in(&batch, 4));
+}

@@ -32,6 +32,25 @@ fn void LspMessage.free(&self)
 }
 
 <*
+ The uri of the document the message is about, or "" when it names none.
+*>
+fn String LspMessage.document_uri(&self)
+{
+	$foreach $m : MessageParams::members:
+		if (self.method.params == $m.type)
+		{
+			$if $defined(self.params.$m.document):
+				return self.params.$m.document.uri;
+			$endif
+			$if $defined(self.params.$m.text_document):
+				return self.params.$m.text_document.uri;
+			$endif
+		}
+	$endforeach
+	return "";
+}
+
+<*
  Turn data into JSONRPC string
  @param [in] expr
  @return "JSONRPC string allocated with `allocator`"

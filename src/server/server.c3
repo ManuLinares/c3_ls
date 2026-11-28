@@ -276,21 +276,41 @@ fn void loop()
 
 <*
  Handles messages read together. A request the batch also cancels is answered
- as cancelled; an edit only queues its analysis, which runs before any other
- message is handled.
+ as cancelled, one whose document it edits later with null; an edit only queues
+ its analysis, which runs before any other message is handled.
 *>
 fn void process_batch(LspMessage[] batch)
 {
-	foreach (&message : batch)
+	foreach (i, &message : batch)
 	{
 		if (message.id && is_cancelled_in(batch, message.id))
 		{
 			respond_cancelled(message);
 			continue;
 		}
+		if (is_superseded_in(batch, i))
+		{
+			respond{Object*}(message, null);
+			continue;
+		}
 		if (is_ready && message.method != DID_CHANGE) project_manager.update_all();
 		dispatch(message);
 	}
+}
+
+<*
+ Whether `batch[index]` is a request about a document that a later message of
+ `batch` edits, so its answer would already be outdated.
+*>
+fn bool is_superseded_in(LspMessage[] batch, sz index)
+{
+	String uri = batch[index].document_uri();
+	if (!batch[index].id || !uri.len) return false;
+	foreach (&later : batch[index + 1..])
+	{
+		if (later.method == DID_CHANGE && later.params.did_change.document.uri == uri) return true;
+	}
+	return false;
 }
 
 <*
