@@ -653,46 +653,6 @@ fn Node*? find_type_node_in_context(AnalyzerContext* context, SourceFile* sf, St
 		if (matched && matched.node) return matched.node;
 	}
 
-	if (context)
-	{
-		context.modules.@each(; mod_name, mod)
-		{
-			if (mod && (!sf || is_module_visible_at(context, sf, loc, mod_name)))
-			{
-				foreach (n : mod.nodes)
-				{
-					if (!n || n.kind == ERROR) continue;
-
-					switch (n.kind)
-					{
-						case STRUCT_DECL:
-							if (n.as(StructDecl).name.is(clean_type))
-							{
-								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
-							}
-						case ENUM_DECL:
-							if (n.as(EnumDecl).name.is(clean_type))
-							{
-								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
-							}
-						case TYPEDEF_DECL:
-							if (n.as(TypedefDecl).name.is(clean_type))
-							{
-								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
-							}
-						case ALIAS_DECL:
-							if (n.as(AliasDecl).name.is(clean_type))
-							{
-								if (!sf || is_symbol_accessible_at(context, sf, loc, n, mod_name)) return n;
-							}
-						default:
-							break;
-					}
-				}
-			}
-		};
-	}
-
 	return NOT_FOUND~;
 }
 
